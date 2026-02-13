@@ -87,11 +87,30 @@ jobs:
 
       - name: Test Docker image
         run: |
-          docker run -d --name test-app -p 8000:8000 predomicsapp-web:latest
+          # Start a postgres container for the app
+          docker network create test-net
+          docker run -d --name test-db --network test-net \
+            -e POSTGRES_USER=predomics \
+            -e POSTGRES_PASSWORD=predomics \
+            -e POSTGRES_DB=predomics \
+            postgres:16-alpine
+          # Wait for postgres
+          for i in $(seq 1 15); do
+            if docker exec test-db pg_isready -U predomics > /dev/null 2>&1; then
+              echo "Postgres ready on attempt $i"
+              break
+            fi
+            sleep 2
+          done
+          # Start app with postgres connection
+          docker run -d --name test-app --network test-net -p 8000:8000 \
+            -e PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@test-db:5432/predomics \
+            predomicsapp-web:latest
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8000/health; then
-              echo " Health check passed on attempt $i"
-              docker stop test-app
+              echo "Health check passed on attempt $i"
+              docker stop test-app test-db
+              docker network rm test-net
               exit 0
             fi
             echo "Waiting for app to start (attempt $i/30)..."
@@ -99,5 +118,6 @@ jobs:
           done
           echo "Health check failed after 30 attempts"
           docker logs test-app
-          docker stop test-app
+          docker stop test-app test-db
+          docker network rm test-net
           exit 1

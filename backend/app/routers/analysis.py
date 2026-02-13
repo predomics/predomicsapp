@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.database import get_db, async_session_factory
+from ..core.database import get_db, sync_session_factory
 from ..core.deps import get_current_user
 from ..models.db_models import User, Project, Job
 from ..models.schemas import (
@@ -60,10 +60,11 @@ async def run_analysis(
         p = storage.get_dataset_path(project_id, ytest_dataset_id)
         ytest_path = str(p) if p else ""
 
-    # Create job record in database
+    # Create job record in database — commit immediately so the background
+    # task (which uses a separate sync DB connection) can see the job.
     job = Job(project_id=project_id, status="pending", config=config.model_dump())
     db.add(job)
-    await db.flush()
+    await db.commit()
 
     job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job.id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -86,8 +87,11 @@ async def run_analysis(
 
 
 def _run_job(job_id: str, project_id: str, param_path: str) -> None:
-    """Execute gpredomics in a subprocess so we can capture Rust log output."""
-    import asyncio
+    """Execute gpredomics in a subprocess so we can capture Rust log output.
+
+    Runs in a Starlette thread pool — uses synchronous DB sessions to avoid
+    event-loop conflicts with the async engine.
+    """
     import os
     import subprocess
     import sys
@@ -96,86 +100,75 @@ def _run_job(job_id: str, project_id: str, param_path: str) -> None:
     log_path = job_dir / "console.log"
     results_path = job_dir / "results.json"
 
-    async def _execute():
-        # Mark job as running
-        async with async_session_factory() as db:
-            result = await db.execute(select(Job).where(Job.id == job_id))
-            job = result.scalar_one()
-            job.status = "running"
-            await db.commit()
+    # Mark job as running
+    with sync_session_factory() as db:
+        job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
+        job.status = "running"
+        db.commit()
 
-        try:
-            if not engine.HAS_ENGINE:
-                # Mock mode — no subprocess needed
-                mock_results = engine._mock_results()
-                storage.save_job_result(project_id, job_id, mock_results)
-                with open(log_path, "w") as lf:
-                    lf.write("[mock] Engine not available, using mock results\n")
-
-                async with async_session_factory() as db:
-                    result = await db.execute(select(Job).where(Job.id == job_id))
-                    job = result.scalar_one()
-                    job.status = "completed"
-                    job.results_path = str(results_path)
-                    job.completed_at = datetime.now(timezone.utc)
-                    await db.commit()
-                return
-
-            # Run worker subprocess — stream output line-by-line for live console
-            worker_module = "app.services.worker"
-            env = os.environ.copy()
-            env["PYTHONUNBUFFERED"] = "1"
-
-            proc = subprocess.Popen(
-                [sys.executable, "-u", "-m", worker_module, param_path, str(results_path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                cwd=str(Path(__file__).resolve().parents[2]),  # backend/
-                env=env,
-            )
-
-            # Read output line-by-line and flush to log file immediately
+    try:
+        if not engine.HAS_ENGINE:
+            # Mock mode — no subprocess needed
+            mock_results = engine._mock_results()
+            storage.save_job_result(project_id, job_id, mock_results)
             with open(log_path, "w") as lf:
-                for line in proc.stdout:
-                    lf.write(line.decode("utf-8", errors="replace"))
-                    lf.flush()
+                lf.write("[mock] Engine not available, using mock results\n")
 
-            proc.wait()
-
-            if proc.returncode != 0:
-                error_msg = log_path.read_text()[-500:] if log_path.exists() else "Unknown error"
-                raise RuntimeError(f"Worker exited with code {proc.returncode}: {error_msg}")
-
-            async with async_session_factory() as db:
-                result = await db.execute(select(Job).where(Job.id == job_id))
-                job = result.scalar_one()
+            with sync_session_factory() as db:
+                job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 job.status = "completed"
                 job.results_path = str(results_path)
                 job.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+                db.commit()
+            return
 
-            logger.info("Job %s completed", job_id)
+        # Run worker subprocess — stream output line-by-line for live console
+        worker_module = "app.services.worker"
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
 
-        except Exception as e:
-            # Append error to log
-            with open(log_path, "a") as lf:
-                lf.write(f"\n[error] {e}\n")
+        proc = subprocess.Popen(
+            [sys.executable, "-u", "-m", worker_module, param_path, str(results_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=str(Path(__file__).resolve().parents[2]),  # backend/
+            env=env,
+        )
 
-            async with async_session_factory() as db:
-                result = await db.execute(select(Job).where(Job.id == job_id))
-                job = result.scalar_one()
-                job.status = "failed"
-                job.error_message = str(e)
-                job.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+        # Read output line-by-line and flush to log file immediately
+        with open(log_path, "w") as lf:
+            for line in proc.stdout:
+                lf.write(line.decode("utf-8", errors="replace"))
+                lf.flush()
 
-            logger.error("Job %s failed: %s", job_id, e)
+        proc.wait()
 
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(_execute())
-    finally:
-        loop.close()
+        if proc.returncode != 0:
+            error_msg = log_path.read_text()[-500:] if log_path.exists() else "Unknown error"
+            raise RuntimeError(f"Worker exited with code {proc.returncode}: {error_msg}")
+
+        with sync_session_factory() as db:
+            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
+            job.status = "completed"
+            job.results_path = str(results_path)
+            job.completed_at = datetime.now(timezone.utc)
+            db.commit()
+
+        logger.info("Job %s completed", job_id)
+
+    except Exception as e:
+        # Append error to log
+        with open(log_path, "a") as lf:
+            lf.write(f"\n[error] {e}\n")
+
+        with sync_session_factory() as db:
+            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
+            job.status = "failed"
+            job.error_message = str(e)
+            job.completed_at = datetime.now(timezone.utc)
+            db.commit()
+
+        logger.error("Job %s failed: %s", job_id, e)
 
 
 @router.get("/{project_id}/jobs/{job_id}/logs")

@@ -16,11 +16,12 @@ os.environ["PREDOMICS_DATA_DIR"] = _tmp
 os.environ["PREDOMICS_PROJECT_DIR"] = os.path.join(_tmp, "projects")
 os.environ["PREDOMICS_UPLOAD_DIR"] = os.path.join(_tmp, "uploads")
 os.environ["PREDOMICS_SAMPLE_DIR"] = os.path.join(_tmp, "samples")
-os.environ["PREDOMICS_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+_db_path = os.path.join(_tmp, "test.db")
+os.environ["PREDOMICS_DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
 os.environ["PREDOMICS_SECRET_KEY"] = "test-secret-key"
 
 from app.main import app  # noqa: E402
-from app.core.database import engine, Base, get_db, async_session_factory  # noqa: E402
+from app.core.database import engine, Base, get_db, async_session_factory, sync_engine  # noqa: E402
 from app.services import engine as ml_engine  # noqa: E402
 from app.services import storage  # noqa: E402
 
@@ -30,10 +31,13 @@ async def db_session():
     """Create tables and yield a test database session."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Also create tables for the sync engine (used by background tasks)
+    Base.metadata.create_all(sync_engine)
     async with async_session_factory() as session:
         yield session
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    Base.metadata.drop_all(sync_engine)
 
 
 @pytest_asyncio.fixture

@@ -27,9 +27,12 @@ const jobStatus = ref('pending')
 const consoleEl = ref(null)
 let pollTimer = null
 
+let errorCount = 0
+
 async function pollLogs() {
   try {
     const { data } = await axios.get(`/api/analysis/${props.projectId}/jobs/${props.jobId}/logs`)
+    errorCount = 0
     logContent.value = data.log
     jobStatus.value = data.status
 
@@ -46,7 +49,13 @@ async function pollLogs() {
       emit('failed', props.jobId)
     }
   } catch (e) {
-    console.error('Failed to poll logs:', e)
+    errorCount++
+    if (errorCount >= 10) {
+      logContent.value = '[error] Job not found. Close the console and re-launch the analysis.'
+      jobStatus.value = 'failed'
+      stopPolling()
+      emit('failed', props.jobId)
+    }
   }
 }
 
