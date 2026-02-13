@@ -13,7 +13,7 @@ os.environ["PREDOMICS_DATA_DIR"] = tempfile.mkdtemp()
 os.environ["PREDOMICS_PROJECT_DIR"] = os.path.join(os.environ["PREDOMICS_DATA_DIR"], "projects")
 os.environ["PREDOMICS_UPLOAD_DIR"] = os.path.join(os.environ["PREDOMICS_DATA_DIR"], "uploads")
 
-from backend.app.main import app  # noqa: E402
+from app.main import app  # noqa: E402
 
 
 @pytest_asyncio.fixture
