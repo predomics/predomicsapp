@@ -3,9 +3,9 @@
 # =============================================================================
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
-COPY frontend/package*.json ./
+COPY predomicsapp-web/frontend/package*.json ./
 RUN npm ci
-COPY frontend/ ./
+COPY predomicsapp-web/frontend/ ./
 RUN npm run build
 
 # =============================================================================
@@ -41,17 +41,17 @@ COPY --from=rust-builder /build/wheels/*.whl /tmp/wheels/
 RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 # Install Python backend dependencies
-COPY backend/pyproject.toml backend/
+COPY predomicsapp-web/backend/pyproject.toml backend/
 RUN pip install --no-cache-dir backend/
 
 # Copy backend code
-COPY backend/ backend/
+COPY predomicsapp-web/backend/ backend/
 
 # Copy built frontend into static directory
-COPY --from=frontend-builder /app/frontend/dist backend/static/
+COPY --from=frontend-builder /app/frontend/dist backend/app/static/
 
-# Copy sample data
-COPY data/qin2014_cirrhosis/ data/qin2014_cirrhosis/
+# Copy demo dataset
+COPY predomicsapp-web/data/qin2014_cirrhosis/ data/qin2014_cirrhosis/
 
 # Create directories for runtime data
 RUN mkdir -p data/uploads data/projects

@@ -1,5 +1,8 @@
+name: predomics
+
 services:
   app:
+    container_name: predomics-web
     build:
       context: ..
       dockerfile: predomicsapp-web/Dockerfile
