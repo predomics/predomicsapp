@@ -25,9 +25,10 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
-# Data & uploads
+# Data & uploads (runtime)
 data/uploads/
 data/projects/
+backend/data/
 *.db
 
 # Environment

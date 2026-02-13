@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     upload_dir: Path = Path("data/uploads")
     project_dir: Path = Path("data/projects")
-    sample_dir: Path = Path("data/sample")
+    sample_dir: Path = Path("data/qin2014_cirrhosis")
 
     # gpredomics defaults
     default_algo: str = "ga"

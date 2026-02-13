@@ -11,7 +11,7 @@ services:
       - PREDOMICS_DATA_DIR=/app/data
       - PREDOMICS_UPLOAD_DIR=/app/data/uploads
       - PREDOMICS_PROJECT_DIR=/app/data/projects
-      - PREDOMICS_SAMPLE_DIR=/app/data/sample
+      - PREDOMICS_SAMPLE_DIR=/app/data/qin2014_cirrhosis
     restart: unless-stopped
 
 volumes:

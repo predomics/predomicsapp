@@ -67,7 +67,7 @@ predomicsapp-web/
 │   │   └── services/        # Business logic
 │   └── tests/
 ├── frontend/                # Vue.js SPA
-├── data/sample/             # Sample datasets
+├── data/qin2014_cirrhosis/  # Demo dataset (Qin et al. 2014)
 ├── Dockerfile
 └── docker-compose.yml
 ```

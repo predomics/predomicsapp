@@ -51,7 +51,7 @@ COPY backend/ backend/
 COPY --from=frontend-builder /app/frontend/dist backend/static/
 
 # Copy sample data
-COPY data/sample/ data/sample/
+COPY data/qin2014_cirrhosis/ data/qin2014_cirrhosis/
 
 # Create directories for runtime data
 RUN mkdir -p data/uploads data/projects
