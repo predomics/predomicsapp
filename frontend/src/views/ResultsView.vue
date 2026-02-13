@@ -2,18 +2,22 @@
   <div class="results">
     <h2>Results</h2>
 
-    <!-- Status -->
-    <div v-if="loading" class="loading">Loading results...</div>
+    <!-- Console output -->
+    <section class="console-section" v-if="showConsole">
+      <div class="console-header">
+        <h3>Console Output</h3>
+        <span class="status-badge" :class="jobStatus">{{ jobStatus }}</span>
+      </div>
+      <div class="console" ref="consoleEl">
+        <pre>{{ logContent || 'Waiting for output...' }}</pre>
+      </div>
+    </section>
 
-    <div v-else-if="!detail" class="status-card">
-      <p><strong>Status:</strong> {{ summary?.status || 'unknown' }}</p>
-      <button v-if="summary?.status === 'running' || summary?.status === 'pending'" @click="poll">
-        Refresh
-      </button>
-    </div>
+    <!-- Loading -->
+    <div v-if="loading && !showConsole" class="loading">Loading results...</div>
 
     <!-- Detail view -->
-    <template v-else>
+    <template v-if="detail">
       <div class="summary-grid">
         <div class="stat-card">
           <div class="stat-value">{{ detail.best_auc?.toFixed(4) || '—' }}</div>
@@ -68,14 +72,18 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 
 const route = useRoute()
 const loading = ref(true)
-const summary = ref(null)
 const detail = ref(null)
+const logContent = ref('')
+const jobStatus = ref('pending')
+const showConsole = ref(true)
+const consoleEl = ref(null)
+let pollTimer = null
 
 const bestMetrics = computed(() => {
   if (!detail.value?.best_individual) return {}
@@ -100,27 +108,120 @@ function featureName(idx) {
   return `feature_${idx}`
 }
 
-async function poll() {
+async function pollLogs() {
   const pid = route.params.id
   const jid = route.params.jobId
   try {
-    const { data } = await axios.get(`/api/analysis/${pid}/jobs/${jid}`)
-    summary.value = data
-    if (data.status === 'completed') {
-      const { data: d } = await axios.get(`/api/analysis/${pid}/jobs/${jid}/detail`)
-      detail.value = d
+    const { data } = await axios.get(`/api/analysis/${pid}/jobs/${jid}/logs`)
+    logContent.value = data.log
+    jobStatus.value = data.status
+
+    // Auto-scroll console
+    await nextTick()
+    if (consoleEl.value) {
+      consoleEl.value.scrollTop = consoleEl.value.scrollHeight
+    }
+
+    // If completed, fetch detail results and stop polling
+    if (data.status === 'completed' || data.status === 'failed') {
+      stopPolling()
+      if (data.status === 'completed') {
+        try {
+          const { data: d } = await axios.get(`/api/analysis/${pid}/jobs/${jid}/detail`)
+          detail.value = d
+        } catch (e) {
+          console.error('Failed to fetch detail:', e)
+        }
+      }
+      loading.value = false
     }
   } catch (e) {
-    console.error('Failed to fetch results:', e)
-  } finally {
-    loading.value = false
+    console.error('Failed to poll logs:', e)
   }
 }
 
-onMounted(poll)
+function startPolling() {
+  pollLogs()
+  pollTimer = setInterval(pollLogs, 1000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+onMounted(() => {
+  loading.value = false
+  startPolling()
+})
+
+onUnmounted(stopPolling)
 </script>
 
 <style scoped>
+.console-section {
+  margin-bottom: 2rem;
+}
+
+.console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.console-header h3 {
+  color: #1a1a2e;
+}
+
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.pending {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.status-badge.running {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.status-badge.completed {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-badge.failed {
+  background: #fce4ec;
+  color: #c62828;
+}
+
+.console {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  max-height: 500px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.console pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -206,23 +307,6 @@ onMounted(poll)
 .feature-chip.negative {
   background: #fce4ec;
   color: #c62828;
-}
-
-.status-card {
-  background: white;
-  padding: 2rem;
-  border-radius: 8px;
-  text-align: center;
-}
-
-.status-card button {
-  margin-top: 1rem;
-  padding: 0.5rem 1.5rem;
-  background: #1a1a2e;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
 }
 
 .loading {

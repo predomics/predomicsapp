@@ -86,10 +86,17 @@ async def run_analysis(
 
 
 def _run_job(job_id: str, project_id: str, param_path: str) -> None:
-    """Execute gpredomics in a background thread. Uses its own DB session."""
+    """Execute gpredomics in a subprocess so we can capture Rust stdout."""
     import asyncio
+    import subprocess
+    import sys
 
-    async def _update_job():
+    job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job_id
+    log_path = job_dir / "console.log"
+    results_path = job_dir / "results.json"
+
+    async def _execute():
+        # Mark job as running
         async with async_session_factory() as db:
             result = await db.execute(select(Job).where(Job.id == job_id))
             job = result.scalar_one()
@@ -97,19 +104,52 @@ def _run_job(job_id: str, project_id: str, param_path: str) -> None:
             await db.commit()
 
         try:
-            results = engine.run_experiment(param_path)
-            results_path = storage.save_job_result(project_id, job_id, results)
+            if not engine.HAS_ENGINE:
+                # Mock mode — no subprocess needed
+                mock_results = engine._mock_results()
+                storage.save_job_result(project_id, job_id, mock_results)
+                with open(log_path, "w") as lf:
+                    lf.write("[mock] Engine not available, using mock results\n")
+
+                async with async_session_factory() as db:
+                    result = await db.execute(select(Job).where(Job.id == job_id))
+                    job = result.scalar_one()
+                    job.status = "completed"
+                    job.results_path = str(results_path)
+                    job.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                return
+
+            # Run worker subprocess — captures all Rust stdout
+            worker_module = "app.services.worker"
+            with open(log_path, "w") as lf:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", worker_module, param_path, str(results_path)],
+                    stdout=lf,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(Path(__file__).resolve().parents[2]),  # backend/
+                )
+                proc.wait()
+
+            if proc.returncode != 0:
+                error_msg = log_path.read_text()[-500:] if log_path.exists() else "Unknown error"
+                raise RuntimeError(f"Worker exited with code {proc.returncode}: {error_msg}")
 
             async with async_session_factory() as db:
                 result = await db.execute(select(Job).where(Job.id == job_id))
                 job = result.scalar_one()
                 job.status = "completed"
-                job.results_path = results_path
+                job.results_path = str(results_path)
                 job.completed_at = datetime.now(timezone.utc)
                 await db.commit()
 
-            logger.info("Job %s completed: AUC=%.4f", job_id, results["best_individual"]["auc"])
+            logger.info("Job %s completed", job_id)
+
         except Exception as e:
+            # Append error to log
+            with open(log_path, "a") as lf:
+                lf.write(f"\n[error] {e}\n")
+
             async with async_session_factory() as db:
                 result = await db.execute(select(Job).where(Job.id == job_id))
                 job = result.scalar_one()
@@ -122,9 +162,40 @@ def _run_job(job_id: str, project_id: str, param_path: str) -> None:
 
     loop = asyncio.new_event_loop()
     try:
-        loop.run_until_complete(_update_job())
+        loop.run_until_complete(_execute())
     finally:
         loop.close()
+
+
+@router.get("/{project_id}/jobs/{job_id}/logs")
+async def get_job_logs(
+    project_id: str,
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the console log output for a job."""
+    result = await db.execute(
+        select(Job).join(Project).where(
+            Job.id == job_id,
+            Job.project_id == project_id,
+            Project.user_id == user.id,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    log_path = Path(storage.settings.project_dir) / project_id / "jobs" / job_id / "console.log"
+    log_content = ""
+    if log_path.exists():
+        log_content = log_path.read_text()
+
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "log": log_content,
+    }
 
 
 @router.get("/{project_id}/jobs/{job_id}", response_model=ExperimentSummary)

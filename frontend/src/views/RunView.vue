@@ -107,10 +107,11 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 
 const route = useRoute()
+const router = useRouter()
 const launching = ref(false)
 const jobId = ref(null)
 const datasets = ref([])
@@ -181,6 +182,7 @@ async function launch() {
       }
     )
     jobId.value = data.job_id
+    router.push(`/project/${route.params.id}/results/${data.job_id}`)
   } catch (e) {
     console.error('Launch failed:', e)
     alert('Failed to launch analysis: ' + (e.response?.data?.detail || e.message))
