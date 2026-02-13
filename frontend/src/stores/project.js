@@ -5,6 +5,14 @@ import axios from 'axios'
 export const useProjectStore = defineStore('project', () => {
   const projects = ref([])
   const current = ref(null)
+  const activeJobId = ref(null)
+  const showConsole = ref(false)
+  const dataFilters = ref({
+    std_threshold: null,
+    prevalence_min_pct: 10,
+    top_n_significant: null,
+    method: 'wilcoxon',
+  })
 
   async function fetchAll() {
     const { data } = await axios.get('/api/projects/')
@@ -28,5 +36,17 @@ export const useProjectStore = defineStore('project', () => {
     await fetchAll()
   }
 
-  return { projects, current, fetchAll, fetchOne, create, remove }
+  function startJob(jobId) {
+    activeJobId.value = jobId
+    showConsole.value = true
+  }
+
+  function closeConsole() {
+    showConsole.value = false
+  }
+
+  return {
+    projects, current, activeJobId, showConsole, dataFilters,
+    fetchAll, fetchOne, create, remove, startJob, closeConsole,
+  }
 })

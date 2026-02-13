@@ -19,18 +19,14 @@ const routes = [
   },
   {
     path: '/project/:id',
-    name: 'Project',
-    component: () => import('./views/ProjectView.vue'),
-  },
-  {
-    path: '/project/:id/run',
-    name: 'RunAnalysis',
-    component: () => import('./views/RunView.vue'),
-  },
-  {
-    path: '/project/:id/results/:jobId',
-    name: 'Results',
-    component: () => import('./views/ResultsView.vue'),
+    component: () => import('./views/ProjectDashboard.vue'),
+    children: [
+      { path: '', redirect: to => ({ name: 'ProjectData', params: { id: to.params.id } }) },
+      { path: 'data', name: 'ProjectData', component: () => import('./views/DataTab.vue') },
+      { path: 'settings', name: 'ProjectSettings', component: () => import('./views/SettingsTab.vue') },
+      { path: 'results', name: 'ProjectResults', component: () => import('./views/ResultsTab.vue') },
+      { path: 'results/:jobId', name: 'ProjectJobResults', component: () => import('./views/ResultsTab.vue') },
+    ],
   },
 ]
 

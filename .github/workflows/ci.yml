@@ -25,7 +25,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -e ".[dev]" pyyaml
+        run: pip install -e ".[dev]"
 
       - name: Run tests
         run: PYTHONPATH=. pytest tests/ -v --tb=short
@@ -88,6 +88,16 @@ jobs:
       - name: Test Docker image
         run: |
           docker run -d --name test-app -p 8000:8000 predomicsapp-web:latest
-          sleep 5
-          curl -f http://localhost:8000/health
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health; then
+              echo " Health check passed on attempt $i"
+              docker stop test-app
+              exit 0
+            fi
+            echo "Waiting for app to start (attempt $i/30)..."
+            sleep 2
+          done
+          echo "Health check failed after 30 attempts"
+          docker logs test-app
           docker stop test-app
+          exit 1

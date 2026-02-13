@@ -118,8 +118,8 @@ body {
 }
 
 .container {
-  max-width: 1200px;
-  margin: 2rem auto;
+  max-width: 1600px;
+  margin: 1.5rem auto;
   padding: 0 1rem;
 }
 </style>

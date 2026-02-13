@@ -86,8 +86,9 @@ async def run_analysis(
 
 
 def _run_job(job_id: str, project_id: str, param_path: str) -> None:
-    """Execute gpredomics in a subprocess so we can capture Rust stdout."""
+    """Execute gpredomics in a subprocess so we can capture Rust log output."""
     import asyncio
+    import os
     import subprocess
     import sys
 
@@ -120,16 +121,26 @@ def _run_job(job_id: str, project_id: str, param_path: str) -> None:
                     await db.commit()
                 return
 
-            # Run worker subprocess — captures all Rust stdout
+            # Run worker subprocess — stream output line-by-line for live console
             worker_module = "app.services.worker"
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+
+            proc = subprocess.Popen(
+                [sys.executable, "-u", "-m", worker_module, param_path, str(results_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd=str(Path(__file__).resolve().parents[2]),  # backend/
+                env=env,
+            )
+
+            # Read output line-by-line and flush to log file immediately
             with open(log_path, "w") as lf:
-                proc = subprocess.Popen(
-                    [sys.executable, "-m", worker_module, param_path, str(results_path)],
-                    stdout=lf,
-                    stderr=subprocess.STDOUT,
-                    cwd=str(Path(__file__).resolve().parents[2]),  # backend/
-                )
-                proc.wait()
+                for line in proc.stdout:
+                    lf.write(line.decode("utf-8", errors="replace"))
+                    lf.flush()
+
+            proc.wait()
 
             if proc.returncode != 0:
                 error_msg = log_path.read_text()[-500:] if log_path.exists() else "Unknown error"
@@ -263,6 +274,32 @@ async def get_job_detail(
         sample_names=results.get("sample_names", []),
         best_individual=IndividualResponse(**best) if best else None,
     )
+
+
+@router.get("/{project_id}/jobs/{job_id}/results")
+async def get_job_results_raw(
+    project_id: str,
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get full results JSON including population and generation tracking."""
+    result = await db.execute(
+        select(Job).join(Project).where(
+            Job.id == job_id,
+            Job.project_id == project_id,
+            Project.user_id == user.id,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    results = storage.get_job_result(project_id, job_id)
+    if not results:
+        raise HTTPException(status_code=404, detail="Results not found")
+
+    return results
 
 
 @router.get("/{project_id}/jobs")
