@@ -102,12 +102,21 @@
               <label>Feature selection
                 <select v-model="form.config.data.feature_selection_method">
                   <option value="wilcoxon">Wilcoxon</option>
-                  <option value="ttest">t-test</option>
+                  <option value="studentt">t-test</option>
+                  <option value="bayesian_fisher">Bayesian Fisher</option>
                   <option value="none">None</option>
                 </select>
               </label>
               <label>Min prevalence %
                 <input type="number" v-model.number="form.config.data.feature_minimal_prevalence_pct" min="0" max="100" />
+              </label>
+            </div>
+            <div class="form-row">
+              <label>Max adj. p-value
+                <input type="number" v-model.number="form.config.data.feature_maximal_adj_pvalue" min="0" max="1" step="0.01" />
+              </label>
+              <label>Min feature value
+                <input type="number" v-model.number="form.config.data.feature_minimal_feature_value" min="0" step="0.0001" />
               </label>
             </div>
           </section>
@@ -306,6 +315,8 @@ const form = reactive({
       holdout_ratio: 0.20,
       feature_selection_method: 'wilcoxon',
       feature_minimal_prevalence_pct: 10,
+      feature_maximal_adj_pvalue: 0.05,
+      feature_minimal_feature_value: 0,
     },
     cv: { outer_folds: 5, inner_folds: 5, overfit_penalty: 0 },
   },

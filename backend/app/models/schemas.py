@@ -81,7 +81,8 @@ class DataConfig(BaseModel):
     holdout_ratio: float = 0.20
     feature_minimal_prevalence_pct: int = 10
     feature_selection_method: str = "wilcoxon"
-    feature_maximal_adj_pvalue: float = 1.0
+    feature_maximal_adj_pvalue: float = 0.05
+    feature_minimal_feature_value: float = 0.0
 
 
 class CvParams(BaseModel):
@@ -191,3 +192,59 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "0.1.0"
     gpredomicspy_available: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Data Explore schemas
+# ---------------------------------------------------------------------------
+
+class DataSummaryResponse(BaseModel):
+    n_features: int
+    n_samples: int
+    n_classes: int
+    class_labels: list[str] = []
+    class_counts: dict[str, int] = {}
+
+
+class FeatureStatRow(BaseModel):
+    name: str
+    index: int
+    selected: bool
+    feature_class: int  # 0, 1, or 2 (not significant)
+    significance: Optional[float] = None
+    mean: float
+    std: float
+    prevalence: float
+    mean_0: Optional[float] = None
+    mean_1: Optional[float] = None
+    std_0: Optional[float] = None
+    std_1: Optional[float] = None
+    prevalence_0: Optional[float] = None
+    prevalence_1: Optional[float] = None
+
+
+class HistogramData(BaseModel):
+    bin_edges: list[float]
+    counts: list[int]
+
+
+class DistributionsResponse(BaseModel):
+    prevalence_histogram: HistogramData
+    sd_histogram: HistogramData
+    class_distribution: dict[str, int]
+
+
+class BoxplotClassData(BaseModel):
+    min: float
+    q1: float
+    median: float
+    q3: float
+    max: float
+    mean: float
+    n: int
+
+
+class FeatureAbundanceItem(BaseModel):
+    name: str
+    classes: dict[str, BoxplotClassData]
+    significance: Optional[float] = None

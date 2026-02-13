@@ -24,6 +24,7 @@ from app.main import app  # noqa: E402
 from app.core.database import engine, Base, get_db, async_session_factory, sync_engine  # noqa: E402
 from app.services import engine as ml_engine  # noqa: E402
 from app.services import storage  # noqa: E402
+from app.services import data_analysis  # noqa: E402
 
 
 @pytest_asyncio.fixture
@@ -1324,3 +1325,184 @@ class TestAdmin:
         assert resp.status_code == 200
         assert "is_admin" in resp.json()
         assert resp.json()["is_admin"] is True
+
+
+# ---------------------------------------------------------------------------
+# Data Explore
+# ---------------------------------------------------------------------------
+
+async def _create_project_with_roled_datasets(auth_client):
+    """Create a project with a composite dataset containing xtrain and ytrain files.
+
+    Returns the project_id.
+    """
+    # Create dataset group
+    ds_resp = await auth_client.post("/api/datasets/", params={"name": "Train Data"})
+    ds_id = ds_resp.json()["id"]
+
+    # Upload Xtrain and Ytrain files (roles auto-detected from filenames)
+    await auth_client.post(
+        f"/api/datasets/{ds_id}/files",
+        files={"file": ("Xtrain.tsv", b"id\ts1\ts2\ts3\ts4\nf1\t0.1\t0.2\t0.3\t0.0\nf2\t0.3\t0.4\t0.0\t0.5\n", "text/plain")},
+    )
+    await auth_client.post(
+        f"/api/datasets/{ds_id}/files",
+        files={"file": ("Ytrain.tsv", b"id\tclass\ns1\t0\ns2\t0\ns3\t1\ns4\t1\n", "text/plain")},
+    )
+
+    # Create project and assign dataset
+    proj_resp = await auth_client.post("/api/projects/", params={"name": "explore_test"})
+    pid = proj_resp.json()["project_id"]
+    await auth_client.post(f"/api/datasets/{ds_id}/assign/{pid}")
+    return pid
+
+
+class TestDataExplore:
+    """Tests for data exploration endpoints (mock the Rust engine)."""
+
+    _mock_filter = staticmethod(data_analysis._mock_filtering)
+
+    @pytest.mark.asyncio
+    async def test_summary_returns_data_dimensions(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        with patch.object(data_analysis, "run_filtering", return_value=self._mock_filter()):
+            resp = await auth_client.get(f"/api/data-explore/{pid}/summary")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "n_features" in data
+        assert "n_samples" in data
+        assert "n_classes" in data
+        assert data["n_classes"] >= 2
+
+    @pytest.mark.asyncio
+    async def test_summary_no_datasets_returns_404(self, auth_client):
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "empty_proj"})
+        pid = proj_resp.json()["project_id"]
+        resp = await auth_client.get(f"/api/data-explore/{pid}/summary")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_feature_stats_returns_features(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        with patch.object(data_analysis, "run_filtering", return_value=self._mock_filter()):
+            resp = await auth_client.get(f"/api/data-explore/{pid}/feature-stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "features" in data
+        assert "selected_count" in data
+        assert "method" in data
+        assert data["method"] == "wilcoxon"
+        assert isinstance(data["features"], list)
+        assert len(data["features"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_feature_stats_with_custom_params(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        mock = self._mock_filter("studentt")
+        with patch.object(data_analysis, "run_filtering", return_value=mock):
+            resp = await auth_client.get(f"/api/data-explore/{pid}/feature-stats", params={
+                "method": "studentt",
+                "prevalence_pct": 5,
+                "max_pvalue": 0.1,
+            })
+        assert resp.status_code == 200
+        assert resp.json()["method"] == "studentt"
+
+    @pytest.mark.asyncio
+    async def test_feature_stats_invalid_method_returns_400(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        resp = await auth_client.get(f"/api/data-explore/{pid}/feature-stats", params={
+            "method": "invalid",
+        })
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_distributions_returns_histograms(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        mock = self._mock_filter()
+        with patch.object(data_analysis, "run_filtering", return_value=mock):
+            resp = await auth_client.get(f"/api/data-explore/{pid}/distributions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "prevalence_histogram" in data
+        assert "sd_histogram" in data
+        assert "class_distribution" in data
+        assert "bin_edges" in data["prevalence_histogram"]
+        assert "counts" in data["prevalence_histogram"]
+
+    @pytest.mark.asyncio
+    async def test_feature_abundance_returns_boxplot_stats(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        mock_abundance = [
+            {"name": "feature_0", "classes": {"0": {"min": 0, "q1": 0.001, "median": 0.003, "q3": 0.006, "max": 0.01, "mean": 0.004, "n": 55}}}
+        ]
+        with patch.object(data_analysis, "compute_feature_abundance", return_value=mock_abundance):
+            resp = await auth_client.get(f"/api/data-explore/{pid}/feature-abundance", params={
+                "features": "feature_0",
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "features" in data
+        assert len(data["features"]) == 1
+        assert data["features"][0]["name"] == "feature_0"
+
+    @pytest.mark.asyncio
+    async def test_feature_abundance_no_features_returns_400(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        resp = await auth_client.get(f"/api/data-explore/{pid}/feature-abundance")
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_barcode_data_returns_matrix(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        mock_barcode = {
+            "matrix": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+            "feature_names": ["feature_0", "feature_1"],
+            "sample_names": ["s1", "s2", "s3"],
+            "sample_classes": [0, 0, 1],
+            "class_labels": ["0", "1"],
+            "class_boundaries": [2],
+        }
+        with patch.object(data_analysis, "compute_barcode_data", return_value=mock_barcode):
+            resp = await auth_client.get(f"/api/data-explore/{pid}/barcode-data", params={
+                "features": "feature_0,feature_1",
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "matrix" in data
+        assert "feature_names" in data
+        assert "sample_names" in data
+        assert "sample_classes" in data
+        assert "class_labels" in data
+        assert "class_boundaries" in data
+        assert len(data["matrix"]) == 2
+        assert len(data["matrix"][0]) == 3
+
+    @pytest.mark.asyncio
+    async def test_barcode_data_no_features_returns_400(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        resp = await auth_client.get(f"/api/data-explore/{pid}/barcode-data")
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_barcode_data_with_max_samples(self, auth_client):
+        pid = await _create_project_with_roled_datasets(auth_client)
+        mock_barcode = {
+            "matrix": [[0.1, 0.2]], "feature_names": ["f0"],
+            "sample_names": ["s1", "s2"], "sample_classes": [0, 1],
+            "class_labels": ["0", "1"], "class_boundaries": [1],
+        }
+        with patch.object(data_analysis, "compute_barcode_data", return_value=mock_barcode) as mock_fn:
+            resp = await auth_client.get(f"/api/data-explore/{pid}/barcode-data", params={
+                "features": "f0", "max_samples": 100,
+            })
+        assert resp.status_code == 200
+        # Verify max_samples was passed through
+        mock_fn.assert_called_once()
+        call_kwargs = mock_fn.call_args
+        assert call_kwargs.kwargs.get("max_samples") == 100 or call_kwargs[1].get("max_samples") == 100
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_data_explore_returns_error(self, client):
+        resp = await client.get("/api/data-explore/someid/summary")
+        assert resp.status_code in (401, 403)

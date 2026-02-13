@@ -76,8 +76,8 @@ def write_param_yaml(
             "inverse_classes": data_cfg.get("inverse_classes", False),
             "feature_minimal_prevalence_pct": data_cfg.get("feature_minimal_prevalence_pct", 10),
             "feature_selection_method": data_cfg.get("feature_selection_method", "wilcoxon"),
-            "feature_maximal_adj_pvalue": data_cfg.get("feature_maximal_adj_pvalue", 1.0),
-            "feature_minimal_feature_value": 1e-4,
+            "feature_maximal_adj_pvalue": data_cfg.get("feature_maximal_adj_pvalue", 0.05),
+            "feature_minimal_feature_value": data_cfg.get("feature_minimal_feature_value", 0.0),
         },
         "cv": {
             "outer_folds": cv.get("outer_folds", 5),

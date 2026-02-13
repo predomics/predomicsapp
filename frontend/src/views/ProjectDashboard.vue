@@ -16,7 +16,8 @@
     />
 
     <nav class="tab-nav">
-      <router-link :to="`/project/${projectId}/settings`" class="tab" active-class="active">Data &amp; Run</router-link>
+      <router-link :to="`/project/${projectId}/data`" class="tab" active-class="active">Data</router-link>
+      <router-link :to="`/project/${projectId}/parameters`" class="tab" active-class="active">Parameters &amp; Run</router-link>
       <router-link :to="`/project/${projectId}/results`" class="tab" active-class="active">Results</router-link>
     </nav>
 
