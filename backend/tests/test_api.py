@@ -1185,3 +1185,142 @@ class TestProjectSharing:
             json={"email": "test@example.com", "role": "viewer"},
         )
         assert resp.status_code == 400
+
+
+# ──────────────────────────────────────────────────────────────
+#  Admin Management
+# ──────────────────────────────────────────────────────────────
+
+class TestAdmin:
+    """Tests for admin user management endpoints."""
+
+    async def _make_admin(self, client, db_session):
+        """Register a user and promote to admin, return auth headers."""
+        await client.post("/api/auth/register", json={
+            "email": "admin@example.com", "password": "adminpass", "full_name": "Admin User",
+        })
+        from app.models.db_models import User
+        from sqlalchemy import update
+        await db_session.execute(
+            update(User).where(User.email == "admin@example.com").values(is_admin=True)
+        )
+        await db_session.commit()
+        r = await client.post("/api/auth/login", json={
+            "email": "admin@example.com", "password": "adminpass",
+        })
+        return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    @pytest.mark.asyncio
+    async def test_non_admin_cannot_list_users(self, auth_client):
+        resp = await auth_client.get("/api/admin/users")
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_cannot_access_admin(self, client, db_session):
+        resp = await client.get("/api/admin/users")
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_admin_can_list_users(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        resp = await client.get("/api/admin/users", headers=admin_h)
+        assert resp.status_code == 200
+        users = resp.json()
+        assert len(users) >= 1
+        assert any(u["email"] == "admin@example.com" for u in users)
+
+    @pytest.mark.asyncio
+    async def test_user_list_includes_counts(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        resp = await client.get("/api/admin/users", headers=admin_h)
+        user = resp.json()[0]
+        assert "project_count" in user
+        assert "dataset_count" in user
+
+    @pytest.mark.asyncio
+    async def test_admin_toggle_active(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        # Create target user
+        await client.post("/api/auth/register", json={
+            "email": "target@example.com", "password": "p",
+        })
+        users = (await client.get("/api/admin/users", headers=admin_h)).json()
+        target = next(u for u in users if u["email"] == "target@example.com")
+
+        # Deactivate
+        resp = await client.patch(
+            f"/api/admin/users/{target['id']}",
+            json={"is_active": False},
+            headers=admin_h,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_active"] is False
+
+        # Target cannot login
+        resp = await client.post("/api/auth/login", json={
+            "email": "target@example.com", "password": "p",
+        })
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_admin_toggle_admin_flag(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        await client.post("/api/auth/register", json={
+            "email": "promote@example.com", "password": "p",
+        })
+        users = (await client.get("/api/admin/users", headers=admin_h)).json()
+        target = next(u for u in users if u["email"] == "promote@example.com")
+
+        resp = await client.patch(
+            f"/api/admin/users/{target['id']}",
+            json={"is_admin": True},
+            headers=admin_h,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_admin"] is True
+
+    @pytest.mark.asyncio
+    async def test_admin_cannot_modify_self(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        users = (await client.get("/api/admin/users", headers=admin_h)).json()
+        self_user = next(u for u in users if u["email"] == "admin@example.com")
+
+        resp = await client.patch(
+            f"/api/admin/users/{self_user['id']}",
+            json={"is_admin": False},
+            headers=admin_h,
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_admin_delete_user(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        await client.post("/api/auth/register", json={
+            "email": "delete_me@example.com", "password": "p",
+        })
+        users = (await client.get("/api/admin/users", headers=admin_h)).json()
+        target = next(u for u in users if u["email"] == "delete_me@example.com")
+
+        resp = await client.delete(f"/api/admin/users/{target['id']}", headers=admin_h)
+        assert resp.status_code == 200
+
+        # Verify deleted
+        users = (await client.get("/api/admin/users", headers=admin_h)).json()
+        assert not any(u["email"] == "delete_me@example.com" for u in users)
+
+    @pytest.mark.asyncio
+    async def test_admin_cannot_delete_self(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        users = (await client.get("/api/admin/users", headers=admin_h)).json()
+        self_user = next(u for u in users if u["email"] == "admin@example.com")
+
+        resp = await client.delete(f"/api/admin/users/{self_user['id']}", headers=admin_h)
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_user_response_includes_is_admin(self, client, db_session):
+        admin_h = await self._make_admin(client, db_session)
+        resp = await client.get("/api/auth/me", headers=admin_h)
+        assert resp.status_code == 200
+        assert "is_admin" in resp.json()
+        assert resp.json()["is_admin"] is True

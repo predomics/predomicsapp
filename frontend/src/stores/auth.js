@@ -7,6 +7,7 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
 
   const isLoggedIn = computed(() => !!token.value)
+  const isAdmin = computed(() => user.value?.is_admin === true)
 
   // Set axios default header whenever token changes
   function setToken(t) {
@@ -65,5 +66,5 @@ export const useAuthStore = defineStore('auth', () => {
     return data
   }
 
-  return { token, user, isLoggedIn, login, register, fetchUser, logout, updateProfile, changePassword, searchUsers }
+  return { token, user, isLoggedIn, isAdmin, login, register, fetchUser, logout, updateProfile, changePassword, searchUsers }
 })

@@ -14,7 +14,7 @@ from sqlalchemy import text
 from .core.config import settings
 from .core.database import engine, Base
 from .models import db_models  # noqa: F401 — ensure models are registered
-from .routers import health, projects, analysis, auth, samples, datasets, sharing
+from .routers import health, projects, analysis, auth, samples, datasets, sharing, admin
 from .routers.datasets import _infer_role
 from .services.storage import ensure_dirs
 
@@ -404,6 +404,66 @@ async def _migrate_to_composite_datasets(conn):
     _log.info("Migration v3_composite_datasets complete")
 
 
+async def _migrate_add_admin_flag(conn):
+    """v4: Add is_admin column to users, seed admin + demo user. Idempotent."""
+    try:
+        r = await conn.execute(
+            text("SELECT 1 FROM schema_versions WHERE version = 'v4_admin_flag'")
+        )
+        if r.scalar():
+            return
+    except Exception:
+        pass
+
+    _log.info("Migration v4: admin flag — starting")
+
+    # Add is_admin column if missing
+    try:
+        r = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'users' AND column_name = 'is_admin'"
+        ))
+        if not r.scalar():
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"
+            ))
+            _log.info("  Added users.is_admin column")
+    except Exception:
+        # SQLite: column created by Base.metadata.create_all
+        pass
+
+    # Promote prifti to admin
+    await conn.execute(text(
+        "UPDATE users SET is_admin = TRUE WHERE email LIKE '%prifti%'"
+    ))
+
+    # Seed demo user if not exists
+    from .core.security import hash_password
+    r = await conn.execute(text(
+        "SELECT 1 FROM users WHERE email = 'demo@predomics.com'"
+    ))
+    if not r.scalar():
+        import uuid
+        demo_id = uuid.uuid4().hex[:12]
+        demo_pw = hash_password("demo")
+        await conn.execute(text(
+            "INSERT INTO users (id, email, hashed_password, full_name, is_active, is_admin, created_at) "
+            "VALUES (:id, :email, :pw, :name, TRUE, FALSE, CURRENT_TIMESTAMP)"
+        ), {
+            "id": demo_id,
+            "email": "demo@predomics.com",
+            "pw": demo_pw,
+            "name": "Demo User",
+        })
+        _log.info("  Created demo user: demo@predomics.com / demo")
+
+    await conn.execute(text(
+        "INSERT INTO schema_versions (version, applied_at) "
+        "VALUES ('v4_admin_flag', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
+    ))
+    _log.info("Migration v4_admin_flag complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
@@ -416,6 +476,8 @@ async def lifespan(app: FastAPI):
         await _migrate_datasets_to_user_library(conn)
     async with engine.begin() as conn:
         await _migrate_to_composite_datasets(conn)
+    async with engine.begin() as conn:
+        await _migrate_add_admin_flag(conn)
     _log.info("PredomicsApp started — data_dir=%s", settings.data_dir)
     yield
 
@@ -446,6 +508,7 @@ app.include_router(projects.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
 app.include_router(samples.router, prefix="/api")
 app.include_router(datasets.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 # Serve Vue.js frontend (production: built into backend/static/)
 _static_dir = Path(__file__).parent / "static"

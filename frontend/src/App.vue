@@ -8,6 +8,7 @@
       <div class="nav-links">
         <router-link v-if="auth.isLoggedIn" to="/projects">Projects</router-link>
         <router-link v-if="auth.isLoggedIn" to="/datasets">Datasets</router-link>
+        <router-link v-if="auth.isLoggedIn && auth.isAdmin" to="/admin">Admin</router-link>
       </div>
       <div class="nav-right">
         <button class="theme-btn" @click="theme.cycle()" :title="`Theme: ${theme.mode}`">

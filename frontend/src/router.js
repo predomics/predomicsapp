@@ -28,6 +28,12 @@ const routes = [
     component: () => import('./views/DatasetLibrary.vue'),
   },
   {
+    path: '/admin',
+    name: 'Admin',
+    component: () => import('./views/AdminView.vue'),
+    meta: { requiresAdmin: true },
+  },
+  {
     path: '/project/:id',
     component: () => import('./views/ProjectDashboard.vue'),
     children: [
@@ -45,7 +51,7 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const token = localStorage.getItem('token')
   // Redirect to login if not authenticated (except guest pages)
   if (!to.meta.guest && to.name !== 'Home' && !token) {
@@ -54,6 +60,17 @@ router.beforeEach((to) => {
   // Redirect away from login if already authenticated
   if (to.meta.guest && token) {
     return { name: 'Projects' }
+  }
+  // Admin route guard
+  if (to.meta.requiresAdmin && token) {
+    const { useAuthStore } = await import('./stores/auth')
+    const auth = useAuthStore()
+    if (!auth.user) {
+      await auth.fetchUser()
+    }
+    if (!auth.user?.is_admin) {
+      return { name: 'Projects' }
+    }
   }
 })
 
