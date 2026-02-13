@@ -38,7 +38,11 @@ def write_param_yaml(
 
     Returns the path to the generated YAML file.
     """
-    general = config.get("general", {})
+    # model_dump() may leave Pydantic Enums — convert to plain values
+    def _plain(d):
+        return {k: (v.value if hasattr(v, "value") else v) for k, v in d.items()}
+
+    general = _plain(config.get("general", {}))
     ga = config.get("ga", {})
     beam = config.get("beam", {})
     mcmc = config.get("mcmc", {})

@@ -3,6 +3,7 @@
 import os
 import shutil
 import tempfile
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -14,6 +15,7 @@ os.environ["PREDOMICS_PROJECT_DIR"] = os.path.join(os.environ["PREDOMICS_DATA_DI
 os.environ["PREDOMICS_UPLOAD_DIR"] = os.path.join(os.environ["PREDOMICS_DATA_DIR"], "uploads")
 
 from app.main import app  # noqa: E402
+from app.services import engine  # noqa: E402
 
 
 @pytest_asyncio.fixture
@@ -225,11 +227,13 @@ class TestAnalysis:
             "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
         }
 
-        resp = await client.post(
-            f"/api/analysis/{pid}/run",
-            json=config,
-            params={"x_dataset_id": x_id, "y_dataset_id": y_id},
-        )
+        # Mock engine so tests don't need real data
+        with patch("app.services.engine.run_experiment", return_value=engine._mock_results()):
+            resp = await client.post(
+                f"/api/analysis/{pid}/run",
+                json=config,
+                params={"x_dataset_id": x_id, "y_dataset_id": y_id},
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert "job_id" in data
@@ -305,10 +309,11 @@ class TestSchemaValidation:
         x_id = ds[0]["id"] if isinstance(ds[0], dict) else ds[0][:8]
         y_id = ds[1]["id"] if isinstance(ds[1], dict) else ds[1][:8]
 
-        # Empty config body → all defaults
-        resp = await client.post(
-            f"/api/analysis/{pid}/run",
-            json={},
-            params={"x_dataset_id": x_id, "y_dataset_id": y_id},
-        )
+        # Empty config body → all defaults; mock engine to avoid real execution
+        with patch("app.services.engine.run_experiment", return_value=engine._mock_results()):
+            resp = await client.post(
+                f"/api/analysis/{pid}/run",
+                json={},
+                params={"x_dataset_id": x_id, "y_dataset_id": y_id},
+            )
         assert resp.status_code == 200
