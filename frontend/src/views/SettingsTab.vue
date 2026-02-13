@@ -1,36 +1,34 @@
 <template>
   <div class="settings-tab">
     <form @submit.prevent="launch" class="config-form">
-      <!-- Dataset selection -->
+      <!-- Dataset assignment (auto-detected from filenames) -->
       <section class="section">
         <h3>Data</h3>
-        <div class="form-row">
-          <label>X (features):
-            <select v-model="form.x_dataset_id" required>
-              <option value="" disabled>Select X dataset</option>
-              <option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.filename }}</option>
-            </select>
-          </label>
-          <label>y (labels):
-            <select v-model="form.y_dataset_id" required>
-              <option value="" disabled>Select y dataset</option>
-              <option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.filename }}</option>
-            </select>
-          </label>
-        </div>
-        <div class="form-row">
-          <label>X test (optional):
-            <select v-model="form.xtest_dataset_id">
-              <option value="">None</option>
-              <option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.filename }}</option>
-            </select>
-          </label>
-          <label>y test (optional):
-            <select v-model="form.ytest_dataset_id">
-              <option value="">None</option>
-              <option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.filename }}</option>
-            </select>
-          </label>
+        <div class="data-assignment">
+          <div class="assign-row">
+            <div class="assign-slot" :class="{ ok: xTrainDs, missing: !xTrainDs }">
+              <span class="assign-label">X train:</span>
+              <span v-if="xTrainDs" class="assign-file">{{ xTrainDs.filename }}</span>
+              <span v-else class="assign-missing">Not found &mdash; upload in Data tab</span>
+            </div>
+            <div class="assign-slot" :class="{ ok: yTrainDs, missing: !yTrainDs }">
+              <span class="assign-label">y train:</span>
+              <span v-if="yTrainDs" class="assign-file">{{ yTrainDs.filename }}</span>
+              <span v-else class="assign-missing">Not found &mdash; upload in Data tab</span>
+            </div>
+          </div>
+          <div class="assign-row">
+            <div class="assign-slot optional" :class="{ ok: xTestDs }">
+              <span class="assign-label">X test:</span>
+              <span v-if="xTestDs" class="assign-file">{{ xTestDs.filename }}</span>
+              <span v-else class="assign-none">None (will use holdout)</span>
+            </div>
+            <div class="assign-slot optional" :class="{ ok: yTestDs }">
+              <span class="assign-label">y test:</span>
+              <span v-if="yTestDs" class="assign-file">{{ yTestDs.filename }}</span>
+              <span v-else class="assign-none">None (will use holdout)</span>
+            </div>
+          </div>
         </div>
         <div class="form-row">
           <label>
@@ -220,15 +218,18 @@
         </div>
       </details>
 
-      <button type="submit" class="btn btn-primary" :disabled="launching">
-        {{ launching ? 'Launching...' : 'Launch Analysis' }}
-      </button>
+      <div class="launch-bar">
+        <button type="submit" class="btn btn-primary" :disabled="launching || !canLaunch">
+          {{ launching ? 'Launching...' : 'Launch Analysis' }}
+        </button>
+        <span v-if="!canLaunch" class="launch-hint">Upload X and y training datasets first</span>
+      </div>
     </form>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 import axios from 'axios'
@@ -239,11 +240,25 @@ const launching = ref(false)
 
 const datasets = computed(() => store.current?.datasets || [])
 
+// Auto-detect dataset roles by filename patterns (same logic as DataTab)
+const xTrainDs = computed(() =>
+  datasets.value.find(d => /^x/i.test(d.filename) && /train/i.test(d.filename))
+  || datasets.value.find(d => /^x\b/i.test(d.filename) && !/test/i.test(d.filename))
+)
+const yTrainDs = computed(() =>
+  datasets.value.find(d => /^y/i.test(d.filename) && /train/i.test(d.filename))
+  || datasets.value.find(d => /^y\b/i.test(d.filename) && !/test/i.test(d.filename))
+)
+const xTestDs = computed(() =>
+  datasets.value.find(d => /^x/i.test(d.filename) && /test/i.test(d.filename))
+)
+const yTestDs = computed(() =>
+  datasets.value.find(d => /^y/i.test(d.filename) && /test/i.test(d.filename))
+)
+
+const canLaunch = computed(() => xTrainDs.value && yTrainDs.value)
+
 const form = reactive({
-  x_dataset_id: '',
-  y_dataset_id: '',
-  xtest_dataset_id: '',
-  ytest_dataset_id: '',
   config: {
     general: {
       algo: 'ga',
@@ -280,32 +295,16 @@ const form = reactive({
   },
 })
 
-function autoSelectDatasets() {
-  const ds = datasets.value
-  if (!ds.length) return
-  const xDs = ds.find(d => /^X/i.test(d.filename) && /train/i.test(d.filename))
-    || ds.find(d => /^X/i.test(d.filename))
-  const yDs = ds.find(d => /^Y/i.test(d.filename) && /train/i.test(d.filename))
-    || ds.find(d => /^Y/i.test(d.filename))
-  const xTest = ds.find(d => /^X/i.test(d.filename) && /test/i.test(d.filename))
-  const yTest = ds.find(d => /^Y/i.test(d.filename) && /test/i.test(d.filename))
-  if (xDs) form.x_dataset_id = xDs.id
-  if (yDs) form.y_dataset_id = yDs.id
-  if (xTest) form.xtest_dataset_id = xTest.id
-  if (yTest) form.ytest_dataset_id = yTest.id
-}
-
-onMounted(autoSelectDatasets)
-
 async function launch() {
+  if (!canLaunch.value) return
   launching.value = true
   try {
     const params = {
-      x_dataset_id: form.x_dataset_id,
-      y_dataset_id: form.y_dataset_id,
+      x_dataset_id: xTrainDs.value.id,
+      y_dataset_id: yTrainDs.value.id,
     }
-    if (form.xtest_dataset_id) params.xtest_dataset_id = form.xtest_dataset_id
-    if (form.ytest_dataset_id) params.ytest_dataset_id = form.ytest_dataset_id
+    if (xTestDs.value) params.xtest_dataset_id = xTestDs.value.id
+    if (yTestDs.value) params.ytest_dataset_id = yTestDs.value.id
 
     const { data } = await axios.post(
       `/api/analysis/${route.params.id}/run`,
@@ -340,6 +339,57 @@ async function launch() {
 .section h3 {
   margin-bottom: 1rem;
   color: #1a1a2e;
+}
+
+.data-assignment {
+  margin-bottom: 1rem;
+}
+
+.assign-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.assign-slot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: #f5f7fa;
+}
+
+.assign-slot.ok {
+  background: #e8f5e9;
+}
+
+.assign-slot.missing {
+  background: #fff3e0;
+}
+
+.assign-label {
+  font-weight: 600;
+  color: #546e7a;
+  min-width: 55px;
+}
+
+.assign-file {
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.assign-missing {
+  color: #e65100;
+  font-size: 0.8rem;
+}
+
+.assign-none {
+  color: #90a4ae;
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .form-row {
@@ -382,6 +432,12 @@ input[type="checkbox"] {
   margin-bottom: 0.75rem;
 }
 
+.launch-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
 .btn {
   padding: 0.75rem 2rem;
   border: none;
@@ -389,7 +445,6 @@ input[type="checkbox"] {
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
-  align-self: flex-start;
 }
 
 .btn-primary {
@@ -400,5 +455,10 @@ input[type="checkbox"] {
 .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.launch-hint {
+  color: #e65100;
+  font-size: 0.85rem;
 }
 </style>

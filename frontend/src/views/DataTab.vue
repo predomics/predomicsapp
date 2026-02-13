@@ -1,74 +1,113 @@
 <template>
   <div class="data-tab">
-    <!-- Upload Section -->
+    <!-- Role-based dataset assignment -->
     <section class="section">
       <h3>Datasets</h3>
-      <div class="upload-grid">
-        <div class="upload-card">
-          <label>
-            <strong>X (features)</strong>
-            <span class="hint">TSV/CSV matrix</span>
-            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, true)" />
+      <div class="role-grid">
+        <!-- X train -->
+        <div class="role-slot" :class="{ assigned: xTrain }">
+          <div class="role-header">
+            <strong>X train</strong>
+            <span class="role-desc">Feature matrix (training)</span>
+          </div>
+          <div v-if="xTrain" class="role-assigned">
+            <span class="check">&#10003;</span>
+            <span class="filename">{{ xTrain.filename }}</span>
+          </div>
+          <label v-else class="upload-btn">
+            <span>Upload file</span>
+            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, 'xtrain')" />
           </label>
         </div>
-        <div class="upload-card">
-          <label>
-            <strong>y (labels)</strong>
-            <span class="hint">TSV/CSV vector</span>
-            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, false)" />
+
+        <!-- y train -->
+        <div class="role-slot" :class="{ assigned: yTrain }">
+          <div class="role-header">
+            <strong>y train</strong>
+            <span class="role-desc">Labels (training)</span>
+          </div>
+          <div v-if="yTrain" class="role-assigned">
+            <span class="check">&#10003;</span>
+            <span class="filename">{{ yTrain.filename }}</span>
+          </div>
+          <label v-else class="upload-btn">
+            <span>Upload file</span>
+            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, 'ytrain')" />
           </label>
         </div>
-        <div class="upload-card">
-          <label>
-            <strong>X test (optional)</strong>
-            <span class="hint">TSV/CSV matrix</span>
-            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, true)" />
+
+        <!-- X test -->
+        <div class="role-slot optional" :class="{ assigned: xTest }">
+          <div class="role-header">
+            <strong>X test</strong>
+            <span class="role-desc">Feature matrix (test, optional)</span>
+          </div>
+          <div v-if="xTest" class="role-assigned">
+            <span class="check">&#10003;</span>
+            <span class="filename">{{ xTest.filename }}</span>
+          </div>
+          <label v-else class="upload-btn">
+            <span>Upload file</span>
+            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, 'xtest')" />
           </label>
         </div>
-        <div class="upload-card">
-          <label>
-            <strong>y test (optional)</strong>
-            <span class="hint">TSV/CSV vector</span>
-            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, false)" />
+
+        <!-- y test -->
+        <div class="role-slot optional" :class="{ assigned: yTest }">
+          <div class="role-header">
+            <strong>y test</strong>
+            <span class="role-desc">Labels (test, optional)</span>
+          </div>
+          <div v-if="yTest" class="role-assigned">
+            <span class="check">&#10003;</span>
+            <span class="filename">{{ yTest.filename }}</span>
+          </div>
+          <label v-else class="upload-btn">
+            <span>Upload file</span>
+            <input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, 'ytest')" />
           </label>
         </div>
       </div>
 
-      <div v-if="datasets.length > 0" class="dataset-list">
-        <div v-for="d in datasets" :key="d.id" class="dataset-item">
+      <!-- Unassigned datasets -->
+      <div v-if="unassigned.length > 0" class="unassigned-section">
+        <h4>Other datasets ({{ unassigned.length }})</h4>
+        <div v-for="d in unassigned" :key="d.id" class="dataset-item">
           <span class="filename">{{ d.filename }}</span>
-          <span class="meta" v-if="d.n_features">{{ d.n_features }} features &times; {{ d.n_samples }} samples</span>
-          <span class="meta" v-if="d.n_classes">({{ d.n_classes }} classes)</span>
         </div>
       </div>
-      <div v-else class="empty">No datasets uploaded yet. Upload files above or load a demo from the Projects page.</div>
     </section>
 
-    <!-- Dataset summary (Phase C placeholder) -->
-    <section class="section" v-if="datasets.length > 0">
+    <!-- Dataset overview -->
+    <section class="section" v-if="xTrain || yTrain">
       <h3>Dataset Overview</h3>
       <div class="stat-cards">
-        <div class="stat-card" v-if="xDataset">
-          <div class="stat-value">{{ xDataset.n_features || '—' }}</div>
-          <div class="stat-label">Features</div>
-        </div>
-        <div class="stat-card" v-if="xDataset">
-          <div class="stat-value">{{ xDataset.n_samples || '—' }}</div>
-          <div class="stat-label">Samples</div>
-        </div>
-        <div class="stat-card" v-if="yDataset">
-          <div class="stat-value">{{ yDataset.n_classes || '—' }}</div>
-          <div class="stat-label">Classes</div>
-        </div>
         <div class="stat-card">
           <div class="stat-value">{{ datasets.length }}</div>
           <div class="stat-label">Datasets</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ xTrain ? '&#10003;' : '&#10007;' }}</div>
+          <div class="stat-label">Train Data</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ xTest ? '&#10003;' : '&#10007;' }}</div>
+          <div class="stat-label">Test Data</div>
+        </div>
+        <div class="stat-card" v-if="xTest && !yTest || !xTest && yTest">
+          <div class="stat-value warn">!</div>
+          <div class="stat-label">Test incomplete</div>
         </div>
       </div>
       <p class="info-text">
         Data exploration, statistics, and filtering will be available here in a future update.
       </p>
     </section>
+
+    <!-- Empty state -->
+    <div v-if="datasets.length === 0" class="empty-state">
+      <p>No datasets loaded. Upload files above or load a demo dataset from the Projects page.</p>
+    </div>
   </div>
 </template>
 
@@ -82,12 +121,37 @@ const route = useRoute()
 const store = useProjectStore()
 
 const datasets = computed(() => store.current?.datasets || [])
-const xDataset = computed(() => datasets.value.find(d => /^X/i.test(d.filename) && /train/i.test(d.filename))
-  || datasets.value.find(d => /^X/i.test(d.filename)))
-const yDataset = computed(() => datasets.value.find(d => /^Y/i.test(d.filename) && /train/i.test(d.filename))
-  || datasets.value.find(d => /^Y/i.test(d.filename)))
 
-async function uploadFile(event, featuresInRows) {
+// Auto-detect dataset roles by filename patterns
+const xTrain = computed(() =>
+  datasets.value.find(d => /^x/i.test(d.filename) && /train/i.test(d.filename))
+  || datasets.value.find(d => /^x\b/i.test(d.filename) && !/test/i.test(d.filename))
+)
+const yTrain = computed(() =>
+  datasets.value.find(d => /^y/i.test(d.filename) && /train/i.test(d.filename))
+  || datasets.value.find(d => /^y\b/i.test(d.filename) && !/test/i.test(d.filename))
+)
+const xTest = computed(() =>
+  datasets.value.find(d => /^x/i.test(d.filename) && /test/i.test(d.filename))
+)
+const yTest = computed(() =>
+  datasets.value.find(d => /^y/i.test(d.filename) && /test/i.test(d.filename))
+)
+
+const assignedIds = computed(() => {
+  const ids = new Set()
+  if (xTrain.value) ids.add(xTrain.value.id)
+  if (yTrain.value) ids.add(yTrain.value.id)
+  if (xTest.value) ids.add(xTest.value.id)
+  if (yTest.value) ids.add(yTest.value.id)
+  return ids
+})
+
+const unassigned = computed(() =>
+  datasets.value.filter(d => !assignedIds.value.has(d.id))
+)
+
+async function uploadFile(event, _role) {
   const file = event.target.files[0]
   if (!file) return
 
@@ -98,7 +162,6 @@ async function uploadFile(event, featuresInRows) {
     await axios.post(
       `/api/projects/${route.params.id}/datasets`,
       formData,
-      { params: { features_in_rows: featuresInRows } }
     )
     await store.fetchOne(route.params.id)
   } catch (e) {
@@ -122,62 +185,97 @@ async function uploadFile(event, featuresInRows) {
   color: #1a1a2e;
 }
 
-.upload-grid {
+.section h4 {
+  margin: 1rem 0 0.5rem;
+  color: #546e7a;
+  font-size: 0.85rem;
+}
+
+.role-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
-  margin-bottom: 1rem;
 }
 
-.upload-card {
+.role-slot {
   border: 2px dashed #cfd8dc;
   border-radius: 8px;
   padding: 1rem;
-  transition: border-color 0.2s;
+  transition: all 0.2s;
 }
 
-.upload-card:hover {
-  border-color: #1a1a2e;
+.role-slot.assigned {
+  border-color: #4caf50;
+  border-style: solid;
+  background: #f1f8e9;
 }
 
-.upload-card label {
+.role-slot.optional:not(.assigned) {
+  border-color: #e0e0e0;
+}
+
+.role-header {
+  margin-bottom: 0.5rem;
+}
+
+.role-header strong {
+  font-size: 0.95rem;
+  color: #1a1a2e;
+}
+
+.role-desc {
+  display: block;
+  font-size: 0.75rem;
+  color: #90a4ae;
+  margin-top: 0.1rem;
+}
+
+.role-assigned {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  cursor: pointer;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 0.9rem;
 }
 
-.upload-card .hint {
-  color: #90a4ae;
-  font-size: 0.8rem;
+.check {
+  color: #4caf50;
+  font-weight: bold;
+  font-size: 1.1rem;
 }
 
-.upload-card input[type="file"] {
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
+.filename {
+  font-weight: 500;
+  color: #37474f;
 }
 
-.dataset-list {
+.upload-btn {
+  display: inline-block;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #1a1a2e;
+  border: 1px solid #cfd8dc;
+  border-radius: 4px;
+  padding: 0.35rem 0.75rem;
+}
+
+.upload-btn:hover {
+  background: #f5f7fa;
+}
+
+.upload-btn input[type="file"] {
+  display: none;
+}
+
+.unassigned-section {
   margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eceff1;
 }
 
 .dataset-item {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid #eceff1;
-  font-size: 0.9rem;
-}
-
-.dataset-item .filename {
-  font-weight: 500;
-}
-
-.dataset-item .meta {
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
   color: #78909c;
-  font-size: 0.8rem;
 }
 
 .stat-cards {
@@ -200,6 +298,10 @@ async function uploadFile(event, featuresInRows) {
   color: #1a1a2e;
 }
 
+.stat-value.warn {
+  color: #f57c00;
+}
+
 .stat-label {
   font-size: 0.75rem;
   color: #90a4ae;
@@ -212,8 +314,9 @@ async function uploadFile(event, featuresInRows) {
   font-style: italic;
 }
 
-.empty {
+.empty-state {
+  text-align: center;
+  padding: 2rem;
   color: #90a4ae;
-  padding: 1rem 0;
 }
 </style>
