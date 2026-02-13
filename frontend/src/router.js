@@ -2,6 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('./views/LoginView.vue'),
+    meta: { guest: true },
+  },
+  {
     path: '/',
     name: 'Home',
     component: () => import('./views/HomeView.vue'),
@@ -28,7 +34,21 @@ const routes = [
   },
 ]
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes,
 })
+
+router.beforeEach((to) => {
+  const token = localStorage.getItem('token')
+  // Redirect to login if not authenticated (except guest pages)
+  if (!to.meta.guest && to.name !== 'Home' && !token) {
+    return { name: 'Login' }
+  }
+  // Redirect away from login if already authenticated
+  if (to.meta.guest && token) {
+    return { name: 'Projects' }
+  }
+})
+
+export default router
