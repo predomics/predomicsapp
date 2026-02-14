@@ -1,44 +1,37 @@
 import { defineStore } from 'pinia'
 import { reactive, computed } from 'vue'
+import { PARAM_DEFS, CATEGORIES } from '../data/parameterDefs'
+
+/**
+ * Build default form values from PARAM_DEFS — single source of truth.
+ * Structure: { general: {...}, ga: {...}, beam: {...}, ... }
+ */
+function buildDefaults() {
+  const form = {}
+  for (const cat of CATEGORIES) form[cat.id] = {}
+  for (const p of PARAM_DEFS) form[p.category][p.key] = p.defaultValue
+  return form
+}
 
 export const useConfigStore = defineStore('config', () => {
+  const defaults = buildDefaults()
+
+  // Data section is managed separately by DataTab — keep it out of parameterDefs
   const form = reactive({
-    general: {
-      algo: 'ga',
-      language: 'bin,ter,ratio',
-      data_type: 'raw,prev',
-      fit: 'auc',
-      seed: 42,
-      thread_number: 4,
-      k_penalty: 0.0001,
-      cv: false,
-      gpu: false,
-    },
-    ga: {
-      population_size: 5000,
-      max_epochs: 100,
-      min_epochs: 1,
-      max_age_best_model: 100,
-      k_min: 1,
-      k_max: 200,
-      select_elite_pct: 2,
-      select_niche_pct: 20,
-      select_random_pct: 10,
-      mutated_children_pct: 80,
-    },
-    beam: { k_min: 2, k_max: 100, best_models_criterion: 10, max_nb_of_models: 20000 },
-    mcmc: { n_iter: 10000, n_burn: 5000, lambda: 0.001, nmin: 10 },
+    ...JSON.parse(JSON.stringify(defaults)),
     data: {
       features_in_rows: true,
+      inverse_classes: false,
       holdout_ratio: 0.20,
       feature_selection_method: 'wilcoxon',
       feature_minimal_prevalence_pct: 10,
       feature_maximal_adj_pvalue: 0.05,
       feature_minimal_feature_value: 0,
+      classes: null,
     },
-    cv: { outer_folds: 5, inner_folds: 5, overfit_penalty: 0 },
   })
 
+  /** Convenience getter for data-explore filtering params */
   const filterParams = computed(() => ({
     method: form.data.feature_selection_method,
     prevalence_pct: form.data.feature_minimal_prevalence_pct,
@@ -46,5 +39,19 @@ export const useConfigStore = defineStore('config', () => {
     min_feature_value: form.data.feature_minimal_feature_value,
   }))
 
-  return { form, filterParams }
+  /** Reset all parameter categories to defaults (preserves data section) */
+  function resetToDefaults() {
+    const fresh = buildDefaults()
+    for (const cat of CATEGORIES) {
+      Object.assign(form[cat.id], fresh[cat.id])
+    }
+  }
+
+  /** Reset a single category to its defaults */
+  function resetCategory(catId) {
+    const fresh = buildDefaults()
+    if (fresh[catId]) Object.assign(form[catId], fresh[catId])
+  }
+
+  return { form, filterParams, resetToDefaults, resetCategory }
 })

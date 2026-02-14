@@ -42,30 +42,86 @@ def write_param_yaml(
     def _plain(d):
         return {k: (v.value if hasattr(v, "value") else v) for k, v in d.items()}
 
-    general = _plain(config.get("general", {}))
-    ga = config.get("ga", {})
-    beam = config.get("beam", {})
-    mcmc = config.get("mcmc", {})
+    def _merge(section_key, defaults):
+        """Merge user-provided values over defaults, stripping None values."""
+        user = _plain(config.get(section_key, {}))
+        merged = {**defaults}
+        for k, v in user.items():
+            if v is not None:
+                merged[k] = v
+        return merged
+
+    general = _merge("general", {
+        "seed": 42, "algo": "ga", "cv": False, "thread_number": 4, "gpu": False,
+        "language": "bin,ter,ratio", "data_type": "raw,prev", "epsilon": 1e-5,
+        "fit": "auc", "k_penalty": 0.0001, "fr_penalty": 0.0, "bias_penalty": 0.0,
+        "threshold_ci_n_bootstrap": 0, "threshold_ci_penalty": 0.5,
+        "threshold_ci_alpha": 0.05, "threshold_ci_frac_bootstrap": 1.0,
+        "user_feature_penalties_weight": 1.0, "n_model_to_display": 30,
+        "log_level": "info", "keep_trace": True, "display_colorful": True,
+        "save_exp": str(Path(output_dir) / "experiment.bin"),
+    })
+
     data_cfg = config.get("data", {})
-    cv = config.get("cv", {})
+
+    cv = _merge("cv", {
+        "outer_folds": 5, "inner_folds": 5, "overfit_penalty": 0.0,
+        "resampling_inner_folds_epochs": 0, "fit_on_valid": True,
+        "cv_best_models_ci_alpha": 0.05, "stratify_by": "",
+    })
+
+    importance = _merge("importance", {
+        "compute_importance": False, "n_permutations_mda": 100,
+        "scaled_importance": True, "importance_aggregation": "mean",
+    })
+
+    voting = _merge("voting", {
+        "vote": False, "fbm_ci_alpha": 0.05, "prune_before_voting": False,
+        "min_perf": 0.5, "min_diversity": 5, "method": "Majority",
+        "method_threshold": 0.5, "threshold_windows_pct": 5, "complete_display": False,
+    })
+
+    ga = _merge("ga", {
+        "population_size": 5000, "max_epochs": 200, "min_epochs": 10,
+        "max_age_best_model": 10, "k_min": 1, "k_max": 200,
+        "select_elite_pct": 2.0, "select_niche_pct": 0.0, "select_random_pct": 2.0,
+        "mutated_children_pct": 80.0, "mutated_features_pct": 20.0,
+        "mutation_non_null_chance_pct": 20.0, "forced_diversity_pct": 0.0,
+        "forced_diversity_epochs": 10, "random_sampling_pct": 0.0,
+        "random_sampling_epochs": 1, "n_epochs_before_global": 0,
+    })
+    # Rename k_min/k_max to kmin/kmax for gpredomics YAML format
+    ga["kmin"] = ga.pop("k_min")
+    ga["kmax"] = ga.pop("k_max")
+
+    beam_cfg = _merge("beam", {
+        "method": "LimitedExhaustive", "k_start": 1, "k_stop": 100,
+        "best_models_criterion": 10.0, "max_nb_of_models": 10000,
+    })
+    # Rename k_start/k_stop to kmin/kmax for gpredomics YAML format
+    beam_out = {
+        "method": beam_cfg["method"],
+        "kmin": beam_cfg.pop("k_start"),
+        "kmax": beam_cfg.pop("k_stop"),
+        "best_models_criterion": beam_cfg["best_models_criterion"],
+        "max_nb_of_models": beam_cfg["max_nb_of_models"],
+    }
+
+    mcmc = config.get("mcmc", {})
+    mcmc_out = {
+        "n_iter": mcmc.get("n_iter", 10000),
+        "n_burn": mcmc.get("n_burn", 5000),
+        "lambda": mcmc.get("lambda_", mcmc.get("lambda", 0.001)),
+        "nmin": mcmc.get("nmin", 10),
+    }
+
+    gpu = _merge("gpu", {
+        "fallback_to_cpu": True, "memory_policy": "Strict",
+        "max_total_memory_mb": 256, "max_buffer_size_mb": 128,
+    })
 
     param = {
-        "general": {
-            "seed": general.get("seed", 42),
-            "algo": general.get("algo", "ga"),
-            "cv": general.get("cv", False),
-            "thread_number": general.get("thread_number", 4),
-            "gpu": general.get("gpu", False),
-            "language": general.get("language", "bin,ter,ratio"),
-            "data_type": general.get("data_type", "raw,prev"),
-            "epsilon": 1e-5,
-            "fit": general.get("fit", "auc"),
-            "k_penalty": general.get("k_penalty", 0.0001),
-            "log_level": "info",
-            "keep_trace": True,
-            "n_model_to_display": 30,
-            "display_colorful": False,
-        },
+        "general": general,
         "data": {
             "X": x_path,
             "y": y_path,
@@ -78,56 +134,15 @@ def write_param_yaml(
             "feature_selection_method": data_cfg.get("feature_selection_method", "wilcoxon"),
             "feature_maximal_adj_pvalue": data_cfg.get("feature_maximal_adj_pvalue", 0.05),
             "feature_minimal_feature_value": data_cfg.get("feature_minimal_feature_value", 0.0),
+            **({"classes": data_cfg["classes"]} if data_cfg.get("classes") else {}),
         },
-        "cv": {
-            "outer_folds": cv.get("outer_folds", 5),
-            "inner_folds": cv.get("inner_folds", 5),
-            "overfit_penalty": cv.get("overfit_penalty", 0.0),
-            "fit_on_valid": True,
-            "cv_best_models_ci_alpha": 0.05,
-        },
-        "importance": {
-            "compute_importance": False,
-            "n_permutations_mda": 100,
-            "scaled_importance": True,
-            "importance_aggregation": "mean",
-        },
-        "voting": {
-            "vote": False,
-        },
-        "ga": {
-            "population_size": ga.get("population_size", 5000),
-            "max_epochs": ga.get("max_epochs", 100),
-            "min_epochs": ga.get("min_epochs", 1),
-            "max_age_best_model": ga.get("max_age_best_model", 100),
-            "kmin": ga.get("k_min", 1),
-            "kmax": ga.get("k_max", 200),
-            "select_elite_pct": ga.get("select_elite_pct", 2.0),
-            "select_niche_pct": ga.get("select_niche_pct", 20.0),
-            "select_random_pct": ga.get("select_random_pct", 10.0),
-            "mutated_children_pct": ga.get("mutated_children_pct", 80.0),
-            "mutated_features_pct": 20.0,
-            "mutation_non_null_chance_pct": 20.0,
-        },
-        "beam": {
-            "method": "LimitedExhaustive",
-            "kmin": beam.get("k_min", 2),
-            "kmax": beam.get("k_max", 100),
-            "best_models_criterion": beam.get("best_models_criterion", 10.0),
-            "max_nb_of_models": beam.get("max_nb_of_models", 20000),
-        },
-        "mcmc": {
-            "n_iter": mcmc.get("n_iter", 10000),
-            "n_burn": mcmc.get("n_burn", 5000),
-            "lambda": mcmc.get("lambda_", mcmc.get("lambda", 0.001)),
-            "nmin": mcmc.get("nmin", 10),
-        },
-        "gpu": {
-            "fallback_to_cpu": True,
-            "memory_policy": "Strict",
-            "max_total_memory_mb": 256,
-            "max_buffer_size_mb": 128,
-        },
+        "cv": cv,
+        "importance": importance,
+        "voting": voting,
+        "ga": ga,
+        "beam": beam_out,
+        "mcmc": mcmc_out,
+        "gpu": gpu,
     }
 
     yaml_path = Path(output_dir) / "param.yaml"

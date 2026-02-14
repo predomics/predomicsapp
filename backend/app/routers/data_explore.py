@@ -114,12 +114,12 @@ async def get_feature_abundance(
 ):
     """Get boxplot summary stats per class for selected features (viewer access).
 
-    Pass feature names as comma-separated string, max 20.
+    Pass feature names as comma-separated string, max 100.
     """
     if not features:
         raise HTTPException(400, "No features specified")
 
-    feature_list = [f.strip() for f in features.split(",") if f.strip()][:20]
+    feature_list = [f.strip() for f in features.split(",") if f.strip()][:100]
     if not feature_list:
         raise HTTPException(400, "No valid features specified")
 
@@ -143,12 +143,12 @@ async def get_barcode_data(
     """Get raw feature values per sample for barcode heatmap (viewer access).
 
     Returns a matrix of shape (n_features, n_samples) with samples ordered by class.
-    Pass feature names as comma-separated string, max 50.
+    Pass feature names as comma-separated string, max 100.
     """
     if not features:
         raise HTTPException(400, "No features specified")
 
-    feature_list = [f.strip() for f in features.split(",") if f.strip()][:50]
+    feature_list = [f.strip() for f in features.split(",") if f.strip()][:100]
     if not feature_list:
         raise HTTPException(400, "No valid features specified")
 

@@ -146,9 +146,9 @@ def compute_feature_abundance(
 ) -> list[dict[str, Any]]:
     """Compute boxplot summary stats per class for selected features.
 
-    Uses pandas to load data and compute quartiles. Max 20 features.
+    Uses pandas to load data and compute quartiles. Max 100 features.
     """
-    feature_names = feature_names[:20]
+    feature_names = feature_names[:100]
 
     X = pd.read_csv(x_path, sep="\t", index_col=0)
     y = pd.read_csv(y_path, sep="\t", index_col=0)
@@ -203,7 +203,7 @@ def compute_barcode_data(
 
     Returns a matrix (features x samples) plus metadata for heatmap rendering.
     """
-    feature_names = feature_names[:50]
+    feature_names = feature_names[:100]
 
     X = pd.read_csv(x_path, sep="\t", index_col=0)
     y = pd.read_csv(y_path, sep="\t", index_col=0)

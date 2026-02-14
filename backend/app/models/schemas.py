@@ -46,26 +46,46 @@ class GeneralParams(BaseModel):
     k_penalty: float = 0.0001
     cv: bool = False
     gpu: bool = False
+    display_colorful: bool = True
+    # Advanced
+    epsilon: Optional[float] = None
+    fr_penalty: Optional[float] = None
+    bias_penalty: Optional[float] = None
+    threshold_ci_n_bootstrap: Optional[int] = None
+    threshold_ci_penalty: Optional[float] = None
+    threshold_ci_alpha: Optional[float] = None
+    threshold_ci_frac_bootstrap: Optional[float] = None
+    user_feature_penalties_weight: Optional[float] = None
+    n_model_to_display: Optional[int] = None
 
 
 class GaParams(BaseModel):
     population_size: int = 5000
-    max_epochs: int = 100
-    min_epochs: int = 1
-    max_age_best_model: int = 100
+    max_epochs: int = 200
+    min_epochs: int = 10
+    max_age_best_model: int = 10
     k_min: int = 1
     k_max: int = 200
-    select_elite_pct: float = 2.0
-    select_niche_pct: float = 20.0
-    select_random_pct: float = 10.0
-    mutated_children_pct: float = 80.0
+    # Advanced
+    select_elite_pct: Optional[float] = None
+    select_niche_pct: Optional[float] = None
+    select_random_pct: Optional[float] = None
+    mutated_children_pct: Optional[float] = None
+    mutated_features_pct: Optional[float] = None
+    mutation_non_null_chance_pct: Optional[float] = None
+    forced_diversity_pct: Optional[float] = None
+    forced_diversity_epochs: Optional[int] = None
+    random_sampling_pct: Optional[float] = None
+    random_sampling_epochs: Optional[int] = None
+    n_epochs_before_global: Optional[int] = None
 
 
 class BeamParams(BaseModel):
-    k_min: int = 2
-    k_max: int = 100
+    method: Optional[str] = None
+    k_start: int = 1
+    k_stop: int = 100
     best_models_criterion: float = 10.0
-    max_nb_of_models: int = 20000
+    max_nb_of_models: int = 10000
 
 
 class McmcParams(BaseModel):
@@ -83,12 +103,45 @@ class DataConfig(BaseModel):
     feature_selection_method: str = "wilcoxon"
     feature_maximal_adj_pvalue: float = 0.05
     feature_minimal_feature_value: float = 0.0
+    classes: Optional[List[str]] = None
 
 
 class CvParams(BaseModel):
     outer_folds: int = 5
     inner_folds: int = 5
     overfit_penalty: float = 0.0
+    # Advanced
+    resampling_inner_folds_epochs: Optional[int] = None
+    fit_on_valid: Optional[bool] = None
+    cv_best_models_ci_alpha: Optional[float] = None
+    stratify_by: Optional[str] = None
+
+
+class ImportanceParams(BaseModel):
+    compute_importance: bool = False
+    n_permutations_mda: int = 100
+    scaled_importance: bool = True
+    importance_aggregation: str = "mean"
+
+
+class VotingParams(BaseModel):
+    vote: bool = False
+    fbm_ci_alpha: float = 0.05
+    prune_before_voting: bool = False
+    # Advanced
+    min_perf: Optional[float] = None
+    min_diversity: Optional[int] = None
+    method: Optional[str] = None
+    method_threshold: Optional[float] = None
+    threshold_windows_pct: Optional[float] = None
+    complete_display: Optional[bool] = None
+
+
+class GpuParams(BaseModel):
+    fallback_to_cpu: bool = True
+    memory_policy: str = "Strict"
+    max_total_memory_mb: int = 256
+    max_buffer_size_mb: int = 128
 
 
 class RunConfig(BaseModel):
@@ -99,6 +152,9 @@ class RunConfig(BaseModel):
     mcmc: McmcParams = McmcParams()
     data: DataConfig = DataConfig()
     cv: CvParams = CvParams()
+    importance: ImportanceParams = ImportanceParams()
+    voting: VotingParams = VotingParams()
+    gpu: GpuParams = GpuParams()
 
 
 # ---------------------------------------------------------------------------

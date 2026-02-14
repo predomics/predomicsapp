@@ -120,6 +120,24 @@ function handleLogout() {
   --status-completed: #4caf50;
   --status-running: #ff9800;
   --status-failed: #e53935;
+
+  /* Category colors (parameter sections) */
+  --cat-general:        hsla(220, 60%, 55%, 0.08);
+  --cat-general-bar:    hsla(220, 60%, 55%, 0.70);
+  --cat-ga:             hsla(145, 55%, 42%, 0.08);
+  --cat-ga-bar:         hsla(145, 55%, 42%, 0.70);
+  --cat-beam:           hsla(30, 80%, 50%, 0.08);
+  --cat-beam-bar:       hsla(30, 80%, 50%, 0.70);
+  --cat-mcmc:           hsla(280, 50%, 55%, 0.08);
+  --cat-mcmc-bar:       hsla(280, 50%, 55%, 0.70);
+  --cat-cv:             hsla(195, 60%, 48%, 0.08);
+  --cat-cv-bar:         hsla(195, 60%, 48%, 0.70);
+  --cat-importance:     hsla(350, 60%, 55%, 0.08);
+  --cat-importance-bar: hsla(350, 60%, 55%, 0.70);
+  --cat-voting:         hsla(50, 70%, 45%, 0.08);
+  --cat-voting-bar:     hsla(50, 70%, 45%, 0.70);
+  --cat-gpu:            hsla(170, 55%, 42%, 0.08);
+  --cat-gpu-bar:        hsla(170, 55%, 42%, 0.70);
 }
 
 /* ================================================================
@@ -190,6 +208,24 @@ function handleLogout() {
   --status-completed: #66bb6a;
   --status-running: #ffa726;
   --status-failed: #ef5350;
+
+  /* Category colors (parameter sections — dark) */
+  --cat-general:        hsla(220, 60%, 55%, 0.12);
+  --cat-general-bar:    hsla(220, 60%, 65%, 0.80);
+  --cat-ga:             hsla(145, 55%, 50%, 0.12);
+  --cat-ga-bar:         hsla(145, 55%, 60%, 0.80);
+  --cat-beam:           hsla(30, 80%, 55%, 0.12);
+  --cat-beam-bar:       hsla(30, 80%, 65%, 0.80);
+  --cat-mcmc:           hsla(280, 50%, 60%, 0.12);
+  --cat-mcmc-bar:       hsla(280, 50%, 70%, 0.80);
+  --cat-cv:             hsla(195, 60%, 55%, 0.12);
+  --cat-cv-bar:         hsla(195, 60%, 65%, 0.80);
+  --cat-importance:     hsla(350, 60%, 60%, 0.12);
+  --cat-importance-bar: hsla(350, 60%, 70%, 0.80);
+  --cat-voting:         hsla(50, 70%, 50%, 0.12);
+  --cat-voting-bar:     hsla(50, 70%, 60%, 0.80);
+  --cat-gpu:            hsla(170, 55%, 50%, 0.12);
+  --cat-gpu-bar:        hsla(170, 55%, 60%, 0.80);
 }
 
 /* ================================================================

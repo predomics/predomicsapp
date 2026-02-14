@@ -51,9 +51,28 @@
             <input type="checkbox" v-model="cfg.data.features_in_rows" />
             Features in rows
           </label>
+          <label class="inline-check">
+            <input type="checkbox" v-model="cfg.data.inverse_classes" />
+            Inverse classes
+          </label>
           <div class="form-row">
             <label>Holdout ratio
               <input type="number" v-model.number="cfg.data.holdout_ratio" min="0" max="1" step="0.05" />
+            </label>
+          </div>
+          <div class="form-col" v-if="summary && summary.class_labels">
+            <label>Class labels
+              <div class="class-labels-row">
+                <span v-for="(cls, i) in summary.class_labels" :key="i" class="class-label-chip">
+                  <input
+                    type="text"
+                    :value="cfg.data.classes ? cfg.data.classes[i] : cls"
+                    @input="e => setClassLabel(i, e.target.value)"
+                    class="class-label-input"
+                    :placeholder="cls"
+                  />
+                </span>
+              </div>
             </label>
           </div>
         </section>
@@ -101,7 +120,7 @@
                 <tr
                   v-for="f in paginatedFeatures"
                   :key="f.index"
-                  :class="[featureRowClass(f), { 'selected-row': selectedFeatures.includes(f.name) }]"
+                  :class="[featureRowClass(f), { 'selected-row': plotFeatureNames.includes(f.name) }]"
                   @click="toggleFeature(f)"
                 >
                   <td class="feature-name-cell">{{ f.name }}</td>
@@ -121,12 +140,19 @@
 
       <!-- RIGHT PANEL -->
       <main class="right-panel">
-        <nav class="viz-tabs">
-          <button :class="{ active: vizTab === 'prevalence' }" @click="vizTab = 'prevalence'">Prevalence</button>
-          <button :class="{ active: vizTab === 'abundance' }" @click="vizTab = 'abundance'">Abundance</button>
-          <button :class="{ active: vizTab === 'barcode' }" @click="vizTab = 'barcode'">Barcode</button>
-          <button :class="{ active: vizTab === 'volcano' }" @click="vizTab = 'volcano'">Volcano</button>
-        </nav>
+        <div class="viz-header">
+          <nav class="viz-tabs">
+            <button :class="{ active: vizTab === 'prevalence' }" @click="vizTab = 'prevalence'">Prevalence</button>
+            <button :class="{ active: vizTab === 'abundance' }" @click="vizTab = 'abundance'">Abundance</button>
+            <button :class="{ active: vizTab === 'barcode' }" @click="vizTab = 'barcode'">Barcode</button>
+            <button :class="{ active: vizTab === 'volcano' }" @click="vizTab = 'volcano'">Volcano</button>
+          </nav>
+          <label class="topn-control" v-if="featureStats">
+            Top
+            <input type="number" v-model.number="topN" :min="1" :max="maxTopN" step="1" class="topn-input" />
+            / {{ featureStats.selected_count }} features
+          </label>
+        </div>
 
         <!-- Prevalence plot -->
         <section class="section viz-section" v-if="vizTab === 'prevalence'">
@@ -136,14 +162,14 @@
 
         <!-- Abundance by class -->
         <section class="section viz-section" v-if="vizTab === 'abundance'">
-          <p v-if="selectedFeatures.length === 0" class="info-text">Click features in the table to show abundance by class.</p>
-          <div ref="abundanceChartEl" class="plotly-chart plotly-chart-tall" v-if="selectedFeatures.length > 0"></div>
+          <div ref="abundanceChartEl" class="plotly-chart plotly-chart-tall"></div>
+          <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see abundance.</p>
         </section>
 
         <!-- Barcode heatmap -->
         <section class="section viz-section" v-if="vizTab === 'barcode'">
-          <p v-if="selectedFeatures.length === 0 && !autoBarcode" class="info-text">Click features in the table, or top significant features will be shown automatically.</p>
           <div ref="barcodeChartEl" class="plotly-chart plotly-chart-tall"></div>
+          <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see barcode.</p>
         </section>
 
         <!-- Volcano plot -->
@@ -181,8 +207,21 @@ const summary = ref(null)
 const featureStats = ref(null)
 const abundanceData = ref([])
 const barcodeData = ref(null)
-const autoBarcode = ref(false)
 const vizTab = ref('prevalence')
+
+// Top N features control — shared across all plots
+const topN = ref(50)
+const maxTopN = computed(() => featureStats.value?.selected_count || 50)
+
+// Computed: top N selected features sorted by significance (single source for all plots)
+const plotFeatureNames = computed(() => {
+  if (!featureStats.value?.features) return []
+  return featureStats.value.features
+    .filter(f => f.selected)
+    .sort((a, b) => (a.significance || 1) - (b.significance || 1))
+    .slice(0, topN.value)
+    .map(f => f.name)
+})
 
 // Feature table
 const featPage = ref(0)
@@ -312,6 +351,14 @@ function toggleFeature(f) {
   }
 }
 
+// --- Class label editing ---
+function setClassLabel(index, value) {
+  if (!cfg.data.classes) {
+    cfg.data.classes = summary.value?.class_labels ? [...summary.value.class_labels] : []
+  }
+  cfg.data.classes[index] = value
+}
+
 // --- Theme colors ---
 function chartColors() {
   const dark = themeStore.isDark
@@ -364,29 +411,19 @@ async function loadFeatureStats() {
       },
     })
     featureStats.value = data
-
-    // Auto-select top significant features for barcode if none selected
-    if (selectedFeatures.value.length === 0) {
-      const top = data.features
-        .filter(f => f.selected)
-        .sort((a, b) => (a.significance || 1) - (b.significance || 1))
-        .slice(0, 20)
-        .map(f => f.name)
-      if (top.length > 0) {
-        selectedFeatures.value = top
-        autoBarcode.value = true
-      }
-    }
+    // Set topN to min(selected_count, 50)
+    topN.value = Math.min(data.selected_count || 50, 50)
   } catch (e) {
     console.error('Failed to load feature stats:', e)
   }
 }
 
 async function loadAbundance() {
-  if (selectedFeatures.value.length === 0 || !hasTrainData.value) return
+  const feats = plotFeatureNames.value
+  if (feats.length === 0 || !hasTrainData.value) return
   try {
     const { data } = await axios.get(`/api/data-explore/${projectId.value}/feature-abundance`, {
-      params: { features: selectedFeatures.value.join(',') },
+      params: { features: feats.join(',') },
     })
     abundanceData.value = data.features || []
   } catch (e) {
@@ -395,7 +432,7 @@ async function loadAbundance() {
 }
 
 async function loadBarcodeData() {
-  const feats = selectedFeatures.value
+  const feats = plotFeatureNames.value
   if (feats.length === 0 || !hasTrainData.value) return
   try {
     const { data } = await axios.get(`/api/data-explore/${projectId.value}/barcode-data`, {
@@ -414,6 +451,8 @@ async function loadAll() {
     await loadSummary()
     await loadFeatureStats()
     await Promise.all([loadAbundance(), loadBarcodeData()])
+    await nextTick()
+    renderCurrentViz()
   } finally {
     loading.value = false
   }
@@ -423,12 +462,10 @@ async function loadAll() {
 let _refreshTimer = null
 function debouncedRefresh() {
   clearTimeout(_refreshTimer)
-  _refreshTimer = setTimeout(() => {
-    loadFeatureStats().then(() => {
-      renderCurrentViz()
-      loadAbundance()
-      loadBarcodeData()
-    })
+  _refreshTimer = setTimeout(async () => {
+    await loadFeatureStats()
+    await Promise.all([loadAbundance(), loadBarcodeData()])
+    renderCurrentViz()
   }, 500)
 }
 
@@ -438,48 +475,62 @@ async function renderPrevalenceChart() {
   if (!prevalenceChartEl.value || !featureStats.value) return
   const c = chartColors()
 
-  const features = featureStats.value.features
-    .filter(f => f.selected)
-    .sort((a, b) => (a.significance || 1) - (b.significance || 1))
-    .slice(0, 40)
+  const names = plotFeatureNames.value
+  if (names.length === 0) return
+  const featureMap = Object.fromEntries(featureStats.value.features.map(f => [f.name, f]))
+  const features = names.map(n => featureMap[n]).filter(Boolean)
 
-  if (features.length === 0) return
+  const nFeat = features.length
+  const barH = 0.35  // half-height of overall bar
 
-  const names = features.map(f => f.name)
+  // ggplot-like: numeric y-axis with shapes for equal spacing
+  const shapes = []
+  const annotations = []
 
+  for (let i = 0; i < nFeat; i++) {
+    const f = features[i]
+    // Overall prevalence bar (faint background)
+    shapes.push({
+      type: 'rect', x0: 0, x1: f.prevalence || 0,
+      y0: i - barH, y1: i + barH,
+      fillcolor: c.dimmed + '55', line: { width: 0 },
+    })
+    // Significance stars
+    if (f.significance != null && f.significance < 0.05) {
+      annotations.push({
+        x: Math.max(f.prevalence_0 || 0, f.prevalence_1 || 0, f.prevalence || 0) + 3,
+        y: i,
+        text: f.significance < 0.001 ? '***' : f.significance < 0.01 ? '**' : '*',
+        showarrow: false,
+        font: { color: c.danger, size: 12, family: 'monospace' },
+      })
+    }
+  }
+
+  // Class-specific markers as scatter traces
   const traces = [
     {
-      y: names, x: features.map(f => f.prevalence),
-      type: 'bar', orientation: 'h', name: 'Overall',
-      marker: { color: c.dimmed, opacity: 0.4 },
-    },
-    {
-      y: names, x: features.map(f => f.prevalence_0),
       type: 'scatter', mode: 'markers', name: 'Class 0',
+      x: features.map(f => f.prevalence_0),
+      y: features.map((_, i) => i),
       marker: { color: c.class0, size: 8, symbol: 'circle' },
     },
     {
-      y: names, x: features.map(f => f.prevalence_1),
       type: 'scatter', mode: 'markers', name: 'Class 1',
+      x: features.map(f => f.prevalence_1),
+      y: features.map((_, i) => i),
       marker: { color: c.class1, size: 8, symbol: 'diamond' },
     },
   ]
 
-  const annotations = features
-    .filter(f => f.significance != null && f.significance < 0.05)
-    .map(f => ({
-      x: Math.max(f.prevalence_0 || 0, f.prevalence_1 || 0, f.prevalence || 0) + 3,
-      y: f.name,
-      text: f.significance < 0.001 ? '***' : f.significance < 0.01 ? '**' : '*',
-      showarrow: false,
-      font: { color: c.danger, size: 12, family: 'monospace' },
-    }))
-
   Plotly.newPlot(prevalenceChartEl.value, traces, chartLayout({
     xaxis: { title: { text: 'Prevalence (%)', font: { color: c.text } }, range: [0, 105], gridcolor: c.grid, color: c.text },
-    yaxis: { automargin: true, autorange: 'reversed', color: c.text },
-    height: Math.max(400, features.length * 18),
-    barmode: 'overlay',
+    yaxis: {
+      tickvals: features.map((_, i) => i), ticktext: features.map(f => f.name),
+      range: [nFeat - 0.5, -0.5], automargin: true, color: c.text, fixedrange: true,
+    },
+    height: Math.max(400, nFeat * 22),
+    shapes,
     annotations,
     legend: { orientation: 'h', y: 1.05, font: { color: c.text } },
     margin: { t: 30, b: 50, l: 120, r: 40 },
@@ -508,8 +559,8 @@ async function renderAbundanceChart() {
   const clsFills = classKeys.map(k => k === '0' ? c.class0 + '44' : c.class1 + '44')
 
   // ggplot-like layout: numeric y for equal spacing, grouped boxes per class
-  const boxH = 0.3 / nCls          // half-height of one box
-  const offsets = nCls === 2 ? [-0.18, 0.18] : [0]
+  const boxH = 0.18 / nCls         // half-height of one box (thin)
+  const offsets = nCls === 2 ? [-0.14, 0.14] : [0]
 
   const shapes = []
   const traces = []
@@ -616,7 +667,7 @@ async function renderAbundanceChart() {
       tickvals: features.map((_, i) => i), ticktext: features.map(f => f.name),
       range: [nFeat - 0.5, -0.5], automargin: true, color: c.text, fixedrange: true,
     },
-    height: Math.max(400, nFeat * 40),
+    height: Math.max(400, nFeat * 22),
     shapes,
     annotations,
     legend: { orientation: 'h', y: 1.05, font: { color: c.text } },
@@ -641,14 +692,12 @@ async function renderBarcodeChart() {
     return lv
   }))
 
-  // Floor value for zeros → maps to white at position 0
   if (!isFinite(lo)) lo = -10
   if (!isFinite(hi)) hi = 0
   const floor = lo - 1
   const z = zLog.map(row => row.map(v => v === null ? floor : v))
 
-  // R palette: white → deepskyblue → blue → green3 → yellow → orange → red → orangered2 → darkred
-  // White band covers floor→lo (zero values), data colors cover lo→hi
+  // Color scale
   const span = hi - floor
   const whiteEnd = Math.max(0.01, (lo - floor) / span)
   const dataColors = ['#00bfff', '#0000ff', '#00cd00', '#ffff00', '#ffa500', '#ff0000', '#ee4000', '#8b0000']
@@ -657,59 +706,111 @@ async function renderBarcodeChart() {
     colorscale.push([whiteEnd + (1 - whiteEnd) * (i + 1) / dataColors.length, dataColors[i]])
   }
 
-  const shapes = d.class_boundaries.map(idx => ({
-    type: 'line',
-    x0: idx - 0.5, x1: idx - 0.5,
-    y0: -0.5, y1: d.feature_names.length - 0.5,
-    line: { color: c.danger, width: 2, dash: 'dash' },
-  }))
-
-  // Class label annotations below
-  const labelAnnotations = []
-  const boundaries = [0, ...d.class_boundaries, d.sample_names.length]
-  for (let i = 0; i < d.class_labels.length; i++) {
-    labelAnnotations.push({
-      x: (boundaries[i] + boundaries[i + 1]) / 2,
-      y: -0.12, yref: 'paper',
-      text: `Class ${d.class_labels[i]}`,
-      showarrow: false,
-      font: { color: c.text, size: 11 },
-    })
-  }
-
-  // Build tick values for the colorbar in original scale
+  // Colorbar ticks in original scale
   const nTicks = 5
-  const tickVals = []
-  const tickTexts = []
+  const tickVals = [], tickTexts = []
   for (let i = 0; i <= nTicks; i++) {
     const lv = lo + (hi - lo) * i / nTicks
     tickVals.push(lv)
     tickTexts.push(Math.pow(4, lv).toExponential(1))
   }
 
-  Plotly.newPlot(barcodeChartEl.value, [{
-    z, x: d.sample_names, y: d.feature_names,
-    type: 'heatmap',
-    colorscale,
-    zmin: floor, zmax: hi,
-    colorbar: {
-      title: { text: 'Value (log\u2084)', font: { color: c.text } },
-      tickvals: tickVals, ticktext: tickTexts,
-      tickfont: { color: c.text },
-    },
-    hovertemplate: d.matrix.map((row, ri) =>
-      row.map((v, ci) =>
-        `Feature: ${d.feature_names[ri]}<br>Sample: ${d.sample_names[ci]}<br>Value: ${v.toExponential(4)}<extra></extra>`
-      )
-    ),
-  }], chartLayout({
-    xaxis: { showticklabels: false, title: { text: 'Samples (ordered by class)', font: { color: c.text } }, gridcolor: c.grid, color: c.text },
-    yaxis: { automargin: true, color: c.text },
-    height: Math.max(300, d.feature_names.length * 20 + 100),
-    margin: { t: 20, b: 60, l: 120, r: 20 },
-    shapes,
-    annotations: labelAnnotations,
-  }), { responsive: true, displayModeBar: true })
+  // Split data by class for faceted panels
+  const boundaries = [0, ...d.class_boundaries, d.sample_names.length]
+  const nCls = d.class_labels.length
+  const traces = []
+  const annotations = []
+
+  // Compute facet x-axis domains with small gap between panels
+  const gap = 0.03
+  const totalSpace = 1 - gap * (nCls - 1) - 0.06 // reserve space for colorbar
+  const classSizes = []
+  for (let ci = 0; ci < nCls; ci++) {
+    classSizes.push(boundaries[ci + 1] - boundaries[ci])
+  }
+  const totalSamples = classSizes.reduce((a, b) => a + b, 0)
+
+  let xPos = 0
+  const domains = []
+  for (let ci = 0; ci < nCls; ci++) {
+    const w = totalSpace * (classSizes[ci] / totalSamples)
+    domains.push([xPos, xPos + w])
+    xPos += w + gap
+  }
+
+  for (let ci = 0; ci < nCls; ci++) {
+    const start = boundaries[ci]
+    const end = boundaries[ci + 1]
+    const classSamples = d.sample_names.slice(start, end)
+    const classZ = z.map(row => row.slice(start, end))
+    const classRaw = d.matrix.map(row => row.slice(start, end))
+
+    const xRef = ci === 0 ? 'x' : `x${ci + 1}`
+    const yRef = ci === 0 ? 'y' : `y${ci + 1}`
+
+    traces.push({
+      z: classZ,
+      x: classSamples,
+      y: d.feature_names,
+      type: 'heatmap',
+      colorscale,
+      zmin: floor, zmax: hi,
+      xaxis: xRef,
+      yaxis: yRef,
+      showscale: ci === nCls - 1,
+      colorbar: ci === nCls - 1 ? {
+        title: { text: 'Value (log\u2084)', font: { color: c.text, size: 10 } },
+        tickvals: tickVals, ticktext: tickTexts,
+        tickfont: { color: c.text, size: 9 },
+        len: 0.8, thickness: 12,
+      } : undefined,
+      hovertemplate: classRaw.map((row, ri) =>
+        row.map((v, si) =>
+          `Feature: ${d.feature_names[ri]}<br>Sample: ${classSamples[si]}<br>Value: ${v.toExponential(4)}<extra></extra>`
+        )
+      ),
+    })
+
+    // Facet title annotation (class label above each panel)
+    annotations.push({
+      text: `<b>Class ${d.class_labels[ci]}</b> (n=${classSizes[ci]})`,
+      xref: 'paper', yref: 'paper',
+      x: (domains[ci][0] + domains[ci][1]) / 2,
+      y: 1.04,
+      showarrow: false,
+      font: { color: c.text, size: 12 },
+    })
+  }
+
+  // Build layout with multiple x/y axes
+  const layout = {
+    height: Math.max(300, d.feature_names.length * 20 + 80),
+    margin: { t: 40, b: 30, l: 120, r: 60 },
+    paper_bgcolor: c.paper,
+    plot_bgcolor: c.paper,
+    font: { family: 'system-ui, sans-serif', size: 12, color: c.text },
+    annotations,
+  }
+
+  for (let ci = 0; ci < nCls; ci++) {
+    const xKey = ci === 0 ? 'xaxis' : `xaxis${ci + 1}`
+    const yKey = ci === 0 ? 'yaxis' : `yaxis${ci + 1}`
+
+    layout[xKey] = {
+      domain: domains[ci],
+      showticklabels: false,
+      color: c.text,
+      gridcolor: c.grid,
+    }
+    layout[yKey] = {
+      anchor: ci === 0 ? 'x' : `x${ci + 1}`,
+      automargin: true,
+      color: c.text,
+      showticklabels: ci === 0, // only show feature names on leftmost panel
+    }
+  }
+
+  Plotly.newPlot(barcodeChartEl.value, traces, layout, { responsive: true, displayModeBar: true })
 }
 
 async function renderVolcanoChart() {
@@ -776,22 +877,20 @@ function renderCurrentViz() {
 // Watchers for chart rendering
 watch(vizTab, async () => {
   await nextTick()
-  if (vizTab.value === 'prevalence') renderPrevalenceChart()
-  else if (vizTab.value === 'abundance') { await loadAbundance(); renderAbundanceChart() }
-  else if (vizTab.value === 'barcode') { await loadBarcodeData(); renderBarcodeChart() }
-  else if (vizTab.value === 'volcano') renderVolcanoChart()
+  renderCurrentViz()
 })
 
 watch(() => themeStore.isDark, () => renderCurrentViz())
 
-watch(selectedFeatures, async () => {
-  autoBarcode.value = false
-  if (selectedFeatures.value.length > 0) {
+// When topN changes, reload abundance/barcode data and re-render all
+let _topNTimer = null
+watch(topN, () => {
+  clearTimeout(_topNTimer)
+  _topNTimer = setTimeout(async () => {
     await Promise.all([loadAbundance(), loadBarcodeData()])
-    if (vizTab.value === 'abundance') renderAbundanceChart()
-    if (vizTab.value === 'barcode') renderBarcodeChart()
-  }
-}, { deep: true })
+    renderCurrentViz()
+  }, 300)
+})
 
 // Watch for dataset changes (after upload/assign)
 watch(hasTrainData, (val) => { if (val) loadAll() })
@@ -1064,11 +1163,56 @@ input[type="checkbox"] {
 }
 .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Class label inputs */
+.class-labels-row {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.class-label-chip {
+  display: flex;
+  align-items: center;
+}
+.class-label-input {
+  width: 80px;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-body);
+}
+
+/* Viz header with tabs + top-N control */
+.viz-header {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.topn-control {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  margin-left: auto;
+  margin-bottom: 1px;
+}
+
+.topn-input {
+  width: 52px;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
 /* Viz tabs */
 .viz-tabs {
   display: flex;
   gap: 0;
-  margin-bottom: 1rem;
   border-bottom: 1px solid var(--border-light);
 }
 

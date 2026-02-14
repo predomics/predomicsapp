@@ -21,19 +21,25 @@
       <router-link :to="`/project/${projectId}/results`" class="tab" active-class="active">Results</router-link>
     </nav>
 
-    <div class="dashboard-body" :class="{ 'with-console': store.showConsole && store.activeJobId }">
+    <div class="dashboard-body">
       <div class="main-panel">
         <router-view />
       </div>
-      <aside v-if="store.showConsole && store.activeJobId" class="console-aside">
+      <div v-if="store.activeJobId" class="console-bottom" :class="{ minimized: !store.showConsole }">
+        <div v-if="!store.showConsole" class="console-minimized-bar" @click="store.showConsole = true">
+          <span>Console</span>
+          <span class="status-badge-mini" :class="miniStatus">{{ miniStatus }}</span>
+          <span class="expand-icon">&#9650;</span>
+        </div>
         <ConsolePanel
+          v-else
           :project-id="projectId"
           :job-id="store.activeJobId"
-          @close="store.closeConsole()"
+          @close="store.showConsole = false"
           @completed="onJobCompleted"
           @failed="onJobFailed"
         />
-      </aside>
+      </div>
     </div>
   </div>
   <div v-else class="loading">Loading project...</div>
@@ -52,6 +58,10 @@ const showShare = ref(false)
 
 const projectId = computed(() => route.params.id)
 const project = computed(() => store.current)
+const miniStatus = computed(() => {
+  const job = store.current?.jobs?.find(j => j.job_id === store.activeJobId)
+  return job?.status || 'running'
+})
 
 async function loadProject() {
   if (projectId.value) {
@@ -140,33 +150,64 @@ onMounted(loadProject)
 }
 
 .dashboard-body {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
+  display: flex;
+  flex-direction: column;
   min-height: calc(100vh - 180px);
 }
 
-.dashboard-body.with-console {
-  grid-template-columns: 1fr 600px;
-}
-
 .main-panel {
+  flex: 1;
   min-width: 0;
-  padding-right: 0;
 }
 
-.dashboard-body.with-console .main-panel {
-  padding-right: 1.5rem;
-}
-
-.console-aside {
-  border-left: 1px solid var(--border-light);
-  border-radius: 0 8px 8px 0;
+.console-bottom {
+  border-top: 1px solid var(--border-light);
+  border-radius: 8px 8px 0 0;
+  height: 250px;
+  margin-top: 1rem;
   overflow: hidden;
-  height: calc(100vh - 180px);
   position: sticky;
-  top: 80px;
+  bottom: 0;
+  background: var(--console-bg);
+  z-index: 10;
 }
+
+.console-bottom.minimized {
+  height: auto;
+}
+
+.console-minimized-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  transition: background 0.15s;
+}
+
+.console-minimized-bar:hover {
+  background: var(--bg-hover);
+}
+
+.console-minimized-bar .expand-icon {
+  margin-left: auto;
+  font-size: 0.65rem;
+}
+
+.status-badge-mini {
+  padding: 0.1rem 0.4rem;
+  border-radius: 8px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge-mini.pending { background: var(--warning-bg); color: var(--warning-dark); }
+.status-badge-mini.running { background: var(--info-bg); color: var(--info); }
+.status-badge-mini.completed { background: var(--success-bg); color: var(--success-dark); }
+.status-badge-mini.failed { background: var(--danger-bg); color: var(--danger-dark); }
 
 .loading {
   text-align: center;

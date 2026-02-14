@@ -194,10 +194,19 @@ def main():
         "generation_tracking": generation_tracking,
     }
 
+    # Save results first — display_results() may panic in Rust and kill the process
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
 
     print(f"\n[worker] Results saved to {results_path}")
+
+    # Print full experiment results (population, importance, voting/jury)
+    # PanicException inherits from BaseException, not Exception
+    try:
+        display_output = experiment.display_results()
+        print(display_output)
+    except BaseException as e:
+        print(f"[worker] Warning: display_results() failed: {e}")
 
 
 if __name__ == "__main__":
