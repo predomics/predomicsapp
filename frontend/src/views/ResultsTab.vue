@@ -367,10 +367,15 @@
           <div ref="voteMatrixEl" class="plotly-chart plotly-chart-tall"></div>
         </section>
 
-        <!-- Per-sample predictions visual -->
+        <!-- Per-sample predictions visual (paginated, ordered by error rate) -->
         <section class="section" v-if="juryData.sample_predictions?.length > 0">
-          <h3>Sample Predictions ({{ juryData.sample_predictions.length }} samples)</h3>
+          <h3>Sample Predictions ({{ juryData.sample_predictions.length }} samples — sorted by error rate)</h3>
           <div ref="samplePredictionsEl" class="plotly-chart"></div>
+          <div class="pagination" v-if="juryData.sample_predictions.length > samplePredPageSize">
+            <button @click="changeSamplePredPage(samplePredPage - 1)" :disabled="samplePredPage === 0">&laquo; Prev</button>
+            <span>Page {{ samplePredPage + 1 }} / {{ Math.ceil(juryData.sample_predictions.length / samplePredPageSize) }}</span>
+            <button @click="changeSamplePredPage(samplePredPage + 1)" :disabled="(samplePredPage + 1) * samplePredPageSize >= juryData.sample_predictions.length">Next &raquo;</button>
+          </div>
         </section>
 
         <!-- FBM info -->
@@ -522,6 +527,8 @@ const juryConcordanceEl = ref(null)
 const juryConfusionTrainEl = ref(null)
 const juryConfusionTestEl = ref(null)
 const samplePredictionsEl = ref(null)
+const samplePredPage = ref(0)
+const samplePredPageSize = 20
 const voteMatrixEl = ref(null)
 // Comparative
 const comparisonBarEl = ref(null)
@@ -1273,38 +1280,37 @@ async function renderConfusionMatrix(el, cmData, title) {
   Plotly.newPlot(el, traces, layout, { responsive: true, displayModeBar: false })
 }
 
+function changeSamplePredPage(page) {
+  samplePredPage.value = page
+  renderSamplePredictions()
+}
+
 async function renderSamplePredictions() {
   await nextTick()
   if (!samplePredictionsEl.value || !juryData.value?.sample_predictions) return
 
   const c = chartColors()
-  const preds = [...juryData.value.sample_predictions]
+  const allPreds = [...juryData.value.sample_predictions]
 
-  // Sort: by real class, then errors first, then by consistency ascending
-  preds.sort((a, b) => {
-    if (a.real !== b.real) return a.real - b.real
-    if (a.correct !== b.correct) return a.correct ? 1 : -1
+  // Sort: rejected first, then errors, then correct — within each group by ascending consistency
+  allPreds.sort((a, b) => {
+    const aRejected = a.predicted === -1 || a.predicted === 2
+    const bRejected = b.predicted === -1 || b.predicted === 2
+    const aError = !a.correct && !aRejected
+    const bError = !b.correct && !bRejected
+    // Priority: rejected > error > correct
+    const aPriority = aRejected ? 0 : aError ? 1 : 2
+    const bPriority = bRejected ? 0 : bError ? 1 : 2
+    if (aPriority !== bPriority) return aPriority - bPriority
+    // Within same group: lowest consistency first (worst first)
     return a.consistency - b.consistency
   })
 
-  const sampleNames = preds.map(s => s.name)
-  const consistencies = preds.map(s => s.consistency)
+  // Paginate
+  const start = samplePredPage.value * samplePredPageSize
+  const preds = allPreds.slice(start, start + samplePredPageSize)
 
-  // Build color and symbol arrays per sample
-  const colors = preds.map(s => {
-    if (s.predicted === -1 || s.predicted === 2) return 'rgba(255, 215, 0, 0.85)' // rejected – gold
-    if (!s.correct) return c.class1Light                                           // error – red
-    return s.real === 1 ? c.class1Light : c.class0Light                            // correct – colored by class
-  })
-  const symbols = preds.map(s => {
-    if (s.predicted === -1 || s.predicted === 2) return 'diamond'
-    if (!s.correct) return 'x'
-    return 'circle'
-  })
-  const borders = preds.map(s => {
-    if (!s.correct && s.predicted !== -1 && s.predicted !== 2) return c.class1Light
-    return 'rgba(0,0,0,0)'
-  })
+  const sampleNames = preds.map(s => s.name)
 
   // One trace per group for a proper legend
   const groups = [
@@ -1333,15 +1339,6 @@ async function renderSamplePredictions() {
     }
   }).filter(Boolean)
 
-  // Add class separator shape
-  const class0Count = preds.filter(s => s.real === 0).length
-  const shapes = class0Count > 0 && class0Count < preds.length ? [{
-    type: 'line', xref: 'paper', yref: 'y',
-    x0: 0, x1: 1,
-    y0: class0Count - 0.5, y1: class0Count - 0.5,
-    line: { color: c.dimmed, width: 1, dash: 'dot' },
-  }] : []
-
   const chartHeight = Math.max(200, preds.length * 22 + 60)
 
   Plotly.newPlot(samplePredictionsEl.value, traces, chartLayout({
@@ -1357,7 +1354,6 @@ async function renderSamplePredictions() {
     height: chartHeight,
     margin: { t: 10, b: 50, l: 120, r: 20 },
     legend: { orientation: 'h', y: 1.05, font: { color: c.text, size: 11 } },
-    shapes,
   }), { responsive: true, displayModeBar: false })
 }
 
@@ -1725,6 +1721,7 @@ async function loadJobResults() {
       selectedDataTypes.value = []
       fbmEnabled.value = false
       popPage.value = 0
+      samplePredPage.value = 0
     } catch {
       fullResults.value = null
       population.value = []

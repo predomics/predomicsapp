@@ -32,6 +32,68 @@ def _compute_auc(y_true, scores):
     return float(auc)
 
 
+def _build_sample_predictions(sample_names, real_classes, votes, predicted_classes):
+    """Build per-sample prediction dicts from vote matrix data.
+
+    Consistency matches gpredomics: max_vote_count / total_votes * 100
+    (includes all votes: 0, 1, and 2=abstain).
+    100% = all experts agree, lower = more disagreement.
+    """
+    from collections import Counter
+    predictions = []
+    for i, name in enumerate(sample_names):
+        real = int(real_classes[i])
+        pred = int(predicted_classes[i]) if i < len(predicted_classes) else 2
+        votes_row = [int(v) for v in votes[i]]
+        total = len(votes_row)
+        if total > 0:
+            counts = Counter(votes_row)
+            max_count = max(counts.values())
+            consistency = max_count / total * 100
+        else:
+            consistency = 0
+        vote_str = "".join(str(v) for v in votes_row)
+        predictions.append({
+            "name": name,
+            "real": real,
+            "votes": vote_str,
+            "predicted": pred,
+            "correct": real == pred,
+            "consistency": round(consistency, 1),
+        })
+    return predictions
+
+
+def _predict_from_votes(votes, weights=None):
+    """Compute predicted classes from vote matrix using weighted majority vote.
+
+    Matches gpredomics Jury.compute_majority_threshold_vote (without threshold_window).
+    votes: list of lists — votes[sample][expert], values 0/1/2 (2=abstain)
+    weights: optional list of expert weights (same length as experts)
+    Returns: list of predicted classes (0, 1, or 2 for tie/rejection)
+    """
+    predicted = []
+    for row in votes:
+        weighted_pos = 0.0
+        weighted_neg = 0.0
+        for j, v in enumerate(row):
+            v = int(v)
+            if v == 2:
+                continue  # abstain
+            w = float(weights[j]) if weights and j < len(weights) else 1.0
+            if v == 1:
+                weighted_pos += w
+            elif v == 0:
+                weighted_neg += w
+        if weighted_pos > weighted_neg:
+            predicted.append(1)
+        elif weighted_neg > weighted_pos:
+            predicted.append(0)
+        else:
+            predicted.append(2)  # tie → rejection
+    return predicted
+
+
 def _evaluate_test_per_generation(experiment, param_path):
     """Evaluate each generation's best model on test data.
 
@@ -200,25 +262,30 @@ def _parse_jury_from_display(display_text):
         }
 
     # Parse per-sample predictions (including vote strings for heatmap)
+    # Matches: name | real | votes → predicted | ✓/✗/~ | consistency%
+    # Rejected samples use ~ and predicted=2, votes may contain 2
     samples = []
     vote_strings = []
     for m in re.finditer(
-        r'^\s*(\S+)\s*\|\s*(\d)\s*\|\s*([01]+)\s*.*?→\s*(\d)\s*\|\s*(✓|✗)\s*\|\s*([\d.]+)%',
+        r'^\s*(\S+)\s*\|\s*(\d)\s*\|\s*([012]+)\s*.*?→\s*(-?\d+)\s*\|\s*(✓|✗|~)\s*\|\s*([\d.]+)%',
         text, re.MULTILINE
     ):
         vote_str = m.group(3)
+        predicted = int(m.group(4))
+        result_sym = m.group(5)
+        correct = result_sym == "✓"
         samples.append({
             "name": m.group(1),
             "real": int(m.group(2)),
             "votes": vote_str,
-            "predicted": int(m.group(4)),
-            "correct": m.group(5) == "✓",
+            "predicted": predicted,
+            "correct": correct,
             "consistency": float(m.group(6)),
         })
         vote_strings.append(vote_str)
     if samples:
         jury["sample_predictions"] = samples
-        # Build vote matrix: rows=samples, columns=experts, values=0/1
+        # Build vote matrix: rows=samples, columns=experts, values=0/1/2
         if vote_strings and all(len(v) == len(vote_strings[0]) for v in vote_strings):
             jury["vote_matrix"] = {
                 "sample_names": [s["name"] for s in samples],
@@ -382,31 +449,16 @@ def main():
                 }
 
                 # Build per-sample predictions from vote matrix
-                sample_predictions = []
-                predicted = jury_metrics.get("predicted_classes", [])
-                for i, name in enumerate(vm["sample_names"]):
-                    real = int(vm["real_classes"][i])
-                    pred = int(predicted[i]) if i < len(predicted) else 2
-                    votes_row = [int(v) for v in vm["votes"][i]]
-                    n_pos = sum(1 for v in votes_row if v == 1)
-                    n_total = sum(1 for v in votes_row if v != 2)
-                    consistency = (n_pos / n_total * 100) if n_total > 0 else 0
-                    # Convert vote row to string
-                    vote_str = "".join(str(v) for v in votes_row if v != 2)
-                    sample_predictions.append({
-                        "name": name,
-                        "real": real,
-                        "votes": vote_str,
-                        "predicted": pred,
-                        "correct": real == pred,
-                        "consistency": round(consistency, 1),
-                    })
+                sample_predictions = _build_sample_predictions(
+                    vm["sample_names"], vm["real_classes"], vm["votes"],
+                    jury_metrics.get("predicted_classes", [])
+                )
                 jury_data["sample_predictions"] = sample_predictions
                 print(f"[worker] Extracted vote matrix: {vm['n_experts']} experts × {len(vm['sample_names'])} samples")
             except Exception as e:
                 print(f"[worker] Warning: vote matrix extraction failed: {e}")
 
-            # Get test vote matrix if available
+            # Get test vote matrix if available — build test sample predictions
             try:
                 vm_test = dict(experiment.get_vote_matrix_test())
                 jury_data["vote_matrix_test"] = {
@@ -416,9 +468,19 @@ def main():
                     "n_experts": int(vm_test["n_experts"]),
                     "expert_aucs": [float(a) for a in vm_test["expert_aucs"]],
                 }
-                # Compute test metrics via jury predict
+                # Build test sample predictions from test vote matrix
+                # Use weighted majority vote (same as gpredomics Jury.predict)
+                weights = jury_metrics.get("weights", None)
+                test_predicted = _predict_from_votes(vm_test["votes"], weights)
+                test_preds = _build_sample_predictions(
+                    vm_test["sample_names"], vm_test["real_classes"],
+                    vm_test["votes"], test_predicted
+                )
+                jury_data["sample_predictions_test"] = test_preds
+                # Use test predictions as primary sample_predictions (errors happen here)
+                jury_data["sample_predictions"] = test_preds
                 jury_data["test"] = {}
-                print(f"[worker] Extracted test vote matrix: {vm_test['n_experts']} experts × {len(vm_test['sample_names'])} samples")
+                print(f"[worker] Extracted test vote matrix: {vm_test['n_experts']} experts × {len(vm_test['sample_names'])} samples, {sum(1 for p in test_preds if not p['correct'])} errors")
             except Exception:
                 pass  # No test data available
 
@@ -452,6 +514,9 @@ def main():
                 results["jury"]["confusion_test"] = parsed["confusion_test"]
             if parsed and "fbm" in parsed:
                 results["jury"]["fbm"] = parsed["fbm"]
+            # Use text-parsed sample_predictions as fallback if API didn't produce any
+            if parsed and "sample_predictions" in parsed and "sample_predictions" not in results["jury"]:
+                results["jury"]["sample_predictions"] = parsed["sample_predictions"]
 
         importance_data = _parse_importance_from_display(display_output)
         if importance_data:
