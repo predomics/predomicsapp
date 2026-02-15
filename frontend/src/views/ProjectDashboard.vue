@@ -27,8 +27,18 @@
       </div>
       <div v-if="store.activeJobId" class="console-bottom" :class="{ minimized: !store.showConsole }">
         <div v-if="!store.showConsole" class="console-minimized-bar" @click="store.showConsole = true">
+          <ProgressCircle
+            v-if="jobProgress.pct > 0 && jobProgress.status === 'running'"
+            :pct="jobProgress.pct"
+            :size="28"
+            :stroke-width="3"
+          />
           <span>Console</span>
           <span class="status-badge-mini" :class="miniStatus">{{ miniStatus }}</span>
+          <template v-if="jobProgress.status === 'running' && jobProgress.generation > 0">
+            <span class="mini-gen">Gen {{ jobProgress.generation }}<template v-if="jobProgress.maxGen"> / {{ jobProgress.maxGen }}</template></span>
+            <span class="mini-eta" v-if="jobProgress.eta">{{ jobProgress.eta }}</span>
+          </template>
           <span class="expand-icon">&#9650;</span>
         </div>
         <ConsolePanel
@@ -38,6 +48,7 @@
           @close="store.showConsole = false"
           @completed="onJobCompleted"
           @failed="onJobFailed"
+          @progress="onProgress"
         />
       </div>
     </div>
@@ -46,17 +57,21 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { useProjectStore } from '../stores/project'
 import ConsolePanel from '../components/ConsolePanel.vue'
+import ProgressCircle from '../components/ProgressCircle.vue'
 import ShareModal from '../components/ShareModal.vue'
 import { requestPermission, notifyJobCompleted, notifyJobFailed } from '../utils/notify'
+import { useToast } from '../composables/useToast'
 
 const route = useRoute()
 const store = useProjectStore()
+const { addToast } = useToast()
 const showShare = ref(false)
+const jobProgress = reactive({ generation: 0, maxGen: 0, k: 0, language: '', pct: 0, eta: '', status: 'pending' })
 
 const projectId = computed(() => route.params.id)
 const project = computed(() => store.current)
@@ -73,22 +88,31 @@ async function loadProject() {
 
 async function onJobCompleted(jobId) {
   await loadProject()
-  // Send browser notification with AUC if available
+  // Send browser notification + in-app toast with AUC if available
   try {
     const { data } = await axios.get(`/api/analysis/${projectId.value}/jobs/${jobId}`)
+    const aucStr = data.best_auc != null ? ` — AUC ${Number(data.best_auc).toFixed(4)}` : ''
+    const kStr = data.best_k != null ? ` (k=${data.best_k})` : ''
+    addToast(`Job completed${aucStr}${kStr}`, 'success', 8000)
     notifyJobCompleted(project.value?.name || 'Project', {
       auc: data.best_auc,
       k: data.best_k,
       jobId,
     })
   } catch {
+    addToast('Job completed', 'success', 6000)
     notifyJobCompleted(project.value?.name || 'Project', { jobId })
   }
 }
 
 function onJobFailed(jobId) {
   loadProject()
+  addToast('Job failed — check console for details', 'error', 8000)
   notifyJobFailed(project.value?.name || 'Project', { jobId })
+}
+
+function onProgress(data) {
+  Object.assign(jobProgress, data)
 }
 
 watch(projectId, loadProject)
@@ -225,6 +249,17 @@ onMounted(() => {
 .status-badge-mini.running { background: var(--info-bg); color: var(--info); }
 .status-badge-mini.completed { background: var(--success-bg); color: var(--success-dark); }
 .status-badge-mini.failed { background: var(--danger-bg); color: var(--danger-dark); }
+
+.mini-gen {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #00BFFF;
+}
+.mini-eta {
+  font-size: 0.68rem;
+  color: #e5c07b;
+  font-style: italic;
+}
 
 .loading {
   text-align: center;

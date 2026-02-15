@@ -111,6 +111,7 @@ async def run_analysis(
 
     await audit.log_action(db, user, audit.ACTION_JOB_LAUNCH, "job", job.id,
                            details={"project_id": project_id})
+    await db.commit()  # Ensure all writes are flushed before background task starts
 
     # Run in background thread
     background_tasks.add_task(_run_job, job.id, project_id, param_path, user.id)

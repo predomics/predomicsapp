@@ -2203,6 +2203,25 @@ watch(completedJobs, (cj) => {
   }
 }, { immediate: true })
 
+// Auto-refresh job list when project store data changes (e.g. job completed)
+let _lastJobCount = -1
+watch(() => store.current?.jobs?.length, (newLen) => {
+  if (newLen != null && _lastJobCount >= 0 && newLen !== _lastJobCount) {
+    loadJobList()
+  }
+  if (newLen != null) _lastJobCount = newLen
+})
+
+// Auto-reload selected job results when its status changes to completed
+watch(() => {
+  const activeJob = store.current?.jobs?.find(j => j.job_id === selectedJobId.value)
+  return activeJob?.status
+}, (newStatus, oldStatus) => {
+  if (newStatus === 'completed' && oldStatus && oldStatus !== 'completed') {
+    loadJobResults()
+  }
+})
+
 onMounted(loadJobList)
 </script>
 

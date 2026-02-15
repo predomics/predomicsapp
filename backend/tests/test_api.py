@@ -46,7 +46,12 @@ async def db_session():
 async def client(db_session):
     """HTTP client with overridden DB dependency."""
     async def _override_db():
-        yield db_session
+        try:
+            yield db_session
+            await db_session.commit()
+        except Exception:
+            await db_session.rollback()
+            raise
 
     app.dependency_overrides[get_db] = _override_db
     transport = ASGITransport(app=app)
@@ -1783,15 +1788,14 @@ class TestAnalysisDeep:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_get_job_status_returns_summary(self, auth_client):
+    async def test_get_job_status_returns_summary(self, auth_client, db_session):
         """Test get job status for a completed job returns summary fields."""
-        pid, x_fid, y_fid = await _create_project_with_datasets(auth_client)
-        job_id = await _run_mock_analysis(auth_client, pid, x_fid, y_fid)
+        pid, job_id = await _create_completed_job(auth_client, db_session)
         resp = await auth_client.get(f"/api/analysis/{pid}/jobs/{job_id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["job_id"] == job_id
-        assert data["status"] in ("completed", "pending")
+        assert data["status"] == "completed"
         assert "config_hash" in data
         assert "config_summary" in data
 
@@ -1840,10 +1844,9 @@ class TestAnalysisDeep:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_get_job_detail_returns_features(self, auth_client):
+    async def test_get_job_detail_returns_features(self, auth_client, db_session):
         """Test that job detail returns feature names and best individual."""
-        pid, x_fid, y_fid = await _create_project_with_datasets(auth_client)
-        job_id = await _run_mock_analysis(auth_client, pid, x_fid, y_fid)
+        pid, job_id = await _create_completed_job(auth_client, db_session)
         resp = await auth_client.get(f"/api/analysis/{pid}/jobs/{job_id}/detail")
         assert resp.status_code == 200
         data = resp.json()

@@ -8,9 +8,10 @@
           <span class="progress-gen">Gen {{ progress.generation }}<template v-if="progress.maxGen"> / {{ progress.maxGen }}</template></span>
           <span class="progress-k" v-if="progress.k">k={{ progress.k }}</span>
           <span class="progress-lang" v-if="progress.language">{{ progress.language }}</span>
+          <span class="progress-eta" v-if="etaDisplay">{{ etaDisplay }}</span>
         </div>
         <div class="progress-bar-wrap" v-if="progress.maxGen">
-          <div class="progress-bar" :style="{ width: Math.min(100, progress.generation / progress.maxGen * 100) + '%' }"></div>
+          <div class="progress-bar" :style="{ width: progressPct + '%' }"></div>
         </div>
       </template>
       <button class="close-btn" @click="$emit('close')" title="Minimize console">&#9660;</button>
@@ -33,7 +34,7 @@ const props = defineProps({
   jobId: { type: String, required: true },
 })
 
-const emit = defineEmits(['close', 'completed', 'failed'])
+const emit = defineEmits(['close', 'completed', 'failed', 'progress'])
 
 const logContent = ref('')
 const jobStatus = ref('pending')
@@ -44,6 +45,7 @@ let ws = null
 let wsConnected = false
 
 let errorCount = 0
+let startTime = null  // When we first see generation > 0
 
 /* ── Progress parser ─────────────────────────────────── */
 // Parses generation lines like: "#42      | best: Ternary:Prevalence  \t0 ████ 1 [k=55, age=0]"
@@ -70,6 +72,8 @@ function parseProgress(text) {
     progress.value.generation = lastGen
     progress.value.k = lastK
     progress.value.language = lastLang
+    // Start time tracking on first generation seen
+    if (!startTime) startTime = Date.now()
   }
   // Try to extract maxGen from early lines (config echo)
   if (!progress.value.maxGen) {
@@ -80,6 +84,48 @@ function parseProgress(text) {
       if (em) { progress.value.maxGen = parseInt(em[1]); break }
     }
   }
+  // Emit progress data to parent for minimized bar display
+  emitProgress()
+}
+
+/* ── ETA calculation ─────────────────────────────────── */
+const progressPct = computed(() => {
+  if (!progress.value.maxGen || progress.value.generation <= 0) return 0
+  return Math.min(100, (progress.value.generation / progress.value.maxGen) * 100)
+})
+
+const etaDisplay = computed(() => {
+  if (!startTime || !progress.value.maxGen || progress.value.generation <= 0) return ''
+  const elapsed = (Date.now() - startTime) / 1000  // seconds
+  const pct = progress.value.generation / progress.value.maxGen
+  if (pct >= 1) return ''
+  const totalEstimate = elapsed / pct
+  const remaining = Math.max(0, totalEstimate - elapsed)
+  return formatEta(remaining)
+})
+
+function formatEta(seconds) {
+  if (seconds < 60) return `~${Math.ceil(seconds)}s left`
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60)
+    const s = Math.ceil(seconds % 60)
+    return `~${m}m ${s}s left`
+  }
+  const h = Math.floor(seconds / 3600)
+  const m = Math.ceil((seconds % 3600) / 60)
+  return `~${h}h ${m}m left`
+}
+
+function emitProgress() {
+  emit('progress', {
+    generation: progress.value.generation,
+    maxGen: progress.value.maxGen,
+    k: progress.value.k,
+    language: progress.value.language,
+    pct: progressPct.value,
+    eta: etaDisplay.value,
+    status: jobStatus.value,
+  })
 }
 
 /* ── ANSI → HTML converter ───────────────────────────── */
@@ -244,6 +290,7 @@ watch(() => props.jobId, (newId) => {
     logContent.value = ''
     jobStatus.value = 'pending'
     progress.value = { generation: 0, maxGen: 0, k: 0, language: '' }
+    startTime = null
     stopConsole()
     startConsole()
   }
@@ -322,6 +369,11 @@ onUnmounted(stopConsole)
 .progress-lang {
   color: var(--text-muted);
   font-size: 0.68rem;
+}
+.progress-eta {
+  color: #e5c07b;
+  font-size: 0.68rem;
+  font-style: italic;
 }
 .progress-bar-wrap {
   width: 80px;
