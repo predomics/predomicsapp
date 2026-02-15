@@ -72,15 +72,18 @@ Notify user when a long-running job completes or fails.
 - Enable/disable toggle in Profile → Preferences
 - Auto-close after 10 seconds, click-to-focus
 
-### 7. Batch Runs
-**Priority:** MEDIUM | **Effort:** Medium
+### 7. Batch Runs ✅
+**Priority:** MEDIUM | **Effort:** Medium | **Status:** Done
 
 Launch multiple analysis jobs with parameter sweeps.
 
-- Parameter grid builder: select ranges for k_min, k_max, population_size, etc.
-- Queue system: submit all combinations, track progress per job
-- Summary view: matrix of results across parameter combinations
-- Best configuration auto-detection
+- Batch Mode toggle in Parameters tab with sweep parameter grid builder
+- 7 sweepable params: seed, algo, language, data_type, population_size, max_epochs, k_max
+- Cartesian product of sweep values (max 50 jobs per batch)
+- `batch_id` column on jobs with migration v10
+- Backend: `POST /batch` creates N jobs, `GET /batches` returns batch summaries with best AUC
+- Jobs named `[Batch] param=value ...` for easy identification
+- Real-time job count preview and max-50 validation
 
 ### 8. Dataset Tagging & Search ✅
 **Priority:** MEDIUM | **Effort:** Low | **Status:** Done

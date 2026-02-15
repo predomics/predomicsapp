@@ -201,6 +201,12 @@ class ExperimentSummary(BaseModel):
     population_size: Optional[int] = None
     config_hash: Optional[str] = None
     disk_size_bytes: Optional[int] = None
+    batch_id: Optional[str] = None
+
+
+class BatchSweepConfig(BaseModel):
+    """Define parameter sweeps for batch runs."""
+    sweeps: Dict[str, list] = {}   # "ga.population_size": [1000, 5000, 10000]
 
 
 class ExperimentDetail(ExperimentSummary):

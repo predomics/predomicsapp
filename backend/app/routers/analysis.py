@@ -1,14 +1,17 @@
 """Analysis execution endpoints — run gpredomics and retrieve results."""
 
 from __future__ import annotations
+import copy
 import hashlib
+import itertools
 import json
 import logging
+import uuid
 from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Body
 from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,6 +21,7 @@ from ..core.deps import get_current_user, get_project_with_access
 from ..models.db_models import User, Job, DatasetFile
 from ..models.schemas import (
     RunConfig,
+    BatchSweepConfig,
     ExperimentSummary,
     ExperimentDetail,
     IndividualResponse,
@@ -108,6 +112,168 @@ async def run_analysis(
     background_tasks.add_task(_run_job, job.id, project_id, param_path)
 
     return ExperimentSummary(job_id=job.id, name=job.name, status=JobStatus.pending)
+
+
+# ---------------------------------------------------------------------------
+# Batch runs — parameter sweeps
+# ---------------------------------------------------------------------------
+
+def _apply_sweep(config_dict: dict, key: str, value) -> dict:
+    """Apply a single sweep value to a config dict (e.g. 'ga.population_size' = 5000)."""
+    out = copy.deepcopy(config_dict)
+    parts = key.split(".")
+    if len(parts) == 2:
+        section, param = parts
+        if section in out:
+            out[section][param] = value
+    return out
+
+
+@router.post("/{project_id}/batch")
+async def run_batch(
+    project_id: str,
+    config: RunConfig,
+    sweep: BatchSweepConfig,
+    x_file_id: str,
+    y_file_id: str,
+    xtest_file_id: str = "",
+    ytest_file_id: str = "",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    background_tasks: BackgroundTasks = None,
+):
+    """Launch a batch of jobs from parameter sweeps (editor access required).
+
+    The sweep config defines which parameters to vary. A cartesian product
+    of all sweep values is computed, and one job is created per combination.
+    Max 50 jobs per batch.
+    """
+    await get_project_with_access(project_id, user, db, require_role="editor")
+
+    if not sweep.sweeps:
+        raise HTTPException(status_code=400, detail="No sweep parameters defined")
+
+    # Build cartesian product of sweep values
+    keys = list(sweep.sweeps.keys())
+    values = [sweep.sweeps[k] for k in keys]
+    combinations = list(itertools.product(*values))
+
+    if len(combinations) > 50:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many combinations ({len(combinations)}). Maximum is 50.",
+        )
+
+    # Resolve file paths
+    async def _resolve(fid):
+        if not fid:
+            return ""
+        r = await db.execute(select(DatasetFile).where(DatasetFile.id == fid))
+        f = r.scalar_one_or_none()
+        return f.disk_path if f else ""
+
+    x_path = await _resolve(x_file_id)
+    y_path = await _resolve(y_file_id)
+    if not x_path or not y_path:
+        raise HTTPException(status_code=404, detail="Dataset file not found")
+    xtest_path = await _resolve(xtest_file_id)
+    ytest_path = await _resolve(ytest_file_id)
+
+    batch_id = uuid.uuid4().hex[:12]
+    base_config = config.model_dump()
+    job_summaries = []
+
+    for combo in combinations:
+        # Apply sweep overrides
+        cfg = base_config
+        name_parts = []
+        for key, val in zip(keys, combo):
+            cfg = _apply_sweep(cfg, key, val)
+            short_key = key.split(".")[-1]
+            name_parts.append(f"{short_key}={val}")
+
+        job_name = f"[Batch] {' '.join(name_parts)}"
+
+        config_hash = _compute_config_hash(cfg, {
+            "x": x_file_id, "y": y_file_id,
+            "xtest": xtest_file_id, "ytest": ytest_file_id,
+        })
+
+        job = Job(
+            project_id=project_id, user_id=user.id, name=job_name,
+            status="pending", config=cfg, config_hash=config_hash,
+            batch_id=batch_id,
+        )
+        db.add(job)
+        await db.flush()
+
+        job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job.id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        param_path = engine.write_param_yaml(
+            config=cfg,
+            x_path=str(x_path), y_path=str(y_path),
+            xtest_path=xtest_path, ytest_path=ytest_path,
+            output_dir=str(job_dir),
+        )
+
+        background_tasks.add_task(_run_job, job.id, project_id, param_path)
+        job_summaries.append({"job_id": job.id, "name": job_name})
+
+    await db.commit()
+
+    return {
+        "batch_id": batch_id,
+        "job_count": len(job_summaries),
+        "jobs": job_summaries,
+    }
+
+
+@router.get("/{project_id}/batches")
+async def list_batches(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all batch runs for a project with summary stats."""
+    await get_project_with_access(project_id, user, db, require_role="viewer")
+
+    result = await db.execute(
+        select(Job)
+        .where(Job.project_id == project_id, Job.batch_id.isnot(None))
+        .order_by(Job.created_at.desc())
+    )
+    jobs = result.scalars().all()
+
+    batches: dict[str, list[Job]] = {}
+    for j in jobs:
+        batches.setdefault(j.batch_id, []).append(j)
+
+    summaries = []
+    for bid, batch_jobs in batches.items():
+        completed = [j for j in batch_jobs if j.status == "completed"]
+        best_auc = None
+        best_job_id = None
+        for j in completed:
+            r = storage.get_job_result(project_id, j.id)
+            if r:
+                auc = r.get("best_individual", {}).get("auc")
+                if auc is not None and (best_auc is None or auc > best_auc):
+                    best_auc = auc
+                    best_job_id = j.id
+
+        summaries.append({
+            "batch_id": bid,
+            "job_count": len(batch_jobs),
+            "completed": len(completed),
+            "failed": sum(1 for j in batch_jobs if j.status == "failed"),
+            "running": sum(1 for j in batch_jobs if j.status in ("pending", "running")),
+            "best_auc": best_auc,
+            "best_job_id": best_job_id,
+            "created_at": batch_jobs[-1].created_at.isoformat() if batch_jobs else None,
+        })
+
+    return summaries
 
 
 def _run_job(job_id: str, project_id: str, param_path: str) -> None:
@@ -507,6 +673,7 @@ def _job_to_summary(job: Job) -> ExperimentSummary:
         population_size=ga.get("population_size"),
         config_hash=getattr(job, 'config_hash', None),
         disk_size_bytes=getattr(job, 'disk_size_bytes', None),
+        batch_id=getattr(job, 'batch_id', None),
     )
 
 
@@ -540,4 +707,5 @@ def _results_to_summary(job: Job, results: dict) -> ExperimentSummary:
         population_size=ga.get("population_size"),
         config_hash=getattr(job, 'config_hash', None),
         disk_size_bytes=getattr(job, 'disk_size_bytes', None),
+        batch_id=getattr(job, 'batch_id', None),
     )

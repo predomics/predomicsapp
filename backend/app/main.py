@@ -632,6 +632,42 @@ async def _migrate_add_dataset_tags(conn):
     _log.info("Migration v9_dataset_tags complete")
 
 
+async def _migrate_add_job_batch_id(conn):
+    """v10: Add batch_id column to jobs for batch run grouping."""
+    try:
+        r = await conn.execute(
+            text("SELECT 1 FROM schema_versions WHERE version = 'v10_job_batch_id'")
+        )
+        if r.scalar():
+            return
+    except Exception:
+        pass
+
+    _log.info("Migration v10: job batch_id — starting")
+
+    try:
+        r = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'jobs' AND column_name = 'batch_id'"
+        ))
+        if not r.scalar():
+            await conn.execute(text(
+                "ALTER TABLE jobs ADD COLUMN batch_id VARCHAR(12)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_jobs_batch_id ON jobs (batch_id)"
+            ))
+            _log.info("  Added jobs.batch_id column with index")
+    except Exception:
+        pass
+
+    await conn.execute(text(
+        "INSERT INTO schema_versions (version, applied_at) "
+        "VALUES ('v10_job_batch_id', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
+    ))
+    _log.info("Migration v10_job_batch_id complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
@@ -656,6 +692,8 @@ async def lifespan(app: FastAPI):
         await _migrate_add_job_disk_size(conn)
     async with engine.begin() as conn:
         await _migrate_add_dataset_tags(conn)
+    async with engine.begin() as conn:
+        await _migrate_add_job_batch_id(conn)
     _log.info("PredomicsApp started — data_dir=%s", settings.data_dir)
     yield
 
