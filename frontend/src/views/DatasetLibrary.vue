@@ -2,10 +2,23 @@
   <div class="datasets">
     <h2>Dataset Library</h2>
 
+    <!-- Search & filter bar -->
+    <div class="filter-bar">
+      <input v-model="searchQuery" placeholder="Search datasets..." class="search-input" @input="applyFilters" />
+      <div class="tag-filter-wrap">
+        <select v-model="filterTag" class="tag-filter" @change="applyFilters">
+          <option value="">All tags</option>
+          <option v-for="t in store.tagSuggestions" :key="t" :value="t">{{ t }}</option>
+        </select>
+      </div>
+      <button v-if="searchQuery || filterTag" class="clear-filter" @click="clearFilters">Clear</button>
+    </div>
+
     <!-- Create group form -->
     <div class="create-form">
       <input v-model="groupName" placeholder="Dataset group name..." class="name-input" @keyup.enter="createGroup" />
       <input v-model="groupDesc" placeholder="Description (optional)" class="desc-input" />
+      <input v-model="groupTags" placeholder="Tags (comma-separated)" class="tags-input" />
       <button @click="createGroup" :disabled="!groupName.trim() || creating">
         {{ creating ? 'Creating...' : 'Create Group' }}
       </button>
@@ -14,7 +27,8 @@
     <div v-if="store.loading" class="loading">Loading...</div>
 
     <div v-if="!store.loading && store.datasets.length === 0" class="empty">
-      No datasets yet. Create a group above, then upload files into it.
+      <template v-if="searchQuery || filterTag">No datasets match your filter.</template>
+      <template v-else>No datasets yet. Create a group above, then upload files into it.</template>
     </div>
 
     <div v-if="store.datasets.length > 0" class="dataset-list">
@@ -23,6 +37,29 @@
           <div class="card-content">
             <h3>{{ d.name }}</h3>
             <p v-if="d.description" class="desc">{{ d.description }}</p>
+            <!-- Tags -->
+            <div class="tag-row" v-if="d.tags?.length > 0 || editingTagsId === d.id">
+              <template v-if="editingTagsId !== d.id">
+                <span v-for="tag in d.tags" :key="tag" class="tag-chip" @click="filterByTag(tag)">{{ tag }}</span>
+                <button class="tag-edit-btn" @click="startEditTags(d)" title="Edit tags">+</button>
+              </template>
+              <template v-else>
+                <input
+                  v-model="editTagsValue"
+                  class="tag-edit-input"
+                  placeholder="comma-separated tags..."
+                  @keyup.enter="saveTags(d)"
+                  @keyup.escape="editingTagsId = null"
+                  ref="tagEditInput"
+                  list="tag-suggestions"
+                />
+                <button class="tag-save-btn" @click="saveTags(d)">Save</button>
+                <button class="tag-cancel-btn" @click="editingTagsId = null">Cancel</button>
+              </template>
+            </div>
+            <div class="tag-row" v-else>
+              <button class="tag-edit-btn add-first" @click="startEditTags(d)" title="Add tags">+ Add tags</button>
+            </div>
             <div class="meta">
               <span>{{ formatDate(d.created_at) }}</span>
               <span>{{ d.files?.length || 0 }} file{{ (d.files?.length || 0) !== 1 ? 's' : '' }}</span>
@@ -50,31 +87,84 @@
       </div>
     </div>
 
+    <!-- Tag suggestions datalist -->
+    <datalist id="tag-suggestions">
+      <option v-for="t in store.tagSuggestions" :key="t" :value="t" />
+    </datalist>
+
     <div v-if="message" :class="['msg', msgType]">{{ message }}</div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useDatasetStore } from '../stores/dataset'
 
 const store = useDatasetStore()
 const groupName = ref('')
 const groupDesc = ref('')
+const groupTags = ref('')
 const creating = ref(false)
 const message = ref('')
 const msgType = ref('success')
+const searchQuery = ref('')
+const filterTag = ref('')
+const editingTagsId = ref(null)
+const editTagsValue = ref('')
+const tagEditInput = ref(null)
+
+async function applyFilters() {
+  await store.fetchDatasets(filterTag.value || null, searchQuery.value || null)
+}
+
+function clearFilters() {
+  searchQuery.value = ''
+  filterTag.value = ''
+  applyFilters()
+}
+
+function filterByTag(tag) {
+  filterTag.value = tag
+  applyFilters()
+}
+
+function startEditTags(d) {
+  editingTagsId.value = d.id
+  editTagsValue.value = (d.tags || []).join(', ')
+  nextTick(() => {
+    if (tagEditInput.value) {
+      const el = Array.isArray(tagEditInput.value) ? tagEditInput.value[0] : tagEditInput.value
+      if (el) el.focus()
+    }
+  })
+}
+
+async function saveTags(d) {
+  const tags = editTagsValue.value.split(',').map(t => t.trim()).filter(Boolean)
+  try {
+    await store.updateTags(d.id, tags)
+    message.value = `Tags updated for "${d.name}"`
+    msgType.value = 'success'
+    store.fetchTagSuggestions()
+  } catch (e) {
+    message.value = e.response?.data?.detail || 'Tag update failed'
+    msgType.value = 'error'
+  }
+  editingTagsId.value = null
+}
 
 async function createGroup() {
   if (!groupName.value.trim()) return
   creating.value = true
   message.value = ''
   try {
-    await store.createGroup(groupName.value.trim(), groupDesc.value.trim())
+    await store.createGroup(groupName.value.trim(), groupDesc.value.trim(), groupTags.value.trim())
     message.value = `Created "${groupName.value.trim()}"`
     msgType.value = 'success'
     groupName.value = ''
     groupDesc.value = ''
+    groupTags.value = ''
+    store.fetchTagSuggestions()
   } catch (e) {
     message.value = e.response?.data?.detail || 'Create failed'
     msgType.value = 'error'
@@ -126,7 +216,10 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString()
 }
 
-onMounted(() => store.fetchDatasets())
+onMounted(() => {
+  store.fetchDatasets()
+  store.fetchTagSuggestions()
+})
 </script>
 
 <style scoped>
@@ -134,6 +227,46 @@ onMounted(() => store.fetchDatasets())
   margin-bottom: 1.5rem;
   color: var(--text-primary);
 }
+
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: var(--bg-input);
+  color: var(--text-body);
+}
+
+.tag-filter {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: var(--bg-input);
+  color: var(--text-body);
+  min-width: 120px;
+}
+
+.clear-filter {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.clear-filter:hover { color: var(--text-primary); }
 
 .create-form {
   display: flex;
@@ -155,7 +288,17 @@ onMounted(() => store.fetchDatasets())
 
 .desc-input {
   flex: 1;
-  min-width: 200px;
+  min-width: 160px;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: var(--bg-input);
+  color: var(--text-body);
+}
+
+.tags-input {
+  min-width: 180px;
   padding: 0.5rem 1rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -213,6 +356,66 @@ onMounted(() => store.fetchDatasets())
   color: var(--text-secondary);
   margin-bottom: 0.25rem;
 }
+
+/* Tags */
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  margin: 0.35rem 0;
+}
+
+.tag-chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(0, 191, 255, 0.12);
+  color: var(--accent, #00BFFF);
+  border: 1px solid rgba(0, 191, 255, 0.25);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tag-chip:hover {
+  background: rgba(0, 191, 255, 0.25);
+}
+
+.tag-edit-btn {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  background: none;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.tag-edit-btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
+.tag-edit-btn.add-first { font-size: 0.72rem; padding: 0.05rem 0.5rem; }
+
+.tag-edit-input {
+  flex: 1;
+  min-width: 150px;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--accent, #00BFFF);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  background: var(--bg-input);
+  color: var(--text-body);
+}
+
+.tag-save-btn, .tag-cancel-btn {
+  padding: 0.15rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.tag-save-btn { background: var(--accent); color: var(--accent-text); }
+.tag-cancel-btn { background: none; color: var(--text-muted); }
 
 .meta {
   display: flex;

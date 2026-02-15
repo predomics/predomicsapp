@@ -599,6 +599,39 @@ async def _migrate_add_job_disk_size(conn):
     _log.info("Migration v8_job_disk_size complete")
 
 
+async def _migrate_add_dataset_tags(conn):
+    """v9: Add tags JSON column to datasets."""
+    try:
+        r = await conn.execute(
+            text("SELECT 1 FROM schema_versions WHERE version = 'v9_dataset_tags'")
+        )
+        if r.scalar():
+            return
+    except Exception:
+        pass
+
+    _log.info("Migration v9: dataset tags — starting")
+
+    try:
+        r = await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'datasets' AND column_name = 'tags'"
+        ))
+        if not r.scalar():
+            await conn.execute(text(
+                "ALTER TABLE datasets ADD COLUMN tags JSON DEFAULT '[]'"
+            ))
+            _log.info("  Added datasets.tags column")
+    except Exception:
+        pass
+
+    await conn.execute(text(
+        "INSERT INTO schema_versions (version, applied_at) "
+        "VALUES ('v9_dataset_tags', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
+    ))
+    _log.info("Migration v9_dataset_tags complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
@@ -621,6 +654,8 @@ async def lifespan(app: FastAPI):
         await _migrate_add_job_config_hash(conn)
     async with engine.begin() as conn:
         await _migrate_add_job_disk_size(conn)
+    async with engine.begin() as conn:
+        await _migrate_add_dataset_tags(conn)
     _log.info("PredomicsApp started — data_dir=%s", settings.data_dir)
     yield
 

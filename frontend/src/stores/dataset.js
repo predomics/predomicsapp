@@ -5,22 +5,42 @@ import axios from 'axios'
 export const useDatasetStore = defineStore('dataset', () => {
   const datasets = ref([])
   const loading = ref(false)
+  const tagSuggestions = ref([])
 
-  async function fetchDatasets() {
+  async function fetchDatasets(tag = null, search = null) {
     loading.value = true
     try {
-      const { data } = await axios.get('/api/datasets/')
+      const params = {}
+      if (tag) params.tag = tag
+      if (search) params.search = search
+      const { data } = await axios.get('/api/datasets/', { params })
       datasets.value = data
     } finally {
       loading.value = false
     }
   }
 
-  async function createGroup(name, description = '') {
+  async function fetchTagSuggestions() {
+    try {
+      const { data } = await axios.get('/api/datasets/tags/suggestions')
+      tagSuggestions.value = data.suggestions || []
+    } catch { /* ignore */ }
+  }
+
+  async function createGroup(name, description = '', tags = '') {
     const { data } = await axios.post('/api/datasets/', null, {
-      params: { name, description },
+      params: { name, description, tags },
     })
     datasets.value.unshift(data)
+    return data
+  }
+
+  async function updateTags(datasetId, tags) {
+    const { data } = await axios.patch(`/api/datasets/${datasetId}/tags`, { tags })
+    const idx = datasets.value.findIndex(d => d.id === datasetId)
+    if (idx >= 0) {
+      datasets.value[idx].tags = data.tags
+    }
     return data
   }
 
@@ -59,8 +79,8 @@ export const useDatasetStore = defineStore('dataset', () => {
   }
 
   return {
-    datasets, loading,
-    fetchDatasets, createGroup, uploadFile, deleteFile,
-    deleteDataset, assignDataset, unassignDataset,
+    datasets, loading, tagSuggestions,
+    fetchDatasets, fetchTagSuggestions, createGroup, updateTags,
+    uploadFile, deleteFile, deleteDataset, assignDataset, unassignDataset,
   }
 })

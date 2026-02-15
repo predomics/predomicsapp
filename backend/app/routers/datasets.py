@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,6 +12,13 @@ from ..core.deps import get_current_user
 from ..models.db_models import User, Dataset, DatasetFile, ProjectDataset, Project
 from ..models.schemas import DatasetResponse, DatasetFileRef
 from ..services import storage
+
+# Pre-defined tag suggestions
+SUGGESTED_TAGS = [
+    "benchmark", "clinical", "metagenomic", "16S", "shotgun",
+    "WGS", "metabolomic", "transcriptomic", "proteomic",
+    "public", "private", "test", "production",
+]
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -40,6 +47,7 @@ def _build_dataset_response(ds: Dataset) -> DatasetResponse:
         id=ds.id,
         name=ds.name,
         description=ds.description,
+        tags=ds.tags or [],
         files=files,
         created_at=ds.created_at.isoformat(),
         project_count=len(ds.project_links),
@@ -54,11 +62,13 @@ def _build_dataset_response(ds: Dataset) -> DatasetResponse:
 async def create_dataset(
     name: str,
     description: str = "",
+    tags: str = "",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new (empty) dataset group."""
-    dataset = Dataset(name=name, description=description, user_id=user.id)
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    dataset = Dataset(name=name, description=description, user_id=user.id, tags=tag_list)
     db.add(dataset)
     await db.flush()
 
@@ -66,25 +76,54 @@ async def create_dataset(
         id=dataset.id,
         name=dataset.name,
         description=dataset.description,
+        tags=tag_list,
         files=[],
         created_at=dataset.created_at.isoformat(),
         project_count=0,
     )
 
 
-@router.get("/", response_model=list[DatasetResponse])
-async def list_datasets(
+@router.get("/tags/suggestions")
+async def get_tag_suggestions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all datasets owned by the current user."""
+    """Get suggested tags (predefined + user's existing tags)."""
     result = await db.execute(
+        select(Dataset.tags).where(Dataset.user_id == user.id)
+    )
+    user_tags = set()
+    for row in result.scalars().all():
+        if row:
+            user_tags.update(row)
+    all_tags = sorted(set(SUGGESTED_TAGS) | user_tags)
+    return {"suggestions": all_tags}
+
+
+@router.get("/", response_model=list[DatasetResponse])
+async def list_datasets(
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    search: Optional[str] = Query(None, description="Search by name"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all datasets owned by the current user, optionally filtered by tag or name."""
+    query = (
         select(Dataset)
         .where(Dataset.user_id == user.id)
         .options(selectinload(Dataset.files), selectinload(Dataset.project_links))
         .order_by(Dataset.created_at.desc())
     )
+    result = await db.execute(query)
     datasets = result.scalars().all()
+
+    # Filter in Python (JSON column filtering varies by DB engine)
+    if tag:
+        datasets = [d for d in datasets if d.tags and tag in d.tags]
+    if search:
+        term = search.lower()
+        datasets = [d for d in datasets if term in d.name.lower() or term in (d.description or "").lower()]
+
     return [_build_dataset_response(d) for d in datasets]
 
 
@@ -128,6 +167,34 @@ async def delete_dataset(
 
     await db.delete(dataset)
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Tag management
+# ---------------------------------------------------------------------------
+
+@router.patch("/{dataset_id}/tags", response_model=DatasetResponse)
+async def update_tags(
+    dataset_id: str,
+    tags: list[str] = Body(..., embed=True),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace all tags on a dataset."""
+    result = await db.execute(
+        select(Dataset)
+        .where(Dataset.id == dataset_id, Dataset.user_id == user.id)
+        .options(selectinload(Dataset.files), selectinload(Dataset.project_links))
+    )
+    dataset = result.scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Clean and deduplicate tags
+    clean_tags = list(dict.fromkeys(t.strip() for t in tags if t.strip()))
+    dataset.tags = clean_tags
+    await db.flush()
+    return _build_dataset_response(dataset)
 
 
 # ---------------------------------------------------------------------------

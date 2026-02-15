@@ -237,6 +237,7 @@ class DatasetResponse(BaseModel):
     id: str
     name: str
     description: str = ""
+    tags: list[str] = []
     files: list[DatasetFileRef] = []
     created_at: str = ""
     project_count: int = 0
