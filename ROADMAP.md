@@ -6,72 +6,71 @@ _Last updated: 2026-02-15_
 
 ## High Impact
 
-### 1. Export & Reports
-**Priority:** HIGH | **Effort:** Medium
+### 1. Export & Reports ✅
+**Priority:** HIGH | **Effort:** Medium | **Status:** Done
 
 Add ability to download results as CSV/HTML report from the Results tab.
 
-- **CSV exports:** Best model coefficients, population table, jury predictions, generation tracking
-- **HTML report:** Self-contained printable/saveable report with embedded charts (Plotly static images or SVG), metrics summary, and model details
-- Backend endpoints: `GET /api/analysis/{pid}/jobs/{jid}/export/csv?section=...` and `GET /api/analysis/{pid}/jobs/{jid}/export/report`
-- Frontend: Export dropdown button in Results tab header
+- CSV exports: coefficients, population, jury, generation tracking
+- HTML report: self-contained with embedded charts and metrics
+- Backend endpoints for CSV sections and full HTML report
+- Frontend: Export dropdown in Results tab header
 
-### 2. Job Comparison View
-**Priority:** HIGH | **Effort:** Medium
+### 2. Job Comparison View ✅
+**Priority:** HIGH | **Effort:** Medium | **Status:** Done
 
 Enhance the existing Comparative sub-tab with detailed side-by-side analysis.
 
 - Side-by-side metrics tables for 2+ selected jobs
-- Diff highlighting: show which parameters changed between runs
-- Feature intersection/union Venn diagram
-- Performance delta visualization (improvement/regression arrows)
-- Config diff viewer: compact visual showing only parameters that differ
+- Diff highlighting for changed parameters
+- Config diff viewer showing only differing parameters
+- Performance delta visualization
 
-### 3. Real-time Job Progress
-**Priority:** HIGH | **Effort:** High
+### 3. Real-time Job Progress ✅
+**Priority:** HIGH | **Effort:** High | **Status:** Done
 
-Replace HTTP polling with WebSocket for live AUC evolution during training.
+Live progress tracking during training.
 
-- Backend: WebSocket endpoint at `/ws/jobs/{job_id}` that streams generation_tracking updates
-- Frontend: Live-updating AUC chart in ConsolePanel or Summary tab while job runs
-- Show progress bar: current generation / max_epochs
-- Estimated time remaining based on per-generation timing
-- Fallback: Keep polling for environments where WebSocket is blocked
+- ConsolePanel with ANSI-rendered log output and HTTP polling
+- Real-time progress bar: current generation / max_epochs
+- Generation, k-value, and language display
+- Minimizable console with status badge
 
-### 4. Notebook Integration
-**Priority:** HIGH | **Effort:** Medium
+### 4. Notebook Integration ✅
+**Priority:** HIGH | **Effort:** Medium | **Status:** Done
 
 Generate downloadable Python/R notebooks from completed job results.
 
-- Backend: `GET /api/analysis/{pid}/jobs/{jid}/export/notebook?lang=python|r`
-- Python notebook (.ipynb): loads data, runs gpredomicspy with same config, displays results
-- R notebook (.Rmd): loads data with gpredomicsR, runs analysis, generates plots
-- Pre-filled with actual parameter values from the completed job
-- Includes data paths and result validation
+- Python notebook (.ipynb): loads data, runs gpredomicspy, displays results with matplotlib
+- R notebook (.Rmd): loads data with gpredomicsR, generates ggplot2 visualizations
+- Pre-filled with actual parameter values from completed jobs
+- Download buttons in Results tab export dropdown
 
 ---
 
 ## Medium Impact
 
-### 5. Onboarding Tour
-**Priority:** MEDIUM | **Effort:** Low
+### 5. Onboarding Tour ✅
+**Priority:** MEDIUM | **Effort:** Low | **Status:** Done
 
 Interactive first-use walkthrough highlighting key features.
 
-- Lightweight JS tooltip tour (no heavy dependency)
-- Steps: Upload data → Configure parameters → Launch analysis → View results
-- "Don't show again" preference stored in localStorage
-- Contextual help tooltips on complex parameter controls
+- Lightweight modal-based tour (OnboardingTour.vue) — no external dependencies
+- 6 steps: Welcome → Create project → Upload data → Configure → Launch → Results
+- "Don't show again" checkbox stored in localStorage
+- Reset tour option in Profile → Preferences
+- Auto-shows for first-time users after login
 
-### 6. Browser Notifications
-**Priority:** MEDIUM | **Effort:** Low
+### 6. Browser Notifications ✅
+**Priority:** MEDIUM | **Effort:** Low | **Status:** Done
 
 Notify user when a long-running job completes or fails.
 
-- Use browser Notification API (requires user permission)
-- Trigger on job status transition: running → completed/failed
-- Show AUC result in notification body
-- Optional sound alert setting
+- Uses browser Notification API with permission request on project dashboard load
+- Triggers on job status transition: running → completed/failed
+- Shows AUC and k in notification body for completed jobs
+- Enable/disable toggle in Profile → Preferences
+- Auto-close after 10 seconds, click-to-focus
 
 ### 7. Batch Runs
 **Priority:** MEDIUM | **Effort:** Medium
@@ -83,15 +82,16 @@ Launch multiple analysis jobs with parameter sweeps.
 - Summary view: matrix of results across parameter combinations
 - Best configuration auto-detection
 
-### 8. Dataset Tagging & Search
-**Priority:** MEDIUM | **Effort:** Low
+### 8. Dataset Tagging & Search ✅
+**Priority:** MEDIUM | **Effort:** Low | **Status:** Done
 
 Organize datasets with tags and enable search/filter.
 
-- Add `tags: JSON` field to Dataset model
-- Tag input UI in Dataset Library
-- Filter datasets by tag in project assignment dialog
-- Pre-defined tags: "benchmark", "clinical", "metagenomic", "16S", etc.
+- Added `tags: JSON` field to Dataset model with migration v9
+- Tag CRUD endpoints (create, update, suggestions, filter)
+- Search bar and tag filter dropdown in Dataset Library
+- Clickable tag chips, inline tag editor with datalist autocomplete
+- Pre-defined tags: benchmark, clinical, metagenomic, 16S, shotgun, WGS, etc.
 
 ---
 

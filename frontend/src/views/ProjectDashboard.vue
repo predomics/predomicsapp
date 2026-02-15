@@ -48,9 +48,11 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import axios from 'axios'
 import { useProjectStore } from '../stores/project'
 import ConsolePanel from '../components/ConsolePanel.vue'
 import ShareModal from '../components/ShareModal.vue'
+import { requestPermission, notifyJobCompleted, notifyJobFailed } from '../utils/notify'
 
 const route = useRoute()
 const store = useProjectStore()
@@ -69,16 +71,31 @@ async function loadProject() {
   }
 }
 
-function onJobCompleted(jobId) {
-  loadProject()
+async function onJobCompleted(jobId) {
+  await loadProject()
+  // Send browser notification with AUC if available
+  try {
+    const { data } = await axios.get(`/api/analysis/${projectId.value}/jobs/${jobId}`)
+    notifyJobCompleted(project.value?.name || 'Project', {
+      auc: data.best_auc,
+      k: data.best_k,
+      jobId,
+    })
+  } catch {
+    notifyJobCompleted(project.value?.name || 'Project', { jobId })
+  }
 }
 
 function onJobFailed(jobId) {
   loadProject()
+  notifyJobFailed(project.value?.name || 'Project', { jobId })
 }
 
 watch(projectId, loadProject)
-onMounted(loadProject)
+onMounted(() => {
+  loadProject()
+  requestPermission()
+})
 </script>
 
 <style scoped>

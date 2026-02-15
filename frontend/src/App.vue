@@ -26,6 +26,7 @@
     <main class="container">
       <router-view />
     </main>
+    <OnboardingTour v-if="auth.isLoggedIn" />
   </div>
 </template>
 
@@ -34,6 +35,7 @@ import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
+import OnboardingTour from './components/OnboardingTour.vue'
 
 const auth = useAuthStore()
 const theme = useThemeStore()

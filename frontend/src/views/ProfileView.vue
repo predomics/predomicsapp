@@ -29,6 +29,27 @@
     </section>
 
     <section class="card">
+      <h3>Preferences</h3>
+      <div class="pref-row">
+        <div>
+          <span class="pref-label">Browser Notifications</span>
+          <span class="pref-desc">Get notified when jobs complete or fail</span>
+        </div>
+        <button class="btn btn-small" @click="toggleNotifications">
+          {{ notifStatus }}
+        </button>
+      </div>
+      <div class="pref-row">
+        <div>
+          <span class="pref-label">Onboarding Tour</span>
+          <span class="pref-desc">Show the welcome tour again on next visit</span>
+        </div>
+        <button class="btn btn-small" @click="resetTour">Reset Tour</button>
+      </div>
+      <span v-if="prefMsg" class="msg success">{{ prefMsg }}</span>
+    </section>
+
+    <section class="card">
       <h3>Change Password</h3>
       <form @submit.prevent="savePassword">
         <div class="form-group">
@@ -49,8 +70,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { isSupported, requestPermission } from '../utils/notify'
 
 const auth = useAuthStore()
 
@@ -63,6 +85,37 @@ const newPw = ref('')
 const savingPw = ref(false)
 const pwMsg = ref('')
 const pwError = ref(false)
+const prefMsg = ref('')
+
+const notifStatus = computed(() => {
+  if (!isSupported()) return 'Not supported'
+  if (localStorage.getItem('predomics_notifications') === 'denied') return 'Disabled'
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') return 'Enabled'
+  if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return 'Blocked'
+  return 'Enable'
+})
+
+async function toggleNotifications() {
+  if (!isSupported()) return
+  if (localStorage.getItem('predomics_notifications') === 'denied') {
+    localStorage.removeItem('predomics_notifications')
+    await requestPermission()
+    prefMsg.value = 'Notifications re-enabled'
+  } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    localStorage.setItem('predomics_notifications', 'denied')
+    prefMsg.value = 'Notifications disabled'
+  } else {
+    const granted = await requestPermission()
+    prefMsg.value = granted ? 'Notifications enabled' : 'Permission denied by browser'
+  }
+  setTimeout(() => { prefMsg.value = '' }, 3000)
+}
+
+function resetTour() {
+  localStorage.removeItem('predomics_onboarding_dismissed')
+  prefMsg.value = 'Tour will show on next page load'
+  setTimeout(() => { prefMsg.value = '' }, 3000)
+}
 
 onMounted(() => {
   fullName.value = auth.user?.full_name || ''
@@ -179,4 +232,26 @@ async function savePassword() {
 
 .msg.success { color: var(--success); }
 .msg.error { color: var(--danger); }
+
+.pref-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-lighter);
+}
+.pref-row:last-of-type { border-bottom: none; }
+.pref-label { display: block; font-size: 0.88rem; color: var(--text-body); }
+.pref-desc { display: block; font-size: 0.75rem; color: var(--text-muted); }
+.btn-small {
+  padding: 0.3rem 0.8rem;
+  background: var(--bg-badge);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-small:hover { border-color: var(--accent); color: var(--accent); }
 </style>
