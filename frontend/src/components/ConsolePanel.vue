@@ -3,6 +3,16 @@
     <div class="console-header">
       <h4>Console Output</h4>
       <span class="status-badge" :class="jobStatus">{{ jobStatus }}</span>
+      <template v-if="progress.generation > 0 && jobStatus === 'running'">
+        <div class="progress-info">
+          <span class="progress-gen">Gen {{ progress.generation }}<template v-if="progress.maxGen"> / {{ progress.maxGen }}</template></span>
+          <span class="progress-k" v-if="progress.k">k={{ progress.k }}</span>
+          <span class="progress-lang" v-if="progress.language">{{ progress.language }}</span>
+        </div>
+        <div class="progress-bar-wrap" v-if="progress.maxGen">
+          <div class="progress-bar" :style="{ width: Math.min(100, progress.generation / progress.maxGen * 100) + '%' }"></div>
+        </div>
+      </template>
       <button class="close-btn" @click="$emit('close')" title="Minimize console">&#9660;</button>
     </div>
     <div class="console" ref="consoleEl">
@@ -25,9 +35,47 @@ const emit = defineEmits(['close', 'completed', 'failed'])
 const logContent = ref('')
 const jobStatus = ref('pending')
 const consoleEl = ref(null)
+const progress = ref({ generation: 0, maxGen: 0, k: 0, language: '' })
 let pollTimer = null
 
 let errorCount = 0
+
+/* ── Progress parser ─────────────────────────────────── */
+// Parses generation lines like: "#42      | best: Ternary:Prevalence  \t0 ████ 1 [k=55, age=0]"
+const GEN_RE = /#(\d+)\s+\|\s+best:\s+(\S+)/
+const K_RE = /\[k=(\d+)/
+
+function parseProgress(text) {
+  if (!text) return
+  // Find the last generation line
+  const lines = text.split('\n')
+  let lastGen = 0, lastK = 0, lastLang = ''
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const clean = lines[i].replace(/\x1b\[[0-9;]*m/g, '')
+    const gm = clean.match(GEN_RE)
+    if (gm) {
+      lastGen = parseInt(gm[1])
+      lastLang = gm[2]
+      const km = clean.match(K_RE)
+      if (km) lastK = parseInt(km[1])
+      break
+    }
+  }
+  if (lastGen > 0) {
+    progress.value.generation = lastGen
+    progress.value.k = lastK
+    progress.value.language = lastLang
+  }
+  // Try to extract maxGen from early lines (config echo)
+  if (!progress.value.maxGen) {
+    for (const line of lines.slice(0, 50)) {
+      const clean = line.replace(/\x1b\[[0-9;]*m/g, '')
+      // Look for max_epochs in config output
+      const em = clean.match(/max_epochs[:\s]+(\d+)/i)
+      if (em) { progress.value.maxGen = parseInt(em[1]); break }
+    }
+  }
+}
 
 /* ── ANSI → HTML converter ───────────────────────────── */
 const ANSI_COLORS = {
@@ -60,6 +108,17 @@ function ansiToHtml(text) {
 
 const renderedLog = computed(() => ansiToHtml(logContent.value))
 
+/* ── Fetch max epochs from job config ─────────────────── */
+async function fetchMaxEpochs() {
+  try {
+    const { data } = await axios.get(`/api/analysis/${props.projectId}/jobs/${props.jobId}`)
+    const epMatch = data.config_summary?.match(/ep=(\d+)/)
+    if (epMatch) {
+      progress.value.maxGen = parseInt(epMatch[1])
+    }
+  } catch { /* ignore */ }
+}
+
 /* ── Polling ─────────────────────────────────────────── */
 async function pollLogs() {
   try {
@@ -67,6 +126,7 @@ async function pollLogs() {
     errorCount = 0
     logContent.value = data.log
     jobStatus.value = data.status
+    parseProgress(data.log)
 
     await nextTick()
     if (consoleEl.value) {
@@ -92,6 +152,7 @@ async function pollLogs() {
 }
 
 function startPolling() {
+  fetchMaxEpochs()
   pollLogs()
   pollTimer = setInterval(pollLogs, 1000)
 }
@@ -107,6 +168,7 @@ watch(() => props.jobId, (newId) => {
   if (newId) {
     logContent.value = ''
     jobStatus.value = 'pending'
+    progress.value = { generation: 0, maxGen: 0, k: 0, language: '' }
     stopPolling()
     startPolling()
   }
@@ -165,6 +227,40 @@ onUnmounted(stopPolling)
 }
 
 .close-btn:hover { color: var(--console-text); }
+
+/* Progress indicators */
+.progress-info {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.72rem;
+  color: var(--text-nav-link);
+}
+.progress-gen {
+  font-weight: 600;
+  color: #00BFFF;
+}
+.progress-k {
+  color: #98c379;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.progress-lang {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+.progress-bar-wrap {
+  width: 80px;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00BFFF, #00e5ff);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
 
 .console {
   flex: 1;

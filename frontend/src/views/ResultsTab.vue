@@ -94,6 +94,23 @@
       <button :class="{ active: subTab === 'population' }" @click="subTab = 'population'">Population</button>
       <button v-if="juryData" :class="{ active: subTab === 'jury' }" @click="subTab = 'jury'">Jury</button>
       <button :class="{ active: subTab === 'comparative' }" @click="subTab = 'comparative'">Comparative</button>
+      <div class="export-dropdown-wrap" v-if="detail">
+        <button class="btn-sm btn-export" @click="exportMenuOpen = !exportMenuOpen">
+          &#8615; Export
+        </button>
+        <div class="export-menu" v-if="exportMenuOpen" @mouseleave="exportMenuOpen = false">
+          <button @click="doExport('report')">HTML Report</button>
+          <button @click="doExport('json')">Full JSON</button>
+          <hr />
+          <button @click="doExport('csv', 'best_model')">CSV: Best Model</button>
+          <button @click="doExport('csv', 'population')">CSV: Population</button>
+          <button @click="doExport('csv', 'generation_tracking')">CSV: Generations</button>
+          <button v-if="juryData" @click="doExport('csv', 'jury_predictions')">CSV: Jury Predictions</button>
+          <hr />
+          <button @click="doExport('notebook', 'python')">Python Notebook (.ipynb)</button>
+          <button @click="doExport('notebook', 'r')">R Notebook (.Rmd)</button>
+        </div>
+      </div>
     </nav>
 
     <!-- ============================================================ -->
@@ -420,9 +437,92 @@
 
       <!-- Comparison charts -->
       <template v-if="compareData.length >= 2">
+        <!-- Side-by-side metrics table -->
+        <section class="section">
+          <h3>Metrics Comparison</h3>
+          <div class="compare-table-wrap">
+            <table class="compare-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th v-for="d in compareData" :key="d.job_id">{{ d.name || d.job_id.slice(0, 8) }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in ['auc', 'fit', 'accuracy', 'sensitivity', 'specificity', 'threshold', 'k', 'language', 'data_type']" :key="m">
+                  <td class="metric-name">{{ m === 'data_type' ? 'Data Type' : m === 'k' ? 'k (features)' : m.charAt(0).toUpperCase() + m.slice(1) }}</td>
+                  <td v-for="d in compareData" :key="d.job_id"
+                    :class="{ 'best-val': compareBestMetric(m) === d.job_id }">
+                    {{ formatMetricVal(d.best, m) }}
+                  </td>
+                </tr>
+                <tr>
+                  <td class="metric-name">Time</td>
+                  <td v-for="d in compareData" :key="d.job_id">{{ d.execution_time ? formatDuration(d.execution_time) : '—' }}</td>
+                </tr>
+                <tr>
+                  <td class="metric-name">Generations</td>
+                  <td v-for="d in compareData" :key="d.job_id">{{ d.generation_count || '—' }}</td>
+                </tr>
+                <tr>
+                  <td class="metric-name">Population</td>
+                  <td v-for="d in compareData" :key="d.job_id">{{ d.population?.length || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Config diff -->
+        <section class="section" v-if="configDiffs.length > 0">
+          <h3>Configuration Differences</h3>
+          <div class="compare-table-wrap">
+            <table class="compare-table config-diff-table">
+              <thead>
+                <tr>
+                  <th>Parameter</th>
+                  <th v-for="d in compareData" :key="d.job_id">{{ d.name || d.job_id.slice(0, 8) }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="diff in configDiffs" :key="diff.path">
+                  <td class="metric-name">{{ diff.label }}</td>
+                  <td v-for="(val, i) in diff.values" :key="i" :class="{ 'diff-val': val !== diff.values[0] }">
+                    {{ val ?? '—' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="configDiffs.length === 0" class="info-text">All selected jobs have identical configuration.</p>
+        </section>
+
         <section class="section">
           <h3>Performance Comparison</h3>
           <div ref="comparisonBarEl" class="plotly-chart"></div>
+        </section>
+
+        <!-- Feature analysis -->
+        <section class="section">
+          <h3>Feature Analysis</h3>
+          <div class="feature-analysis">
+            <div class="feature-stat">
+              <span class="fa-label">Common to all jobs:</span>
+              <span class="fa-value">{{ featureIntersection.length }} features</span>
+            </div>
+            <div class="feature-stat">
+              <span class="fa-label">Union (any job):</span>
+              <span class="fa-value">{{ featureUnion.length }} features</span>
+            </div>
+            <div class="feature-stat" v-if="featureIntersection.length > 0">
+              <span class="fa-label">Overlap ratio:</span>
+              <span class="fa-value">{{ (featureIntersection.length / featureUnion.length * 100).toFixed(1) }}%</span>
+            </div>
+          </div>
+          <div v-if="featureIntersection.length > 0" class="common-features">
+            <strong>Common features:</strong>
+            <span v-for="f in featureIntersection" :key="f" class="feature-chip positive">{{ featureLabel(f) }}</span>
+          </div>
         </section>
 
         <section class="section">
@@ -506,6 +606,9 @@ const jobPageSize = 10
 // Duplicate detection state
 const duplicateGroups = ref([])
 const duplicatesLoading = ref(false)
+
+// Export menu state
+const exportMenuOpen = ref(false)
 
 // Chart element refs — Summary
 const convergenceChartEl = ref(null)
@@ -634,6 +737,80 @@ const fbmCount = computed(() => {
   }
   return filterFBM(pop).length
 })
+
+// Comparative: feature intersection/union
+const featureIntersection = computed(() => {
+  if (compareData.value.length < 2) return []
+  const sets = compareData.value.map(d => {
+    const feats = d.best_individual?.features || d.best?.features || {}
+    const names = d.feature_names || []
+    return new Set(Object.keys(feats).map(idx => names[parseInt(idx)] || `f_${idx}`))
+  })
+  let common = sets[0]
+  for (let i = 1; i < sets.length; i++) {
+    common = new Set([...common].filter(f => sets[i].has(f)))
+  }
+  return [...common].sort()
+})
+
+const featureUnion = computed(() => {
+  if (compareData.value.length < 2) return []
+  const all = new Set()
+  for (const d of compareData.value) {
+    const feats = d.best_individual?.features || d.best?.features || {}
+    const names = d.feature_names || []
+    for (const idx of Object.keys(feats)) {
+      all.add(names[parseInt(idx)] || `f_${idx}`)
+    }
+  }
+  return [...all].sort()
+})
+
+// Config diff: find parameters that differ across selected jobs
+const configDiffs = computed(() => {
+  if (compareData.value.length < 2) return []
+  // We need job configs. Fetch from job summaries.
+  const jobConfigs = compareData.value.map(d => {
+    const meta = jobs.value.find(j => j.job_id === d.job_id || j.job_id === d.jobId) || {}
+    return meta
+  })
+  // Compare numeric/string fields from summaries
+  const fields = [
+    { key: 'language', label: 'Language' },
+    { key: 'data_type', label: 'Data Type' },
+    { key: 'population_size', label: 'Population Size' },
+    { key: 'config_summary', label: 'Config' },
+  ]
+  const diffs = []
+  for (const f of fields) {
+    const vals = jobConfigs.map(jc => jc[f.key] ?? null)
+    const unique = new Set(vals.map(String))
+    if (unique.size > 1) {
+      diffs.push({ path: f.key, label: f.label, values: vals })
+    }
+  }
+  return diffs
+})
+
+function compareBestMetric(metric) {
+  if (compareData.value.length < 2) return null
+  const numericMetrics = ['auc', 'fit', 'accuracy', 'sensitivity', 'specificity']
+  if (!numericMetrics.includes(metric)) return null
+  let bestId = null, bestVal = -Infinity
+  for (const d of compareData.value) {
+    const v = d.best?.[metric] ?? d.best_individual?.[metric]
+    if (v != null && v > bestVal) { bestVal = v; bestId = d.job_id || d.jobId }
+  }
+  return bestId
+}
+
+function formatMetricVal(best, metric) {
+  if (!best) return '—'
+  const v = best[metric]
+  if (v == null) return '—'
+  if (typeof v === 'number') return v.toFixed(4)
+  return String(v)
+}
 
 const bestMetrics = computed(() => {
   if (!detail.value?.best_individual) return {}
@@ -1461,7 +1638,15 @@ async function loadCompareData() {
   for (const jid of compareJobIds.value) {
     try {
       const { data } = await axios.get(`/api/analysis/${pid}/jobs/${jid}/results`)
-      results.push({ jobId: jid, ...data })
+      // Find job metadata (name, config) from job list
+      const jobMeta = jobs.value.find(j => j.job_id === jid) || {}
+      results.push({
+        job_id: jid, jobId: jid,
+        name: jobMeta.name,
+        config_summary: jobMeta.config_summary,
+        best: data.best_individual || {},
+        ...data,
+      })
     } catch { /* skip */ }
   }
   compareData.value = results
@@ -1673,6 +1858,46 @@ async function cleanupDuplicates() {
     detail.value = null
   }
   alert(`Deleted ${deleted} duplicate job${deleted !== 1 ? 's' : ''}.`)
+}
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+async function doExport(format, section) {
+  exportMenuOpen.value = false
+  const pid = route.params.id
+  const jid = selectedJobId.value
+  if (!jid) return
+
+  let url
+  if (format === 'csv') {
+    url = `/api/export/${pid}/jobs/${jid}/csv?section=${section}`
+  } else if (format === 'report') {
+    url = `/api/export/${pid}/jobs/${jid}/report`
+  } else if (format === 'json') {
+    url = `/api/export/${pid}/jobs/${jid}/json`
+  } else if (format === 'notebook') {
+    url = `/api/export/${pid}/jobs/${jid}/notebook?lang=${section}`
+  }
+
+  try {
+    const { data, headers } = await axios.get(url, { responseType: 'blob' })
+    // Extract filename from Content-Disposition header
+    const disposition = headers['content-disposition'] || ''
+    const match = disposition.match(/filename="?([^"]+)"?/)
+    const filename = match ? match[1] : `export.${format === 'csv' ? 'csv' : format === 'json' ? 'json' : 'html'}`
+
+    // Trigger browser download
+    const blob = new Blob([data])
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(link.href)
+  } catch (e) {
+    console.error('Export failed:', e)
+    alert('Export failed: ' + (e.response?.data?.detail || e.message))
+  }
 }
 
 function truncateVotes(votes) {
@@ -2083,7 +2308,7 @@ onMounted(loadJobList)
   margin-bottom: 1.5rem;
   border-bottom: 1px solid var(--border-light);
 }
-.sub-tabs button {
+.sub-tabs > button {
   padding: 0.5rem 1.25rem;
   border: none;
   background: none;
@@ -2094,9 +2319,12 @@ onMounted(loadJobList)
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
-.sub-tabs button.active {
+.sub-tabs > button.active {
   color: var(--text-primary);
   border-bottom-color: var(--accent);
+}
+.sub-tabs {
+  align-items: center;
 }
 
 /* Summary stat cards */
@@ -2362,6 +2590,135 @@ onMounted(loadJobList)
 .info-text { color: var(--text-faint); font-size: 0.85rem; font-style: italic; }
 .empty { text-align: center; padding: 3rem; color: var(--text-faint); }
 .loading { text-align: center; padding: 3rem; color: var(--text-faint); }
+
+/* Comparative: metrics table */
+.compare-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.compare-table th {
+  background: var(--bg-card);
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-light);
+  white-space: nowrap;
+}
+.compare-table td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border-lighter, var(--border-light));
+  text-align: center;
+}
+.compare-table td.metric-name {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.compare-table td.best-val {
+  color: var(--accent, #00BFFF);
+  font-weight: 700;
+}
+.compare-table td.diff-val {
+  background: rgba(255, 165, 0, 0.08);
+  color: var(--text-primary);
+}
+.config-diff-table td {
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+
+/* Feature analysis */
+.feature-analysis {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.feature-stat {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+.fa-label {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+.fa-value {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.common-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  font-size: 0.82rem;
+  margin-top: 0.5rem;
+}
+
+/* Export dropdown */
+.export-dropdown-wrap {
+  position: relative;
+  margin-left: auto;
+}
+.btn-export {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-export:hover {
+  background: var(--accent, #00BFFF);
+  color: #fff;
+  border-color: var(--accent, #00BFFF);
+}
+.export-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 0.25rem 0;
+  min-width: 180px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  z-index: 100;
+}
+.export-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.9rem;
+  border: none;
+  background: transparent;
+  color: var(--text-body);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.export-menu button:hover {
+  background: var(--bg-hover, rgba(0,191,255,0.1));
+  color: var(--text-primary);
+}
+.export-menu hr {
+  border: none;
+  border-top: 1px solid var(--border-light);
+  margin: 0.25rem 0;
+}
 
 @media (max-width: 900px) {
   .best-model-layout { grid-template-columns: 1fr; }
