@@ -39,7 +39,7 @@
         :key="p.project_id"
         :project="p"
         :selected="store.selectedId === p.project_id"
-        @select="store.selectedId = p.project_id"
+        @select="openProject(p.project_id)"
         @open="openProject(p.project_id)"
       />
 
@@ -51,7 +51,7 @@
         :project="sp"
         :selected="store.selectedId === sp.project_id"
         :is-shared="true"
-        @select="store.selectedId = sp.project_id"
+        @select="openProject(sp.project_id)"
         @open="openProject(sp.project_id)"
       />
 

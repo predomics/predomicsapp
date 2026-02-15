@@ -2,7 +2,7 @@
   <div id="app">
     <nav class="navbar">
       <router-link to="/" class="brand">
-        <img src="/logo.png" alt="PredomicsApp" class="brand-logo" />
+        <img src="/logo-dark.png" alt="PredomicsApp" class="brand-logo" />
         PredomicsApp
       </router-link>
       <div class="nav-links">
