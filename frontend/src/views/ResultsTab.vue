@@ -87,6 +87,47 @@
       </div>
     </div>
 
+    <!-- Failed job error panel -->
+    <div v-if="selectedJobInfo && selectedJobInfo.status === 'failed' && !detail" class="failed-job-panel">
+      <div class="failed-header">
+        <span class="failed-icon">&#9888;</span>
+        <h3>Job Failed</h3>
+        <span class="failed-name" v-if="selectedJobInfo.name">{{ selectedJobInfo.name }}</span>
+      </div>
+      <div class="failed-details">
+        <div class="failed-row" v-if="selectedJobInfo.error_message">
+          <strong>Error:</strong>
+          <pre class="error-message">{{ selectedJobInfo.error_message }}</pre>
+        </div>
+        <div class="failed-row" v-if="selectedJobInfo.created_at">
+          <strong>Started:</strong> {{ formatDate(selectedJobInfo.created_at) }}
+        </div>
+        <div class="failed-row" v-if="selectedJobInfo.duration_seconds">
+          <strong>Duration:</strong> {{ formatDuration(selectedJobInfo.duration_seconds) }}
+        </div>
+        <div class="failed-row" v-if="selectedJobInfo.config_summary">
+          <strong>Config:</strong> {{ selectedJobInfo.config_summary }}
+        </div>
+      </div>
+      <div v-if="failedJobLog" class="failed-log">
+        <strong>Console output (last 50 lines):</strong>
+        <pre class="log-content">{{ failedJobLog }}</pre>
+      </div>
+      <div v-else class="failed-log-hint">
+        <button class="btn-sm btn-outline" @click="loadFailedJobLog">Show console log</button>
+      </div>
+    </div>
+
+    <!-- Pending/running job info panel -->
+    <div v-else-if="selectedJobInfo && (selectedJobInfo.status === 'pending' || selectedJobInfo.status === 'running') && !detail" class="pending-job-panel">
+      <div class="pending-header">
+        <span class="pending-icon">&#9203;</span>
+        <h3>Job {{ selectedJobInfo.status === 'running' ? 'Running' : 'Pending' }}</h3>
+        <span class="pending-name" v-if="selectedJobInfo.name">{{ selectedJobInfo.name }}</span>
+      </div>
+      <p class="pending-text">Results will appear here once the job completes.</p>
+    </div>
+
     <!-- Sub-tabs -->
     <nav class="sub-tabs" v-if="detail">
       <button :class="{ active: subTab === 'summary' }" @click="subTab = 'summary'">Summary</button>
@@ -680,6 +721,12 @@ const jobs = computed(() => {
   const allJobs = store.current?.jobs || []
   return allJobs.map(j => typeof j === 'string' ? { job_id: j, status: 'unknown' } : j)
 })
+
+const selectedJobInfo = computed(() => {
+  return jobs.value.find(j => j.job_id === selectedJobId.value) || null
+})
+
+const failedJobLog = ref('')
 
 const filteredJobs = computed(() => {
   let arr = [...jobs.value]
@@ -1932,11 +1979,24 @@ function renderComparativeCharts() {
   renderFeatureOverlap()
 }
 
+async function loadFailedJobLog() {
+  if (!selectedJobId.value) return
+  const pid = route.params.id
+  try {
+    const { data } = await axios.get(`/api/analysis/${pid}/jobs/${selectedJobId.value}/logs`)
+    const lines = (data.log || '').split('\n')
+    failedJobLog.value = lines.slice(-50).join('\n')
+  } catch {
+    failedJobLog.value = 'Unable to load console log.'
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Job table helpers
 // ---------------------------------------------------------------------------
 function selectJob(jobId) {
   selectedJobId.value = jobId
+  failedJobLog.value = ''
   loadJobResults()
 }
 
@@ -2226,6 +2286,74 @@ onMounted(loadJobList)
 </script>
 
 <style scoped>
+/* Failed job panel */
+.failed-job-panel {
+  background: var(--danger-bg, #2d1b1b);
+  border: 1px solid var(--danger-dark, #e06c75);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.failed-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.failed-header h3 { margin: 0; color: var(--danger-dark, #e06c75); font-size: 1rem; }
+.failed-icon { font-size: 1.2rem; }
+.failed-name { color: var(--text-muted); font-size: 0.85rem; }
+.failed-details { margin-bottom: 0.75rem; }
+.failed-row { margin-bottom: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); }
+.failed-row strong { color: var(--text-primary); }
+.error-message {
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0,0,0,0.2);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  color: #e06c75;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.failed-log { margin-top: 0.75rem; }
+.failed-log strong { font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem; }
+.log-content {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0,0,0,0.3);
+  border-radius: 4px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.failed-log-hint { margin-top: 0.5rem; }
+
+/* Pending/running job panel */
+.pending-job-panel {
+  background: var(--info-bg, #1b2d3d);
+  border: 1px solid var(--info, #61afef);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.pending-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.pending-header h3 { margin: 0; color: var(--info, #61afef); font-size: 1rem; }
+.pending-icon { font-size: 1.2rem; }
+.pending-name { color: var(--text-muted); font-size: 0.85rem; }
+.pending-text { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
+
 /* Job management table */
 .job-table-section {
   margin-bottom: 1.5rem;

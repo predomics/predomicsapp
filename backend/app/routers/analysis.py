@@ -260,12 +260,10 @@ async def list_batches(
         best_auc = None
         best_job_id = None
         for j in completed:
-            r = storage.get_job_result(project_id, j.id)
-            if r:
-                auc = r.get("best_individual", {}).get("auc")
-                if auc is not None and (best_auc is None or auc > best_auc):
-                    best_auc = auc
-                    best_job_id = j.id
+            auc = j.best_auc
+            if auc is not None and (best_auc is None or auc > best_auc):
+                best_auc = auc
+                best_job_id = j.id
 
         summaries.append({
             "batch_id": bid,
@@ -327,12 +325,15 @@ def _run_job(job_id: str, project_id: str, param_path: str, user_id: str = "") -
             with open(log_path, "w") as lf:
                 lf.write("[mock] Engine not available, using mock results\n")
 
+            best = mock_results.get("best_individual", {})
             with sync_session_factory() as db:
                 job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
                 job.status = "completed"
                 job.results_path = str(results_path)
                 job.completed_at = datetime.now(timezone.utc)
                 job.disk_size_bytes = _job_disk_size(project_id, job_id)
+                job.best_auc = best.get("auc")
+                job.best_k = best.get("k")
                 db.commit()
 
             if user_id:
@@ -366,12 +367,27 @@ def _run_job(job_id: str, project_id: str, param_path: str, user_id: str = "") -
             error_msg = log_path.read_text()[-500:] if log_path.exists() else "Unknown error"
             raise RuntimeError(f"Worker exited with code {proc.returncode}: {error_msg}")
 
+        # Extract best_auc/best_k from results for fast list_jobs
+        best_auc_val = None
+        best_k_val = None
+        if results_path.exists():
+            try:
+                with open(results_path) as rf:
+                    res = json.load(rf)
+                best = res.get("best_individual", {})
+                best_auc_val = best.get("auc")
+                best_k_val = best.get("k")
+            except Exception:
+                pass
+
         with sync_session_factory() as db:
             job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
             job.status = "completed"
             job.results_path = str(results_path)
             job.completed_at = datetime.now(timezone.utc)
             job.disk_size_bytes = _job_disk_size(project_id, job_id)
+            job.best_auc = best_auc_val
+            job.best_k = best_k_val
             db.commit()
 
         logger.info("Job %s completed", job_id)
@@ -447,11 +463,7 @@ async def find_duplicate_jobs(
         # Pick the best: completed > failed > pending, then highest AUC, then newest
         def sort_key(j):
             status_rank = {"completed": 0, "running": 1, "failed": 2, "pending": 3}.get(j.status, 4)
-            auc = 0.0
-            if j.status == "completed":
-                r = storage.get_job_result(project_id, j.id)
-                if r:
-                    auc = r.get("best_individual", {}).get("auc", 0.0) or 0.0
+            auc = j.best_auc or 0.0
             return (status_rank, -auc, -(j.created_at.timestamp() if j.created_at else 0))
         group_jobs.sort(key=sort_key)
         best_id = group_jobs[0].id
@@ -578,7 +590,7 @@ async def list_jobs(
     )
     jobs = result.scalars().all()
 
-    # Backfill missing config_hash and disk_size_bytes for older jobs
+    # Backfill missing cached columns for older jobs
     dirty = False
     for j in jobs:
         if j.config_hash is None and j.config:
@@ -587,18 +599,19 @@ async def list_jobs(
         if j.disk_size_bytes is None and j.status == "completed":
             j.disk_size_bytes = _job_disk_size(j.project_id, j.id)
             dirty = True
+        # Lazy backfill best_auc/best_k from results file if not cached yet
+        if j.status == "completed" and j.best_auc is None:
+            results = storage.get_job_result(project_id, j.id)
+            if results:
+                best = results.get("best_individual", {})
+                j.best_auc = best.get("auc")
+                j.best_k = best.get("k")
+                dirty = True
     if dirty:
         await db.commit()
 
-    summaries = []
-    for j in jobs:
-        if j.status == "completed":
-            results = storage.get_job_result(project_id, j.id)
-            if results:
-                summaries.append(_results_to_summary(j, results))
-                continue
-        summaries.append(_job_to_summary(j))
-    return summaries
+    # All data now comes from DB — no per-job file reads needed
+    return [_job_to_summary(j) for j in jobs]
 
 
 @router.delete("/{project_id}/jobs/{job_id}")
@@ -694,7 +707,10 @@ def _job_disk_size(project_id: str, job_id: str) -> int | None:
 
 
 def _job_to_summary(job: Job) -> ExperimentSummary:
-    """Convert a Job ORM object to an ExperimentSummary (no results loaded)."""
+    """Convert a Job ORM object to an ExperimentSummary.
+
+    Uses cached best_auc/best_k from DB columns — no file I/O needed.
+    """
     config = job.config or {}
     gen = config.get("general", {})
     ga = config.get("ga", {})
@@ -705,6 +721,8 @@ def _job_to_summary(job: Job) -> ExperimentSummary:
         job_id=job.id,
         name=job.name,
         status=JobStatus(job.status),
+        best_auc=getattr(job, 'best_auc', None),
+        best_k=getattr(job, 'best_k', None),
         created_at=job.created_at.isoformat() if job.created_at else None,
         completed_at=job.completed_at.isoformat() if job.completed_at else None,
         duration_seconds=duration,
@@ -716,6 +734,7 @@ def _job_to_summary(job: Job) -> ExperimentSummary:
         config_hash=getattr(job, 'config_hash', None),
         disk_size_bytes=getattr(job, 'disk_size_bytes', None),
         batch_id=getattr(job, 'batch_id', None),
+        error_message=getattr(job, 'error_message', None),
     )
 
 

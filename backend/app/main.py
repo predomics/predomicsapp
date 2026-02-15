@@ -767,6 +767,68 @@ async def _migrate_add_dataset_versions(conn):
     _log.info("Migration v15_dataset_versions complete")
 
 
+async def _migrate_add_job_best_auc(conn):
+    """v16: Add best_auc and best_k columns to jobs for fast list_jobs."""
+    try:
+        r = await conn.execute(
+            text("SELECT 1 FROM schema_versions WHERE version = 'v16_job_best_auc'")
+        )
+        if r.scalar():
+            return
+    except Exception:
+        pass
+
+    _log.info("Migration v16: job best_auc/best_k — starting")
+
+    for col, col_type in [("best_auc", "FLOAT"), ("best_k", "INTEGER")]:
+        try:
+            r = await conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'jobs' AND column_name = :col"
+            ), {"col": col})
+            if not r.scalar():
+                await conn.execute(text(
+                    f"ALTER TABLE jobs ADD COLUMN {col} {col_type}"
+                ))
+                _log.info("  Added jobs.%s column", col)
+        except Exception:
+            pass
+
+    # Backfill from results.json files for existing completed jobs
+    try:
+        rows = await conn.execute(text(
+            "SELECT id, project_id FROM jobs "
+            "WHERE status = 'completed' AND best_auc IS NULL"
+        ))
+        to_backfill = rows.fetchall()
+        if to_backfill:
+            _log.info("  Backfilling best_auc/best_k for %d completed jobs", len(to_backfill))
+            import json as _json
+            for job_id, project_id in to_backfill:
+                results_path = Path(settings.project_dir) / project_id / "jobs" / job_id / "results.json"
+                if results_path.exists():
+                    try:
+                        with open(results_path) as rf:
+                            res = _json.load(rf)
+                        best = res.get("best_individual", {})
+                        auc = best.get("auc")
+                        k = best.get("k")
+                        if auc is not None or k is not None:
+                            await conn.execute(text(
+                                "UPDATE jobs SET best_auc = :auc, best_k = :k WHERE id = :id"
+                            ), {"auc": auc, "k": k, "id": job_id})
+                    except Exception:
+                        pass
+    except Exception as e:
+        _log.warning("  Backfill skipped: %s", e)
+
+    await conn.execute(text(
+        "INSERT INTO schema_versions (version, applied_at) "
+        "VALUES ('v16_job_best_auc', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
+    ))
+    _log.info("Migration v16_job_best_auc complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
@@ -803,6 +865,8 @@ async def lifespan(app: FastAPI):
         await _migrate_add_webhooks(conn)
     async with engine.begin() as conn:
         await _migrate_add_dataset_versions(conn)
+    async with engine.begin() as conn:
+        await _migrate_add_job_best_auc(conn)
     _log.info("PredomicsApp started — data_dir=%s", settings.data_dir)
     yield
 

@@ -108,6 +108,8 @@ class Job(Base):
     config_hash: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     disk_size_bytes: Mapped[Optional[int]] = mapped_column(nullable=True)
     batch_id: Mapped[Optional[str]] = mapped_column(String(12), nullable=True, index=True)
+    best_auc: Mapped[Optional[float]] = mapped_column(nullable=True)
+    best_k: Mapped[Optional[int]] = mapped_column(nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="jobs")
     owner: Mapped[Optional["User"]] = relationship()

@@ -202,6 +202,7 @@ class ExperimentSummary(BaseModel):
     config_hash: Optional[str] = None
     disk_size_bytes: Optional[int] = None
     batch_id: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 class BatchSweepConfig(BaseModel):
