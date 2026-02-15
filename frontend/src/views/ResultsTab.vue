@@ -135,6 +135,7 @@
       <button :class="{ active: subTab === 'population' }" @click="subTab = 'population'">Population</button>
       <button v-if="juryData" :class="{ active: subTab === 'jury' }" @click="subTab = 'jury'">Jury</button>
       <button :class="{ active: subTab === 'comparative' }" @click="subTab = 'comparative'">Comparative</button>
+      <button v-if="population.length > 1" :class="{ active: subTab === 'copresence' }" @click="subTab = 'copresence'">Co-presence</button>
       <div class="export-dropdown-wrap" v-if="detail">
         <button class="btn-sm btn-export" @click="exportMenuOpen = !exportMenuOpen">
           &#8615; Export
@@ -607,6 +608,93 @@
       </p>
     </div>
 
+    <!-- ============================================================ -->
+    <!-- CO-PRESENCE SUB-TAB                                         -->
+    <!-- ============================================================ -->
+    <div v-if="detail && subTab === 'copresence'" class="sub-content">
+      <!-- Controls -->
+      <div class="pop-controls">
+        <div class="pop-controls-row">
+          <label class="fbm-toggle">
+            <input type="checkbox" v-model="copresenceFBM" />
+            FBM only
+            <span class="fbm-badge" v-if="copresenceFBM">{{ fbmCount }} / {{ population.length }}</span>
+          </label>
+          <label class="topn-control" style="margin-left: 1rem;">
+            Min prevalence
+            <input type="number" v-model.number="copresenceMinPrev" :min="2" :max="population.length" step="1" class="topn-input" />
+            models
+          </label>
+        </div>
+      </div>
+
+      <!-- Feature prevalence in population -->
+      <section class="section" v-if="copresencePopulation.length > 1">
+        <h3>Feature Prevalence in Population ({{ copresencePopulation.length }} models)</h3>
+        <div ref="copresencePrevalenceEl" class="plotly-chart"></div>
+      </section>
+
+      <!-- Co-occurrence heatmap -->
+      <section class="section" v-if="copresencePopulation.length > 1">
+        <h3>Feature Co-occurrence Matrix</h3>
+        <p class="info-text" style="margin-bottom: 0.5rem;">
+          Ratio of observed to expected co-occurrence. Values &gt; 1 (red) indicate features that co-occur more often than expected;
+          values &lt; 1 (blue) indicate mutual exclusion.
+        </p>
+        <div ref="copresenceHeatmapEl" class="plotly-chart"></div>
+      </section>
+
+      <!-- Co-occurrence network -->
+      <section class="section" v-if="copresencePopulation.length > 1">
+        <h3>Co-occurrence Network</h3>
+        <p class="info-text" style="margin-bottom: 0.5rem;">
+          Nodes sized by prevalence. Edges connect features that co-occur significantly more (green)
+          or less (red dashed) than expected. Edge width = strength of association.
+        </p>
+        <div ref="copresenceNetworkEl" class="plotly-chart"></div>
+      </section>
+
+      <!-- Co-occurrence statistics table -->
+      <section class="section" v-if="copresenceStats.length > 0">
+        <h3>Significant Co-occurrence Pairs ({{ copresenceStats.length }})</h3>
+        <table class="pop-table">
+          <thead>
+            <tr>
+              <th>Feature 1</th>
+              <th>Feature 2</th>
+              <th>Observed</th>
+              <th>Expected</th>
+              <th>Ratio</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, ri) in copresenceStatsPaginated" :key="ri">
+              <td>{{ featureLabel(row.f1) }}</td>
+              <td>{{ featureLabel(row.f2) }}</td>
+              <td>{{ row.observed }}</td>
+              <td>{{ row.expected.toFixed(1) }}</td>
+              <td :style="{ color: row.ratio > 1 ? 'var(--positive, #98c379)' : 'var(--negative, #e06c75)' }">
+                {{ row.ratio === Infinity ? '∞' : row.ratio.toFixed(2) }}
+              </td>
+              <td>
+                <span class="cooccur-type" :class="row.type">{{ row.type === 'positive' ? 'Co-occur' : 'Exclude' }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="pagination" v-if="copresenceStats.length > copresencePageSize">
+          <button @click="copresencePage = Math.max(0, copresencePage - 1)" :disabled="copresencePage === 0">&laquo; Prev</button>
+          <span>Page {{ copresencePage + 1 }} / {{ Math.ceil(copresenceStats.length / copresencePageSize) }}</span>
+          <button @click="copresencePage++" :disabled="(copresencePage + 1) * copresencePageSize >= copresenceStats.length">Next &raquo;</button>
+        </div>
+      </section>
+
+      <p v-if="population.length < 2" class="info-text">
+        Co-presence analysis requires at least 2 models in the population.
+      </p>
+    </div>
+
     <!-- Empty states -->
     <div v-if="!detail && jobs.length === 0" class="empty">
       No analysis jobs yet. Go to Data &amp; Run to launch an analysis.
@@ -713,6 +801,14 @@ const voteMatrixEl = ref(null)
 const comparisonBarEl = ref(null)
 const comparisonConvergenceEl = ref(null)
 const featureOverlapEl = ref(null)
+// Co-presence
+const copresencePrevalenceEl = ref(null)
+const copresenceHeatmapEl = ref(null)
+const copresenceNetworkEl = ref(null)
+const copresenceFBM = ref(true)
+const copresenceMinPrev = ref(2)
+const copresencePage = ref(0)
+const copresencePageSize = 20
 
 // ---------------------------------------------------------------------------
 // Computed
@@ -818,6 +914,106 @@ const fbmCount = computed(() => {
     pop = pop.filter(i => selectedDataTypes.value.includes(i.metrics?.data_type))
   }
   return filterFBM(pop).length
+})
+
+// Co-presence: population to analyse (optionally FBM-filtered)
+const copresencePopulation = computed(() => {
+  return copresenceFBM.value ? filterFBM(population.value) : population.value
+})
+
+// Co-presence: compute pairwise co-occurrence statistics
+const copresenceData = computed(() => {
+  const pop = copresencePopulation.value
+  if (pop.length < 2) return { features: [], prevalence: {}, matrix: [], pairs: [] }
+
+  // Build feature prevalence (count of models containing each feature)
+  const prevalence = {}
+  for (const ind of pop) {
+    for (const name of Object.keys(ind.named_features || {})) {
+      prevalence[name] = (prevalence[name] || 0) + 1
+    }
+  }
+
+  // Filter features by minimum prevalence
+  const minPrev = copresenceMinPrev.value || 2
+  const features = Object.entries(prevalence)
+    .filter(([, count]) => count >= minPrev)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name]) => name)
+
+  if (features.length < 2) return { features, prevalence, matrix: [], pairs: [] }
+
+  const N = pop.length
+  const fSet = new Set(features)
+
+  // Build binary presence per model (only for filtered features)
+  const presenceByModel = pop.map(ind => {
+    const s = new Set()
+    for (const name of Object.keys(ind.named_features || {})) {
+      if (fSet.has(name)) s.add(name)
+    }
+    return s
+  })
+
+  // Compute pairwise co-occurrence
+  const cooccurCounts = {}
+  for (let i = 0; i < features.length; i++) {
+    for (let j = i + 1; j < features.length; j++) {
+      let count = 0
+      for (const ps of presenceByModel) {
+        if (ps.has(features[i]) && ps.has(features[j])) count++
+      }
+      cooccurCounts[`${i},${j}`] = count
+    }
+  }
+
+  // Build matrix and pairs with stats
+  // matrix[i][j] = observed/expected ratio (or 0 if expected=0)
+  const matrix = features.map(() => features.map(() => 1))
+  const pairs = []
+
+  for (let i = 0; i < features.length; i++) {
+    for (let j = i + 1; j < features.length; j++) {
+      const ni = prevalence[features[i]]
+      const nj = prevalence[features[j]]
+      const observed = cooccurCounts[`${i},${j}`]
+      const expected = (ni * nj) / N
+
+      // Ratio of observed to expected
+      const ratio = expected > 0 ? observed / expected : (observed > 0 ? Infinity : 1)
+
+      matrix[i][j] = ratio
+      matrix[j][i] = ratio
+
+      // Simple significance test: |observed - expected| > 2*sqrt(expected)
+      // This is a rough Poisson-based criterion
+      const significant = expected > 0 && Math.abs(observed - expected) > 2 * Math.sqrt(expected)
+
+      if (significant) {
+        pairs.push({
+          f1: features[i],
+          f2: features[j],
+          observed,
+          expected,
+          ratio,
+          type: observed > expected ? 'positive' : 'negative',
+          strength: Math.abs(observed - expected) / Math.max(1, Math.sqrt(expected)),
+        })
+      }
+    }
+    matrix[i][i] = prevalence[features[i]] / N // diagonal = self-prevalence
+  }
+
+  // Sort pairs by strength descending
+  pairs.sort((a, b) => b.strength - a.strength)
+
+  return { features, prevalence, matrix, pairs }
+})
+
+const copresenceStats = computed(() => copresenceData.value.pairs)
+const copresenceStatsPaginated = computed(() => {
+  const start = copresencePage.value * copresencePageSize
+  return copresenceStats.value.slice(start, start + copresencePageSize)
 })
 
 // Comparative: feature intersection/union
@@ -1825,6 +2021,223 @@ function renderJuryCharts() {
 }
 
 // ---------------------------------------------------------------------------
+// CO-PRESENCE CHARTS
+// ---------------------------------------------------------------------------
+async function renderCopresencePrevalence() {
+  await nextTick()
+  if (!copresencePrevalenceEl.value) return
+  const { features, prevalence } = copresenceData.value
+  if (features.length === 0) return
+
+  const c = chartColors()
+  // Sort ascending so most prevalent is at top of horizontal bar chart
+  const sorted = [...features].sort((a, b) => prevalence[a] - prevalence[b])
+  const N = copresencePopulation.value.length
+
+  Plotly.newPlot(copresencePrevalenceEl.value, [{
+    type: 'bar',
+    orientation: 'h',
+    y: sorted.map(n => featureLabel(n)),
+    x: sorted.map(n => prevalence[n]),
+    text: sorted.map(n => `${((prevalence[n] / N) * 100).toFixed(0)}%`),
+    textposition: 'outside',
+    marker: {
+      color: sorted.map(n => {
+        const pct = prevalence[n] / N
+        return pct > 0.75 ? c.accent : pct > 0.5 ? c.class0Light : c.class1Light
+      }),
+    },
+    hovertemplate: '%{y}: %{x} models (%{text})<extra></extra>',
+  }], chartLayout({
+    xaxis: { title: { text: 'Models containing feature', font: { color: c.text } }, gridcolor: c.grid, color: c.text },
+    yaxis: { automargin: true, color: c.text },
+    height: Math.max(300, sorted.length * 22 + 80),
+    margin: { t: 20, b: 50, l: 200, r: 60 },
+    showlegend: false,
+  }), { responsive: true, displayModeBar: false })
+}
+
+async function renderCopresenceHeatmap() {
+  await nextTick()
+  if (!copresenceHeatmapEl.value) return
+  const { features, matrix } = copresenceData.value
+  if (features.length < 2) return
+
+  const c = chartColors()
+  const labels = features.map(n => featureLabel(n))
+
+  // Determine max ratio for symmetric colorscale
+  let maxRatio = 2
+  for (let i = 0; i < features.length; i++) {
+    for (let j = 0; j < features.length; j++) {
+      if (i !== j && isFinite(matrix[i][j])) {
+        maxRatio = Math.max(maxRatio, matrix[i][j])
+      }
+    }
+  }
+  maxRatio = Math.min(maxRatio, 5) // cap at 5 for readability
+
+  // Blue (exclusion) → white (independent) → red (co-occurrence)
+  const colorscale = [
+    [0, 'rgba(0, 100, 200, 0.7)'],
+    [0.5 / maxRatio, 'rgba(0, 100, 200, 0.3)'],
+    [1 / maxRatio, c.paper],
+    [(1 + maxRatio) / (2 * maxRatio), 'rgba(200, 50, 50, 0.3)'],
+    [1, 'rgba(200, 50, 50, 0.7)'],
+  ]
+
+  // Cap matrix values for display
+  const displayMatrix = matrix.map(row => row.map(v => Math.min(isFinite(v) ? v : maxRatio, maxRatio)))
+
+  const size = Math.max(400, features.length * 28 + 120)
+
+  Plotly.newPlot(copresenceHeatmapEl.value, [{
+    type: 'heatmap',
+    z: displayMatrix,
+    x: labels,
+    y: labels,
+    colorscale,
+    zmin: 0,
+    zmax: maxRatio,
+    showscale: true,
+    colorbar: {
+      title: { text: 'Obs/Exp', font: { color: c.text, size: 10 } },
+      tickfont: { color: c.text, size: 9 },
+      len: 0.5, thickness: 12,
+    },
+    xgap: 1,
+    ygap: 1,
+    hovertemplate: '%{y} × %{x}<br>Obs/Exp: %{z:.2f}<extra></extra>',
+  }], chartLayout({
+    xaxis: { automargin: true, color: c.text, tickangle: -45 },
+    yaxis: { automargin: true, color: c.text },
+    height: size,
+    width: size,
+    margin: { t: 20, b: 120, l: 200, r: 60 },
+  }), { responsive: true, displayModeBar: true })
+}
+
+async function renderCopresenceNetwork() {
+  await nextTick()
+  if (!copresenceNetworkEl.value) return
+  const { features, prevalence, pairs } = copresenceData.value
+  if (features.length < 2 || pairs.length === 0) return
+
+  const c = chartColors()
+  const N = copresencePopulation.value.length
+
+  // Simple force-directed layout using feature indices
+  // Place nodes in a circle, then adjust based on connections
+  const nNodes = features.length
+  const nodeX = features.map((_, i) => Math.cos(2 * Math.PI * i / nNodes) * 100)
+  const nodeY = features.map((_, i) => Math.sin(2 * Math.PI * i / nNodes) * 100)
+
+  // Simple spring-force iterations to improve layout
+  const featureIdx = {}
+  features.forEach((f, i) => { featureIdx[f] = i })
+
+  for (let iter = 0; iter < 60; iter++) {
+    const fx = new Array(nNodes).fill(0)
+    const fy = new Array(nNodes).fill(0)
+
+    // Repulsion between all nodes
+    for (let i = 0; i < nNodes; i++) {
+      for (let j = i + 1; j < nNodes; j++) {
+        const dx = nodeX[i] - nodeX[j]
+        const dy = nodeY[i] - nodeY[j]
+        const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
+        const force = 500 / (dist * dist)
+        fx[i] += force * dx / dist
+        fy[i] += force * dy / dist
+        fx[j] -= force * dx / dist
+        fy[j] -= force * dy / dist
+      }
+    }
+
+    // Attraction along edges (positive co-occurrence)
+    for (const pair of pairs) {
+      const i = featureIdx[pair.f1]
+      const j = featureIdx[pair.f2]
+      if (i === undefined || j === undefined) continue
+      const dx = nodeX[j] - nodeX[i]
+      const dy = nodeY[j] - nodeY[i]
+      const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
+      const sign = pair.type === 'positive' ? 1 : -1
+      const force = sign * pair.strength * 0.05
+      fx[i] += force * dx / dist
+      fy[i] += force * dy / dist
+      fx[j] -= force * dx / dist
+      fy[j] -= force * dy / dist
+    }
+
+    // Apply forces with damping
+    const damping = 0.8 / (1 + iter * 0.05)
+    for (let i = 0; i < nNodes; i++) {
+      nodeX[i] += fx[i] * damping
+      nodeY[i] += fy[i] * damping
+    }
+  }
+
+  // Draw edges as individual traces
+  const edgeTraces = []
+  for (const pair of pairs) {
+    const i = featureIdx[pair.f1]
+    const j = featureIdx[pair.f2]
+    if (i === undefined || j === undefined) continue
+    const isPos = pair.type === 'positive'
+    edgeTraces.push({
+      type: 'scatter', mode: 'lines',
+      x: [nodeX[i], nodeX[j], null],
+      y: [nodeY[i], nodeY[j], null],
+      line: {
+        color: isPos ? 'rgba(100, 200, 100, 0.5)' : 'rgba(200, 80, 80, 0.4)',
+        width: Math.min(4, 1 + pair.strength * 0.3),
+        dash: isPos ? 'solid' : 'dash',
+      },
+      hoverinfo: 'skip',
+      showlegend: false,
+    })
+  }
+
+  // Draw nodes
+  const maxPrev = Math.max(...features.map(f => prevalence[f]))
+  const nodeTrace = {
+    type: 'scatter', mode: 'markers+text',
+    x: nodeX,
+    y: nodeY,
+    text: features.map(f => featureLabel(f)),
+    textposition: 'top center',
+    textfont: { color: c.text, size: 9 },
+    marker: {
+      size: features.map(f => 10 + (prevalence[f] / maxPrev) * 25),
+      color: features.map(f => {
+        const pct = prevalence[f] / N
+        return pct > 0.75 ? c.accent : pct > 0.5 ? c.class0Light : c.class1Light
+      }),
+      line: { color: c.text, width: 1 },
+      opacity: 0.85,
+    },
+    hovertemplate: '%{text}<br>Prevalence: %{customdata} models<extra></extra>',
+    customdata: features.map(f => prevalence[f]),
+    showlegend: false,
+  }
+
+  Plotly.newPlot(copresenceNetworkEl.value, [...edgeTraces, nodeTrace], chartLayout({
+    xaxis: { visible: false, showgrid: false, zeroline: false },
+    yaxis: { visible: false, showgrid: false, zeroline: false, scaleanchor: 'x' },
+    height: 500,
+    margin: { t: 20, b: 20, l: 20, r: 20 },
+    hovermode: 'closest',
+  }), { responsive: true, displayModeBar: false })
+}
+
+function renderCoPresenceCharts() {
+  renderCopresencePrevalence()
+  renderCopresenceHeatmap()
+  renderCopresenceNetwork()
+}
+
+// ---------------------------------------------------------------------------
 // COMPARATIVE CHARTS
 // ---------------------------------------------------------------------------
 // predomicspkg-inspired palette: deepskyblue, firebrick, darkorchid, darkgoldenrod, teal, coral, slateblue, seagreen
@@ -2213,6 +2626,7 @@ async function renderActiveTab() {
   else if (subTab.value === 'population') renderPopulationCharts()
   else if (subTab.value === 'jury') renderJuryCharts()
   else if (subTab.value === 'comparative') renderComparativeCharts()
+  else if (subTab.value === 'copresence') renderCoPresenceCharts()
 }
 
 // ---------------------------------------------------------------------------
@@ -2248,6 +2662,18 @@ watch(topNModels, debouncedPopRender)
 watch(selectedLanguages, debouncedPopRender, { deep: true })
 watch(selectedDataTypes, debouncedPopRender, { deep: true })
 watch(fbmEnabled, debouncedPopRender)
+
+// Re-render co-presence charts when controls change
+let _copresenceTimer = null
+function debouncedCopresenceRender() {
+  clearTimeout(_copresenceTimer)
+  _copresenceTimer = setTimeout(() => {
+    copresencePage.value = 0
+    if (subTab.value === 'copresence') renderCoPresenceCharts()
+  }, 300)
+}
+watch(copresenceFBM, debouncedCopresenceRender)
+watch(copresenceMinPrev, debouncedCopresenceRender)
 
 // Load compare data when selection changes
 watch(compareJobIds, async () => {
@@ -3027,6 +3453,23 @@ onMounted(loadJobList)
   border: none;
   border-top: 1px solid var(--border-light);
   margin: 0.25rem 0;
+}
+
+/* Co-presence badges */
+.cooccur-type {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.cooccur-type.positive {
+  background: rgba(100, 200, 100, 0.15);
+  color: var(--positive, #98c379);
+}
+.cooccur-type.negative {
+  background: rgba(200, 80, 80, 0.15);
+  color: var(--negative, #e06c75);
 }
 
 @media (max-width: 900px) {
