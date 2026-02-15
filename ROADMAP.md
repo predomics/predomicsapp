@@ -100,24 +100,24 @@ Organize datasets with tags and enable search/filter.
 
 ## Landing Page
 
-### 9. Animated Workflow Diagram
-**Priority:** LOW | **Effort:** Medium
+### 9. Animated Workflow Diagram ✅
+**Priority:** LOW | **Effort:** Medium | **Status:** Done
 
-Interactive SVG/CSS animation showing the Predomics pipeline.
+Interactive CSS animation showing the Predomics pipeline on the landing page.
 
-- Data input → Feature selection → Evolutionary search → Model evaluation → Jury voting
-- Step-by-step animation triggered on scroll
-- Clickable steps linking to documentation
+- 5-step pipeline: Data Input → Feature Selection → Evolutionary Search → Model Evaluation → Jury Voting
+- CSS keyframe fadeSlideIn animation with staggered delays
+- Arrow connectors between steps, responsive layout
+- Each step has icon, label, and description
 
-### 10. Use Case Examples
-**Priority:** LOW | **Effort:** Low
+### 10. Use Case Examples ✅
+**Priority:** LOW | **Effort:** Low | **Status:** Done
 
-Add real-world use cases with results to the landing page.
+Real-world use cases with results on the landing page.
 
-- Cirrhosis prediction from gut microbiome
-- Cancer classification from gene expression
-- Metabolic disease biomarker discovery
-- Each with key metrics, model size, and publication reference
+- 4 use cases: Cirrhosis (Qin 2014), Cancer (Zeller 2014), Treatment Response (Gopalakrishnan 2018), Metabolic Disease (Karlsson 2013)
+- Each card has icon, description, key metrics (AUC, features, samples), and publication reference
+- Hover effects, responsive grid layout
 
 ---
 
@@ -133,24 +133,26 @@ Expand test suite to cover critical paths.
 - Edge cases: concurrent job execution, large datasets, error recovery
 - CI pipeline: fail on coverage regression
 
-### 12. API Documentation
-**Priority:** LOW | **Effort:** Low
+### 12. API Documentation ✅
+**Priority:** LOW | **Effort:** Low | **Status:** Done
 
 Auto-generate OpenAPI documentation.
 
-- FastAPI already generates `/docs` and `/redoc` endpoints
-- Add detailed docstrings and examples to all endpoints
-- Generate client SDK types for TypeScript frontend
-- Publish API docs on landing page
+- Fixed SPA catch-all to not intercept `/docs`, `/redoc`, `/openapi.json` paths
+- FastAPI Swagger UI available at `/docs`, ReDoc at `/redoc`
+- OpenAPI JSON schema at `/openapi.json`
 
-### 13. Production Deployment Guide
-**Priority:** MEDIUM | **Effort:** Low
+### 13. Production Deployment Guide ✅
+**Priority:** MEDIUM | **Effort:** Low | **Status:** Done
 
-Documentation for deploying to various environments.
+Comprehensive DEPLOYMENT.md covering all deployment scenarios.
 
-- Docker Compose for single-server deployment (current)
-- Kubernetes Helm chart for cluster deployment
-- NGINX reverse proxy configuration
-- SSL/TLS setup with Let's Encrypt
-- PostgreSQL migration from SQLite
-- Backup and restore procedures
+- Docker Compose single-server deployment with production overrides
+- Full environment variable reference table
+- NGINX reverse proxy configuration with security headers
+- SSL/TLS setup with Let's Encrypt and certbot
+- PostgreSQL configuration and managed database migration
+- Backup & restore procedures (database + files) with automated cron script
+- Kubernetes deployment manifests with Ingress and cert-manager
+- Health check and monitoring guidance
+- Troubleshooting section

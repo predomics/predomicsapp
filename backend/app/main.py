@@ -6,7 +6,7 @@ import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -735,9 +735,15 @@ if _static_dir.is_dir():
 
     app.mount("/assets", StaticFiles(directory=_static_dir / "assets"), name="assets")
 
+    # Paths that should NOT be handled by the SPA (let FastAPI handle them)
+    _reserved_paths = {"docs", "redoc", "openapi.json", "health", "api"}
+
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        """Serve Vue.js SPA — all non-API routes return index.html."""
+        """Serve Vue.js SPA — all non-API/docs routes return index.html."""
+        first_segment = full_path.split("/")[0] if full_path else ""
+        if first_segment in _reserved_paths:
+            raise HTTPException(status_code=404, detail="Not found")
         file_path = _static_dir / full_path
         if file_path.is_file():
             return FileResponse(file_path)
