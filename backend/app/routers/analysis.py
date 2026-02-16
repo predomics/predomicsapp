@@ -11,7 +11,7 @@ from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Body
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Body, File, UploadFile, Form
 from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,6 +28,7 @@ from ..models.schemas import (
     JobStatus,
 )
 from ..services import engine, storage, audit
+from ..services.prediction import predict_from_model, parse_tsv
 from ..services.webhooks import send_webhook_sync
 
 logger = logging.getLogger(__name__)
@@ -571,6 +572,55 @@ async def get_job_results_raw(
         raise HTTPException(status_code=404, detail="Results not found")
 
     return results
+
+
+@router.post("/{project_id}/jobs/{job_id}/validate")
+async def validate_on_new_data(
+    project_id: str,
+    job_id: str,
+    x_file: UploadFile = File(..., description="Feature matrix TSV"),
+    y_file: UploadFile = File(None, description="Optional class labels TSV"),
+    features_in_rows: bool = Form(True),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Score new samples against a trained model (viewer access).
+
+    Upload an X matrix (TSV) and optionally Y labels to compute predictions
+    and evaluation metrics using the best model from a completed job.
+    """
+    job = await _verify_job_access(project_id, job_id, user, db)
+    if job.status != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed")
+
+    results = storage.get_job_result(project_id, job_id)
+    if not results:
+        raise HTTPException(status_code=404, detail="Results not found")
+
+    try:
+        x_content = await x_file.read()
+        x_data = parse_tsv(x_content)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse X file: {e}")
+
+    y_labels = None
+    if y_file is not None:
+        try:
+            y_content = await y_file.read()
+            y_df = parse_tsv(y_content)
+            y_labels = y_df.iloc[:, 0]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse Y file: {e}")
+
+    try:
+        prediction = predict_from_model(
+            results, x_data, y_labels=y_labels,
+            features_in_rows=features_in_rows,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+
+    return prediction
 
 
 @router.get("/{project_id}/jobs")

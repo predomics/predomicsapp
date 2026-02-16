@@ -14,7 +14,7 @@ from sqlalchemy import text
 from .core.config import settings
 from .core.database import engine, Base
 from .models import db_models  # noqa: F401 — ensure models are registered
-from .routers import health, projects, analysis, auth, samples, datasets, sharing, admin, data_explore, export, websocket, templates, webhook_router
+from .routers import health, projects, analysis, auth, samples, datasets, sharing, admin, data_explore, export, websocket, templates, webhook_router, predict, dashboard, comments, public
 from .routers.datasets import _infer_role
 from .services.storage import ensure_dirs
 
@@ -829,6 +829,68 @@ async def _migrate_add_job_best_auc(conn):
     _log.info("Migration v16_job_best_auc complete")
 
 
+async def _migrate_add_project_comments(conn):
+    """v17: Create project_comments table."""
+    try:
+        r = await conn.execute(
+            text("SELECT 1 FROM schema_versions WHERE version = 'v17_project_comments'")
+        )
+        if r.scalar():
+            return
+    except Exception:
+        pass
+
+    _log.info("Migration v17: project_comments — starting")
+    await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS project_comments (
+            id VARCHAR(12) PRIMARY KEY,
+            project_id VARCHAR(12) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            user_id VARCHAR(12) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+    """))
+    await conn.execute(text(
+        "INSERT INTO schema_versions (version, applied_at) "
+        "VALUES ('v17_project_comments', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
+    ))
+    _log.info("Migration v17_project_comments complete")
+
+
+async def _migrate_add_public_shares(conn):
+    """v18: Create public_shares table."""
+    try:
+        r = await conn.execute(
+            text("SELECT 1 FROM schema_versions WHERE version = 'v18_public_shares'")
+        )
+        if r.scalar():
+            return
+    except Exception:
+        pass
+
+    _log.info("Migration v18: public_shares — starting")
+    await conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS public_shares (
+            id VARCHAR(12) PRIMARY KEY,
+            project_id VARCHAR(12) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            token VARCHAR(64) NOT NULL UNIQUE,
+            created_by VARCHAR(12) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at TIMESTAMP WITH TIME ZONE,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares(token)"
+    ))
+    await conn.execute(text(
+        "INSERT INTO schema_versions (version, applied_at) "
+        "VALUES ('v18_public_shares', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
+    ))
+    _log.info("Migration v18_public_shares complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
@@ -867,6 +929,10 @@ async def lifespan(app: FastAPI):
         await _migrate_add_dataset_versions(conn)
     async with engine.begin() as conn:
         await _migrate_add_job_best_auc(conn)
+    async with engine.begin() as conn:
+        await _migrate_add_project_comments(conn)
+    async with engine.begin() as conn:
+        await _migrate_add_public_shares(conn)
     _log.info("PredomicsApp started — data_dir=%s", settings.data_dir)
     yield
 
@@ -918,6 +984,10 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(templates.router, prefix="/api")
 app.include_router(webhook_router.router, prefix="/api")
+app.include_router(predict.router, prefix="/api")
+app.include_router(dashboard.router, prefix="/api")
+app.include_router(comments.router, prefix="/api")
+app.include_router(public.router, prefix="/api")
 app.include_router(websocket.router)  # WebSocket (no /api prefix, uses /ws/)
 
 # Serve Vue.js frontend (production: built into backend/static/)

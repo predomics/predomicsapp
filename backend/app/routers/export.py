@@ -246,6 +246,34 @@ async def export_json(
     )
 
 
+@router.get("/{project_id}/jobs/{job_id}/pdf")
+async def export_pdf(
+    project_id: str,
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export a PDF biomarker discovery report for a job."""
+    job, results = await _get_job_results(project_id, job_id, user, db)
+
+    from ..services.pdf_report import generate_pdf
+
+    job_name = job.name or job_id[:8]
+    pdf_bytes = generate_pdf(
+        job_id=job_id,
+        job_name=job_name,
+        results=results,
+        config=job.config,
+    )
+
+    filename = f"predomics_biomarker_report_{job_id[:8]}.pdf"
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{project_id}/jobs/{job_id}/notebook")
 async def export_notebook(
     project_id: str,

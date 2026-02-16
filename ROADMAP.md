@@ -1,6 +1,6 @@
 # PredomicsApp-Web — Roadmap
 
-_Last updated: 2026-02-15_
+_Last updated: 2026-02-16_
 
 ---
 
@@ -305,3 +305,136 @@ Per-user and per-IP rate limits using slowapi (in-memory, no Redis required).
 - Limiter decorators on auth, upload, and admin endpoints
 - 429 toast handling in frontend Axios interceptor
 - Global enable/disable via config setting
+
+---
+
+## Phase 4: Analytics, Collaboration & Infrastructure
+
+### 27. External Validation ✅
+**Priority:** HIGH | **Effort:** Medium | **Status:** Done
+
+Score new samples against trained models without re-training.
+
+- Shared prediction service (`services/prediction.py`): coefficient extraction, data_type transform, score computation, threshold classification
+- Upload X_valid.tsv + optional Y_valid.tsv via multipart form
+- Validation metrics: AUC, accuracy, sensitivity, specificity, confusion matrix
+- Per-sample prediction table with scores and classifications
+- Backend: `POST /api/analysis/{id}/jobs/{jid}/validate` endpoint
+- Frontend: ValidateModal in Best Model sub-tab with file upload and results display
+
+### 28. Model Deployment API ✅
+**Priority:** HIGH | **Effort:** Medium | **Status:** Done
+
+Serve trained models as live prediction endpoints.
+
+- `POST /api/predict/{job_id}` — JSON body with `{features: {name: [values]}, sample_names: [...]}`
+- Returns scores, predicted_classes, threshold, matched/missing features
+- Reuses shared `prediction.py` service from F27
+- API key authentication (`X-API-Key` header) for programmatic access
+- Frontend: "Prediction API" section in Best Model sub-tab with endpoint URL, curl example, and copy button
+
+### 29. Biomarker Discovery Report ✅
+**Priority:** HIGH | **Effort:** Medium | **Status:** Done
+
+Auto-generate publication-ready PDF summarizing analysis findings.
+
+- 3-page PDF report using reportlab (`services/pdf_report.py`)
+- Page 1: Performance metrics (AUC, accuracy, sensitivity, specificity), jury summary
+- Page 2: Feature table with coefficients, taxonomy annotations, functional properties
+- Page 3: Configuration summary, generation tracking highlights
+- Backend: `GET /api/export/{pid}/jobs/{jid}/pdf` endpoint
+- Frontend: "PDF Biomarker Report" option in Export dropdown
+
+### 30. Multi-Cohort Meta-Analysis
+**Priority:** HIGH | **Effort:** High | **Status:** Pending
+
+Compare models trained on different datasets for the same phenotype.
+
+- Select multiple completed jobs (cross-project) for comparison
+- Shared feature overlap analysis (Venn diagram or UpSet plot)
+- Concordance of feature directions (same sign across cohorts)
+- Meta-AUC estimation across datasets
+- Frontend: new "Meta-Analysis" top-level view
+- Backend: cross-project job query endpoint
+
+### 31. SHAP-Style Feature Explanations
+**Priority:** MEDIUM | **Effort:** Medium | **Status:** Pending
+
+Per-sample feature contribution breakdown for model interpretability.
+
+- Compute Shapley-like values: feature × coefficient × sample value
+- Beeswarm plot: feature impact distribution across all samples
+- Force plot: single-sample waterfall of feature contributions
+- Dependence plot: feature value vs. SHAP value scatter
+- All computed client-side from existing results + barcode data
+- Frontend: "Explanations" section in Best Model sub-tab
+
+### 32. Project Comments & Activity Feed ✅
+**Priority:** MEDIUM | **Effort:** Low | **Status:** Done
+
+Threaded notes/discussion per project.
+
+- `ProjectComment` model: id, project_id, user_id, content (Text), created_at, updated_at
+- CRUD endpoints: create, list, update (author only), delete (author or project owner)
+- CommentsSidebar component: slide-out panel with comment list, add/edit/delete
+- User initials avatar, timestamps, Ctrl+Enter submit shortcut
+- "Notes" button in project dashboard header
+- Migration v17
+
+### 33. Public Sharing Links ✅
+**Priority:** MEDIUM | **Effort:** Low | **Status:** Done
+
+Share results via read-only public links (no login required).
+
+- `PublicShare` model: id, project_id, token (64-char, unique indexed), created_by, expires_at, is_active
+- Authenticated endpoints: create, list, revoke links (project owner only)
+- Unauthenticated endpoints: `GET /api/public/{token}` for project info + jobs, `GET /api/public/{token}/jobs/{jid}/results` for full results
+- PublicShareModal: create links with expiry options (7/30/90 days or never), copy URL, revoke
+- PublicShareView: guest-accessible page with project summary, job cards, metrics grid, feature display
+- "Public Link" button in project dashboard header
+- Router guard allows both authenticated and unauthenticated access
+- Migration v18
+
+### 34. Dashboard Overview ✅
+**Priority:** MEDIUM | **Effort:** Low | **Status:** Done
+
+Global view of all projects with summary statistics and recent activity.
+
+- Backend: `GET /api/dashboard/` — aggregates counts (projects, datasets, running/completed/failed jobs, shared)
+- Active jobs section with status badges and links to project console
+- Recent completions mini-table (project name, AUC, k, date)
+- Activity feed from audit_logs with action icons, resource links, timeAgo formatting
+- Summary cards grid: Projects, Datasets, Running, Completed, Failed, Shared
+- "Dashboard" link in navbar (before Projects)
+
+### 35. E2E Integration Tests
+**Priority:** MEDIUM | **Effort:** Medium | **Status:** Pending
+
+Automated end-to-end testing using Playwright.
+
+- Extend existing `capture_screenshots.mjs` into full test suite
+- Test flows: register → create project → upload data → run analysis → view results
+- Assert page content, not just screenshots
+- CI integration: run E2E tests in GitHub Actions with Docker
+- Smoke test for production deployments
+
+### 36. CI/CD Pipeline & Docker Registry
+**Priority:** LOW | **Effort:** Low | **Status:** Pending
+
+Auto-deploy on tag push with container registry publishing.
+
+- GitHub Actions: build + push Docker image to GHCR on version tags
+- Auto-deploy to staging on main push (optional webhook)
+- Release artifact: pre-built Docker image for easy deployment
+- Version label in Docker image metadata
+
+### 37. Internationalization (i18n)
+**Priority:** LOW | **Effort:** High | **Status:** Pending
+
+Multi-language support starting with French.
+
+- vue-i18n integration with JSON locale files
+- Extract all user-facing strings to translation keys
+- Language selector in navbar or profile settings
+- Initial languages: English (default), French
+- Backend: translatable error messages

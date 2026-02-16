@@ -25,6 +25,11 @@ const routes = [
     component: () => import('./views/HomeView.vue'),
   },
   {
+    path: '/dashboard',
+    name: 'Dashboard',
+    component: () => import('./views/DashboardView.vue'),
+  },
+  {
     path: '/projects',
     name: 'Projects',
     component: () => import('./views/ProjectsView.vue'),
@@ -58,6 +63,12 @@ const routes = [
       { path: 'results/:jobId', name: 'ProjectJobResults', component: () => import('./views/ResultsTab.vue') },
     ],
   },
+  {
+    path: '/public/:token',
+    name: 'PublicShare',
+    component: () => import('./views/PublicShareView.vue'),
+    meta: { guest: true, public: true },
+  },
 ]
 
 const router = createRouter({
@@ -71,8 +82,8 @@ router.beforeEach(async (to) => {
   if (!to.meta.guest && to.name !== 'Home' && !token) {
     return { name: 'Login' }
   }
-  // Redirect away from login if already authenticated
-  if (to.meta.guest && token) {
+  // Redirect away from login if already authenticated (but allow public pages)
+  if (to.meta.guest && !to.meta.public && token) {
     return { name: 'Projects' }
   }
   // Admin route guard

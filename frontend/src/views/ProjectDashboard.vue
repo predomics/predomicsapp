@@ -7,12 +7,26 @@
         {{ project.jobs?.length || 0 }} jobs
       </div>
       <button class="share-btn" @click="showShare = true">Share</button>
+      <button class="share-btn" @click="showPublicShare = true">Public Link</button>
+      <button class="share-btn" @click="showComments = !showComments">Notes</button>
     </header>
 
     <ShareModal
       v-if="showShare"
       :project-id="projectId"
       @close="showShare = false"
+    />
+
+    <PublicShareModal
+      v-if="showPublicShare"
+      :project-id="projectId"
+      @close="showPublicShare = false"
+    />
+
+    <CommentsSidebar
+      :project-id="projectId"
+      :visible="showComments"
+      @close="showComments = false"
     />
 
     <nav class="tab-nav">
@@ -64,6 +78,8 @@ import { useProjectStore } from '../stores/project'
 import ConsolePanel from '../components/ConsolePanel.vue'
 import ProgressCircle from '../components/ProgressCircle.vue'
 import ShareModal from '../components/ShareModal.vue'
+import CommentsSidebar from '../components/CommentsSidebar.vue'
+import PublicShareModal from '../components/PublicShareModal.vue'
 import { requestPermission, notifyJobCompleted, notifyJobFailed } from '../utils/notify'
 import { useToast } from '../composables/useToast'
 
@@ -71,6 +87,8 @@ const route = useRoute()
 const store = useProjectStore()
 const { addToast } = useToast()
 const showShare = ref(false)
+const showPublicShare = ref(false)
+const showComments = ref(false)
 const jobProgress = reactive({ generation: 0, maxGen: 0, k: 0, language: '', pct: 0, eta: '', status: 'pending' })
 
 const projectId = computed(() => route.params.id)

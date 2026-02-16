@@ -142,6 +142,7 @@
         </button>
         <div class="export-menu" v-if="exportMenuOpen" @mouseleave="exportMenuOpen = false">
           <button @click="doExport('report')">HTML Report</button>
+          <button @click="doExport('pdf')">PDF Biomarker Report</button>
           <button @click="doExport('json')">Full JSON</button>
           <hr />
           <button @click="doExport('csv', 'best_model')">CSV: Best Model</button>
@@ -260,6 +261,47 @@
         <div v-if="contributionLoading" class="loading">Computing per-sample contributions...</div>
         <div v-if="contributionData" ref="contributionHeatmapEl" class="plotly-chart plotly-chart-tall"></div>
       </section>
+
+      <!-- External validation -->
+      <section class="section" v-if="detail.best_individual">
+        <h3>External Validation</h3>
+        <p class="info-text">Score an independent cohort against this model to assess generalisability.</p>
+        <button class="btn-sm btn-outline" @click="showValidateModal = true">
+          Validate on New Data
+        </button>
+      </section>
+
+      <!-- Deploy as API -->
+      <section class="section" v-if="detail.best_individual">
+        <h3>Prediction API</h3>
+        <p class="info-text">Use this endpoint to score new samples programmatically.</p>
+        <div class="deploy-box">
+          <div class="deploy-endpoint">
+            <code>POST {{ apiBaseUrl }}/api/predict/{{ selectedJobId }}</code>
+            <button class="btn-sm btn-outline" @click="copyDeployUrl">{{ deployCopied ? 'Copied!' : 'Copy' }}</button>
+          </div>
+          <details class="deploy-example">
+            <summary>Usage example (curl)</summary>
+            <pre class="code-block">curl -X POST {{ apiBaseUrl }}/api/predict/{{ selectedJobId }} \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+  "features": {
+    "feature_1": [0.1, 0.2],
+    "feature_2": [0.3, 0.4]
+  },
+  "sample_names": ["sample_A", "sample_B"]
+}'</pre>
+          </details>
+        </div>
+      </section>
+
+      <ValidateModal
+        v-if="showValidateModal"
+        :project-id="route.params.id"
+        :job-id="selectedJobId"
+        @close="showValidateModal = false"
+      />
     </div>
 
     <!-- ============================================================ -->
@@ -772,6 +814,7 @@ import { useRoute } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 import { useChartTheme } from '../composables/useChartTheme'
 import axios from 'axios'
+import ValidateModal from '../components/ValidateModal.vue'
 // Lazy-load Plotly for better initial page load
 let Plotly = null
 async function ensurePlotly() {
@@ -828,6 +871,13 @@ const duplicatesLoading = ref(false)
 
 // Export menu state
 const exportMenuOpen = ref(false)
+
+// Validate modal state
+const showValidateModal = ref(false)
+
+// Deploy API state
+const apiBaseUrl = window.location.origin
+const deployCopied = ref(false)
 
 // Chart element refs — Summary
 const convergenceChartEl = ref(null)
@@ -2791,6 +2841,8 @@ async function doExport(format, section) {
     url = `/api/export/${pid}/jobs/${jid}/csv?section=${section}`
   } else if (format === 'report') {
     url = `/api/export/${pid}/jobs/${jid}/report`
+  } else if (format === 'pdf') {
+    url = `/api/export/${pid}/jobs/${jid}/pdf`
   } else if (format === 'json') {
     url = `/api/export/${pid}/jobs/${jid}/json`
   } else if (format === 'notebook') {
@@ -2815,6 +2867,14 @@ async function doExport(format, section) {
     console.error('Export failed:', e)
     alert('Export failed: ' + (e.response?.data?.detail || e.message))
   }
+}
+
+function copyDeployUrl() {
+  const url = `${apiBaseUrl}/api/predict/${selectedJobId.value}`
+  navigator.clipboard.writeText(url).then(() => {
+    deployCopied.value = true
+    setTimeout(() => { deployCopied.value = false }, 2000)
+  })
 }
 
 function truncateVotes(votes) {
@@ -3819,6 +3879,26 @@ onMounted(loadJobList)
 .cooccur-type.negative {
   background: rgba(200, 80, 80, 0.15);
   color: var(--negative, #e06c75);
+}
+
+/* Deploy API box */
+.deploy-box {
+  background: var(--bg-primary); border: 1px solid var(--border-color);
+  border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem;
+}
+.deploy-endpoint {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+}
+.deploy-endpoint code {
+  font-size: 0.85rem; color: var(--accent); background: rgba(0,191,255,0.08);
+  padding: 0.3rem 0.6rem; border-radius: 4px;
+}
+.deploy-example { margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-faint); }
+.deploy-example summary { cursor: pointer; }
+.code-block {
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 6px; padding: 0.75rem; margin-top: 0.5rem;
+  font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
 }
 
 @media (max-width: 900px) {

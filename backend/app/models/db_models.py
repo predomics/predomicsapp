@@ -201,6 +201,37 @@ class Webhook(Base):
     user: Mapped["User"] = relationship()
 
 
+class ProjectComment(Base):
+    """Threaded notes/discussion per project."""
+    __tablename__ = "project_comments"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    project: Mapped["Project"] = relationship()
+    user: Mapped["User"] = relationship()
+
+
+class PublicShare(Base):
+    """Public read-only share link for a project."""
+    __tablename__ = "public_shares"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    project: Mapped["Project"] = relationship()
+    creator: Mapped["User"] = relationship()
+
+
 class DatasetVersion(Base):
     """Snapshot of dataset files at a point in time."""
     __tablename__ = "dataset_versions"
