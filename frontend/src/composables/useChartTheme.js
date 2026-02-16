@@ -59,5 +59,13 @@ export function useChartTheme() {
     return `${name} ${ann.species}`
   }
 
-  return { themeStore, chartColors, chartLayout, featureLabel }
+  /** Functional annotation properties from biobanks.gmt.bio */
+  const FUNC_PROPS = [
+    { key: 'butyrate',      label: 'Butyrate',      desc: { 1: 'Producer' } },
+    { key: 'inflammation',  label: 'Inflammation',   desc: { 1: 'Enriched', '-1': 'Depleted' } },
+    { key: 'transit',       label: 'Transit',        desc: { 1: 'Fast', '-1': 'Slow' } },
+    { key: 'oralisation',   label: 'Oral origin',    desc: { 1: 'Oral' } },
+  ]
+
+  return { themeStore, chartColors, chartLayout, featureLabel, FUNC_PROPS }
 }

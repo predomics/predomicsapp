@@ -625,6 +625,15 @@
             <input type="number" v-model.number="copresenceMinPrev" :min="2" :max="population.length" step="1" class="topn-input" />
             models
           </label>
+          <label class="topn-control" style="margin-left: 1rem;">
+            p-value &le;
+            <select v-model.number="copresenceAlpha" class="topn-input" style="width: 5rem;">
+              <option :value="0.2">0.20</option>
+              <option :value="0.1">0.10</option>
+              <option :value="0.05">0.05</option>
+              <option :value="0.01">0.01</option>
+            </select>
+          </label>
         </div>
       </div>
 
@@ -632,6 +641,47 @@
       <section class="section" v-if="copresencePopulation.length > 1">
         <h3>Feature Prevalence in Population ({{ copresencePopulation.length }} models)</h3>
         <div ref="copresencePrevalenceEl" class="plotly-chart"></div>
+      </section>
+
+      <!-- Functional annotation summary -->
+      <section class="section" v-if="copresencePopulation.length > 1 && Object.keys(mspAnnotations).length > 0">
+        <h3>Functional Annotations</h3>
+        <p class="info-text" style="margin-bottom: 0.5rem;">
+          Functional properties of features present in the population, from biobanks.gmt.bio.
+        </p>
+        <div ref="funcAnnotChartEl" class="plotly-chart"></div>
+        <!-- Annotation table per feature -->
+        <details class="advanced-toggle" style="margin-top: 0.75rem;">
+          <summary>Feature annotation details ({{ funcAnnotatedFeatures.length }} annotated)</summary>
+          <table class="pop-table" style="margin-top: 0.5rem;">
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th>Taxonomy</th>
+                <th>Butyrate</th>
+                <th>Inflammation</th>
+                <th>Transit</th>
+                <th>Oral</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="f in funcAnnotatedFeatures" :key="f.name">
+                <td>{{ f.name }}</td>
+                <td style="font-style: italic; font-size: 0.78rem;">{{ f.species }}</td>
+                <td><span v-if="f.butyrate === 1" class="func-badge func-positive">Producer</span></td>
+                <td>
+                  <span v-if="f.inflammation === 1" class="func-badge func-negative">Enriched</span>
+                  <span v-else-if="f.inflammation === -1" class="func-badge func-positive">Depleted</span>
+                </td>
+                <td>
+                  <span v-if="f.transit === 1" class="func-badge func-neutral">Fast</span>
+                  <span v-else-if="f.transit === -1" class="func-badge func-neutral">Slow</span>
+                </td>
+                <td><span v-if="f.oralisation === 1" class="func-badge func-warn">Oral</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
       </section>
 
       <!-- Co-occurrence heatmap -->
@@ -673,6 +723,7 @@
               <th>Observed</th>
               <th>Expected</th>
               <th>Ratio</th>
+              <th>p-value</th>
               <th>Type</th>
             </tr>
           </thead>
@@ -685,6 +736,7 @@
               <td :style="{ color: row.ratio > 1 ? 'var(--positive, #98c379)' : 'var(--negative, #e06c75)' }">
                 {{ row.ratio === Infinity ? '∞' : row.ratio.toFixed(2) }}
               </td>
+              <td>{{ row.pvalue < 0.001 ? row.pvalue.toExponential(1) : row.pvalue.toFixed(3) }}</td>
               <td>
                 <span class="cooccur-type" :class="row.type">{{ row.type === 'positive' ? 'Co-occur' : 'Exclude' }}</span>
               </td>
@@ -732,7 +784,7 @@ async function ensurePlotly() {
 
 const route = useRoute()
 const store = useProjectStore()
-const { themeStore, chartColors, chartLayout, featureLabel: _featureLabel } = useChartTheme()
+const { themeStore, chartColors, chartLayout, featureLabel: _featureLabel, FUNC_PROPS } = useChartTheme()
 
 // ---------------------------------------------------------------------------
 // State
@@ -815,6 +867,8 @@ const copresenceHeatmapEl = ref(null)
 const copresenceNetworkEl = ref(null)
 const copresenceFBM = ref(true)
 const copresenceMinPrev = ref(2)
+const copresenceAlpha = ref(0.1)
+const funcAnnotChartEl = ref(null)
 const copresencePage = ref(0)
 const copresencePageSize = 20
 const networkLayout = ref('force')
@@ -936,6 +990,51 @@ const copresencePopulation = computed(() => {
   return copresenceFBM.value ? filterFBM(population.value) : population.value
 })
 
+// Hypergeometric p-value (Fisher's exact test for co-occurrence)
+// Uses log-factorial to avoid overflow: P(X=k) = C(K,k)*C(N-K,n-k)/C(N,n)
+// where N=total models, K=models with feature i, n=models with feature j, k=co-occurrences
+function _logFact(n) {
+  let s = 0
+  for (let i = 2; i <= n; i++) s += Math.log(i)
+  return s
+}
+// Cache log-factorials up to max N
+let _lfCache = [0, 0]
+function logFact(n) {
+  if (n < _lfCache.length) return _lfCache[n]
+  let s = _lfCache[_lfCache.length - 1]
+  for (let i = _lfCache.length; i <= n; i++) {
+    s += Math.log(i)
+    _lfCache.push(s)
+  }
+  return _lfCache[n]
+}
+
+function hypergeomPMF(k, N, K, n) {
+  // P(X=k) = C(K,k) * C(N-K, n-k) / C(N,n)
+  if (k < 0 || k > Math.min(K, n) || (n - k) > (N - K)) return 0
+  return Math.exp(
+    logFact(K) - logFact(k) - logFact(K - k) +
+    logFact(N - K) - logFact(n - k) - logFact(N - K - n + k) -
+    logFact(N) + logFact(n) + logFact(N - n)
+  )
+}
+
+// p-value for positive co-occurrence: P(X >= observed)
+function pvalueGreater(observed, N, ni, nj) {
+  let p = 0
+  const maxK = Math.min(ni, nj)
+  for (let k = observed; k <= maxK; k++) p += hypergeomPMF(k, N, ni, nj)
+  return Math.min(1, p)
+}
+
+// p-value for negative co-occurrence: P(X <= observed)
+function pvalueLess(observed, N, ni, nj) {
+  let p = 0
+  for (let k = 0; k <= observed; k++) p += hypergeomPMF(k, N, ni, nj)
+  return Math.min(1, p)
+}
+
 // Co-presence: compute pairwise co-occurrence statistics
 const copresenceData = computed(() => {
   const pop = copresencePopulation.value
@@ -961,6 +1060,9 @@ const copresenceData = computed(() => {
   const N = pop.length
   const fSet = new Set(features)
 
+  // Warm up log-factorial cache
+  logFact(N)
+
   // Build binary presence per model (only for filtered features)
   const presenceByModel = pop.map(ind => {
     const s = new Set()
@@ -982,10 +1084,10 @@ const copresenceData = computed(() => {
     }
   }
 
-  // Build matrix and pairs with stats
-  // matrix[i][j] = observed/expected ratio (or 0 if expected=0)
+  // Build matrix and pairs with stats using hypergeometric test
   const matrix = features.map(() => features.map(() => 1))
   const pairs = []
+  const alpha = copresenceAlpha.value
 
   for (let i = 0; i < features.length; i++) {
     for (let j = i + 1; j < features.length; j++) {
@@ -1000,19 +1102,22 @@ const copresenceData = computed(() => {
       matrix[i][j] = ratio
       matrix[j][i] = ratio
 
-      // Simple significance test: |observed - expected| > 2*sqrt(expected)
-      // This is a rough Poisson-based criterion
-      const significant = expected > 0 && Math.abs(observed - expected) > 2 * Math.sqrt(expected)
+      // Hypergeometric test (same as R cooccur package)
+      const pGt = pvalueGreater(observed, N, ni, nj)  // positive co-occurrence
+      const pLt = pvalueLess(observed, N, ni, nj)      // negative (exclusion)
+      const pval = Math.min(pGt, pLt)
+      const type = pGt < pLt ? 'positive' : 'negative'
 
-      if (significant) {
+      if (pval <= alpha) {
         pairs.push({
           f1: features[i],
           f2: features[j],
           observed,
           expected,
           ratio,
-          type: observed > expected ? 'positive' : 'negative',
-          strength: Math.abs(observed - expected) / Math.max(1, Math.sqrt(expected)),
+          pvalue: pval,
+          type,
+          strength: -Math.log10(Math.max(pval, 1e-300)),
         })
       }
     }
@@ -1029,6 +1134,25 @@ const copresenceStats = computed(() => copresenceData.value.pairs)
 const copresenceStatsPaginated = computed(() => {
   const start = copresencePage.value * copresencePageSize
   return copresenceStats.value.slice(start, start + copresencePageSize)
+})
+
+// Functional annotations for features in the population
+const funcAnnotatedFeatures = computed(() => {
+  const { features, prevalence } = copresenceData.value
+  const ann = mspAnnotations.value
+  if (!features.length || !Object.keys(ann).length) return []
+  return features
+    .filter(f => ann[f] && ann[f].species)
+    .sort((a, b) => (prevalence[b] || 0) - (prevalence[a] || 0))
+    .map(f => ({
+      name: f,
+      species: ann[f].species || '',
+      butyrate: ann[f].butyrate ?? 0,
+      inflammation: ann[f].inflammation ?? 0,
+      transit: ann[f].transit ?? 0,
+      oralisation: ann[f].oralisation ?? 0,
+      prevalence: prevalence[f] || 0,
+    }))
 })
 
 // Comparative: feature intersection/union
@@ -1141,7 +1265,21 @@ function toggleExpand(rank) {
 // MSP Annotations
 // ---------------------------------------------------------------------------
 async function loadMspAnnotations() {
-  const names = detail.value?.feature_names?.filter(n => n.startsWith('msp_')) || []
+  // Collect features actually used in population models + best individual,
+  // not the entire feature_names array (which can be 2000+ and was causing a 500 cap miss)
+  const used = new Set()
+  for (const ind of population.value) {
+    for (const name of Object.keys(ind.named_features || {})) {
+      if (name.startsWith('msp_')) used.add(name)
+    }
+  }
+  const best = detail.value?.best_individual?.features || {}
+  const featureNames = detail.value?.feature_names || []
+  for (const idx of Object.keys(best)) {
+    const name = featureNames[parseInt(idx)]
+    if (name?.startsWith('msp_')) used.add(name)
+  }
+  const names = [...used]
   if (names.length === 0) return
   try {
     const { data } = await axios.post('/api/data-explore/msp-annotations', { features: names })
@@ -2308,8 +2446,77 @@ async function renderCopresenceNetwork() {
   }), { responsive: true, displayModeBar: false })
 }
 
+async function renderFuncAnnotChart() {
+  await nextTick()
+  if (!funcAnnotChartEl.value) return
+  const features = funcAnnotatedFeatures.value
+  if (features.length === 0) return
+
+  const c = chartColors()
+  const N = copresencePopulation.value.length
+
+  // Count features by functional property
+  const props = FUNC_PROPS
+  const propColors = [c.class0Light, '#e06c75', c.accent, c.warn]
+
+  // For each property, count: positive (+1), negative (-1), zero
+  const traces = []
+  for (let pi = 0; pi < props.length; pi++) {
+    const prop = props[pi]
+    const posCount = features.filter(f => f[prop.key] === 1).length
+    const negCount = features.filter(f => f[prop.key] === -1).length
+
+    if (posCount > 0) {
+      const desc = prop.desc['1'] || '+1'
+      traces.push({
+        type: 'bar', name: `${prop.label} (${desc})`,
+        x: [prop.label], y: [posCount],
+        marker: { color: propColors[pi], opacity: 0.85 },
+        text: [String(posCount)], textposition: 'outside',
+        showlegend: true,
+      })
+    }
+    if (negCount > 0) {
+      const desc = prop.desc['-1'] || '-1'
+      traces.push({
+        type: 'bar', name: `${prop.label} (${desc})`,
+        x: [prop.label], y: [negCount],
+        marker: { color: propColors[pi], opacity: 0.45, line: { color: propColors[pi], width: 2, dash: 'dash' } },
+        text: [String(negCount)], textposition: 'outside',
+        showlegend: true,
+      })
+    }
+  }
+
+  // Also add a stacked horizontal bar per feature showing its functional profile
+  // Use a grouped bar: one group per functional prop, bars = number of features with that property
+  const featureLabels = features.map(f => featureLabel(f.name))
+  const funcTraces = props.map((prop, pi) => ({
+    type: 'bar', orientation: 'h',
+    name: prop.label,
+    y: featureLabels,
+    x: features.map(f => f[prop.key]),
+    marker: { color: propColors[pi] },
+    hovertemplate: `%{y}<br>${prop.label}: %{x}<extra></extra>`,
+  }))
+
+  Plotly.newPlot(funcAnnotChartEl.value, funcTraces, chartLayout({
+    barmode: 'group',
+    xaxis: {
+      title: { text: 'Annotation value (-1, 0, +1)', font: { color: c.text } },
+      gridcolor: c.grid, color: c.text,
+      dtick: 1, range: [-1.5, 1.5],
+    },
+    yaxis: { automargin: true, color: c.text },
+    height: Math.max(350, features.length * 20 + 100),
+    margin: { t: 20, b: 50, l: 200, r: 20 },
+    legend: { orientation: 'h', y: 1.08, font: { color: c.text } },
+  }), { responsive: true, displayModeBar: false })
+}
+
 function renderCoPresenceCharts() {
   renderCopresencePrevalence()
+  renderFuncAnnotChart()
   renderCopresenceHeatmap()
   renderCopresenceNetwork()
 }
@@ -2751,6 +2958,7 @@ function debouncedCopresenceRender() {
 }
 watch(copresenceFBM, debouncedCopresenceRender)
 watch(copresenceMinPrev, debouncedCopresenceRender)
+watch(copresenceAlpha, debouncedCopresenceRender)
 watch(networkLayout, () => {
   if (subTab.value === 'copresence') renderCopresenceNetwork()
 })
@@ -3570,6 +3778,31 @@ onMounted(loadJobList)
   color: var(--text-primary);
 }
 .layout-option:hover { border-color: var(--accent); }
+
+/* Functional annotation badges */
+.func-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.func-positive {
+  background: rgba(100, 200, 100, 0.15);
+  color: var(--positive, #98c379);
+}
+.func-negative {
+  background: rgba(200, 80, 80, 0.15);
+  color: var(--negative, #e06c75);
+}
+.func-neutral {
+  background: rgba(186, 85, 211, 0.15);
+  color: var(--accent, #BA55D3);
+}
+.func-warn {
+  background: rgba(229, 192, 123, 0.15);
+  color: var(--warn, #e5c07b);
+}
 
 /* Co-presence badges */
 .cooccur-type {

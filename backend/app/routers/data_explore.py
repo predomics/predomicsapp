@@ -175,5 +175,5 @@ async def get_msp_annotations(
     feature_names = body.get("features", [])
     if not feature_names or not isinstance(feature_names, list):
         raise HTTPException(400, "Provide a 'features' list")
-    annotations = msp_annotations.get_annotations(feature_names[:500])
+    annotations = msp_annotations.get_annotations(feature_names[:2000])
     return {"annotations": annotations}
