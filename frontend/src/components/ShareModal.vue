@@ -2,14 +2,14 @@
   <div class="modal-overlay" @click.self="$emit('close')">
     <div class="modal">
       <div class="modal-header">
-        <h3>Share Project</h3>
+        <h3>{{ $t('modals.shareProject') }}</h3>
         <button class="close-btn" @click="$emit('close')">&times;</button>
       </div>
 
       <div class="search-section">
         <input
           v-model="query"
-          placeholder="Search by email..."
+          :placeholder="$t('modals.searchByEmail')"
           @input="search"
           class="search-input"
         />
@@ -27,17 +27,17 @@
       </div>
 
       <div v-if="shares.length > 0" class="shares-list">
-        <h4>Shared with</h4>
+        <h4>{{ $t('modals.sharedWith') }}</h4>
         <div v-for="s in shares" :key="s.id" class="share-item">
           <div class="share-info">
             <span class="share-email">{{ s.email }}</span>
             <span v-if="s.full_name" class="share-name">{{ s.full_name }}</span>
           </div>
           <select :value="s.role" @change="updateRole(s, $event.target.value)" class="role-select">
-            <option value="viewer">Viewer</option>
-            <option value="editor">Editor</option>
+            <option value="viewer">{{ $t('modals.viewer') }}</option>
+            <option value="editor">{{ $t('modals.editor') }}</option>
           </select>
-          <button class="revoke-btn" @click="revoke(s)" title="Revoke access">&times;</button>
+          <button class="revoke-btn" @click="revoke(s)" :title="$t('modals.revokeAccess')">&times;</button>
         </div>
       </div>
 
@@ -48,8 +48,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 import axios from 'axios'
+
+const { t } = useI18n()
 
 const props = defineProps({ projectId: String })
 const emit = defineEmits(['close'])

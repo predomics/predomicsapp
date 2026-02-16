@@ -1,34 +1,34 @@
 <template>
   <div class="datasets">
-    <h2>Dataset Library</h2>
+    <h2>{{ $t('datasets.title') }}</h2>
 
     <!-- Search & filter bar -->
     <div class="filter-bar">
-      <input v-model="searchQuery" placeholder="Search datasets..." class="search-input" @input="applyFilters" />
+      <input v-model="searchQuery" :placeholder="$t('datasets.searchPlaceholder')" class="search-input" @input="applyFilters" />
       <div class="tag-filter-wrap">
         <select v-model="filterTag" class="tag-filter" @change="applyFilters">
-          <option value="">All tags</option>
-          <option v-for="t in store.tagSuggestions" :key="t" :value="t">{{ t }}</option>
+          <option value="">{{ $t('datasets.allTags') }}</option>
+          <option v-for="tag in store.tagSuggestions" :key="tag" :value="tag">{{ tag }}</option>
         </select>
       </div>
-      <button v-if="searchQuery || filterTag" class="clear-filter" @click="clearFilters">Clear</button>
+      <button v-if="searchQuery || filterTag" class="clear-filter" @click="clearFilters">{{ $t('datasets.clear') }}</button>
     </div>
 
     <!-- Create group form -->
     <div class="create-form">
-      <input v-model="groupName" placeholder="Dataset group name..." class="name-input" @keyup.enter="createGroup" />
-      <input v-model="groupDesc" placeholder="Description (optional)" class="desc-input" />
-      <input v-model="groupTags" placeholder="Tags (comma-separated)" class="tags-input" />
+      <input v-model="groupName" :placeholder="$t('datasets.groupName')" class="name-input" @keyup.enter="createGroup" />
+      <input v-model="groupDesc" :placeholder="$t('datasets.description')" class="desc-input" />
+      <input v-model="groupTags" :placeholder="$t('datasets.tags')" class="tags-input" />
       <button @click="createGroup" :disabled="!groupName.trim() || creating">
-        {{ creating ? 'Creating...' : 'Create Group' }}
+        {{ creating ? $t('datasets.creating') : $t('datasets.createGroup') }}
       </button>
     </div>
 
-    <div v-if="store.loading" class="loading">Loading...</div>
+    <div v-if="store.loading" class="loading">{{ $t('datasets.loading') }}</div>
 
     <div v-if="!store.loading && store.datasets.length === 0" class="empty">
-      <template v-if="searchQuery || filterTag">No datasets match your filter.</template>
-      <template v-else>No datasets yet. Create a group above, then upload files into it.</template>
+      <template v-if="searchQuery || filterTag">{{ $t('datasets.noMatch') }}</template>
+      <template v-else>{{ $t('datasets.noDatasets') }}</template>
     </div>
 
     <div v-if="store.datasets.length > 0" class="dataset-list">
@@ -41,33 +41,33 @@
             <div class="tag-row" v-if="d.tags?.length > 0 || editingTagsId === d.id">
               <template v-if="editingTagsId !== d.id">
                 <span v-for="tag in d.tags" :key="tag" class="tag-chip" @click="filterByTag(tag)">{{ tag }}</span>
-                <button class="tag-edit-btn" @click="startEditTags(d)" title="Edit tags">+</button>
+                <button class="tag-edit-btn" @click="startEditTags(d)" :title="$t('datasets.addTags')">+</button>
               </template>
               <template v-else>
                 <input
                   v-model="editTagsValue"
                   class="tag-edit-input"
-                  placeholder="comma-separated tags..."
+                  :placeholder="$t('datasets.tags')"
                   @keyup.enter="saveTags(d)"
                   @keyup.escape="editingTagsId = null"
                   ref="tagEditInput"
                   list="tag-suggestions"
                 />
-                <button class="tag-save-btn" @click="saveTags(d)">Save</button>
-                <button class="tag-cancel-btn" @click="editingTagsId = null">Cancel</button>
+                <button class="tag-save-btn" @click="saveTags(d)">{{ $t('datasets.save') }}</button>
+                <button class="tag-cancel-btn" @click="editingTagsId = null">{{ $t('datasets.cancel') }}</button>
               </template>
             </div>
             <div class="tag-row" v-else>
-              <button class="tag-edit-btn add-first" @click="startEditTags(d)" title="Add tags">+ Add tags</button>
+              <button class="tag-edit-btn add-first" @click="startEditTags(d)" :title="$t('datasets.addTags')">{{ $t('datasets.addTags') }}</button>
             </div>
             <div class="meta">
               <span>{{ formatDate(d.created_at) }}</span>
-              <span>{{ d.files?.length || 0 }} file{{ (d.files?.length || 0) !== 1 ? 's' : '' }}</span>
-              <span v-if="d.project_count > 0">{{ d.project_count }} project{{ d.project_count > 1 ? 's' : '' }}</span>
-              <span v-else class="unused">Not assigned</span>
+              <span>{{ d.files?.length || 0 }} {{ $t('datasets.files') }}</span>
+              <span v-if="d.project_count > 0">{{ d.project_count }} {{ $t('datasets.projects') }}</span>
+              <span v-else class="unused">{{ $t('datasets.notAssigned') }}</span>
             </div>
           </div>
-          <button class="delete-btn" @click="deleteDs(d)" title="Delete dataset group">&times;</button>
+          <button class="delete-btn" @click="deleteDs(d)" :title="$t('common.delete')">&times;</button>
         </div>
 
         <!-- Files within group -->
@@ -75,31 +75,31 @@
           <div v-for="f in d.files" :key="f.id" class="file-row">
             <span class="file-name">{{ f.filename }}</span>
             <span v-if="f.role" class="file-role">{{ f.role }}</span>
-            <button class="file-preview" @click="openPreview(d.id, f.id, f.filename)" title="Preview file">Preview</button>
-            <button class="file-del" @click="deleteFile(d, f)" title="Remove file">&times;</button>
+            <button class="file-preview" @click="openPreview(d.id, f.id, f.filename)" :title="$t('datasets.preview')">{{ $t('datasets.preview') }}</button>
+            <button class="file-del" @click="deleteFile(d, f)" :title="$t('common.remove')">&times;</button>
           </div>
         </div>
 
         <!-- Version history toggle -->
         <div class="version-bar">
           <button class="version-toggle" @click="toggleVersions(d)">
-            {{ expandedVersions === d.id ? 'Hide History' : 'History' }}
+            {{ expandedVersions === d.id ? $t('datasets.hideHistory') : $t('datasets.history') }}
           </button>
-          <span v-if="d._versions?.length > 0" class="version-count">{{ d._versions.length }} version{{ d._versions.length !== 1 ? 's' : '' }}</span>
+          <span v-if="d._versions?.length > 0" class="version-count">{{ d._versions.length }} {{ $t('datasets.versions') }}</span>
         </div>
         <div v-if="expandedVersions === d.id && d._versions" class="version-list">
           <div v-for="v in d._versions" :key="v.id" class="version-row">
             <span class="ver-num">v{{ v.version_number }}</span>
             <span class="ver-note">{{ v.note || '—' }}</span>
             <span class="ver-date">{{ formatDate(v.created_at) }}</span>
-            <span class="ver-files">{{ v.files_snapshot?.length || 0 }} files</span>
-            <button class="ver-restore" @click="restoreVersion(d, v)">Restore</button>
+            <span class="ver-files">{{ v.files_snapshot?.length || 0 }} {{ $t('datasets.filesLabel') }}</span>
+            <button class="ver-restore" @click="restoreVersion(d, v)">{{ $t('datasets.restore') }}</button>
           </div>
         </div>
 
         <!-- Upload file into group -->
         <label class="upload-into">
-          + Add file
+          {{ $t('datasets.addFile') }}
           <input type="file" accept=".tsv,.csv,.txt" @change="e => addFile(e, d.id)" />
         </label>
       </div>
@@ -107,7 +107,7 @@
 
     <!-- Tag suggestions datalist -->
     <datalist id="tag-suggestions">
-      <option v-for="t in store.tagSuggestions" :key="t" :value="t" />
+      <option v-for="tag in store.tagSuggestions" :key="tag" :value="tag" />
     </datalist>
 
     <div v-if="message" :class="['msg', msgType]">{{ message }}</div>
@@ -125,10 +125,12 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { useDatasetStore } from '../stores/dataset'
 import DatasetPreviewModal from '../components/DatasetPreviewModal.vue'
 
+const { t } = useI18n()
 const store = useDatasetStore()
 const previewFile = ref(null)
 const expandedVersions = ref(null)
@@ -175,14 +177,14 @@ function startEditTags(d) {
 }
 
 async function saveTags(d) {
-  const tags = editTagsValue.value.split(',').map(t => t.trim()).filter(Boolean)
+  const tags = editTagsValue.value.split(',').map(s => s.trim()).filter(Boolean)
   try {
     await store.updateTags(d.id, tags)
-    message.value = `Tags updated for "${d.name}"`
+    message.value = t('datasets.tagsUpdated', { name: d.name })
     msgType.value = 'success'
     store.fetchTagSuggestions()
   } catch (e) {
-    message.value = e.response?.data?.detail || 'Tag update failed'
+    message.value = e.response?.data?.detail || t('datasets.tagUpdateFailed')
     msgType.value = 'error'
   }
   editingTagsId.value = null
@@ -194,14 +196,14 @@ async function createGroup() {
   message.value = ''
   try {
     await store.createGroup(groupName.value.trim(), groupDesc.value.trim(), groupTags.value.trim())
-    message.value = `Created "${groupName.value.trim()}"`
+    message.value = t('datasets.created', { name: groupName.value.trim() })
     msgType.value = 'success'
     groupName.value = ''
     groupDesc.value = ''
     groupTags.value = ''
     store.fetchTagSuggestions()
   } catch (e) {
-    message.value = e.response?.data?.detail || 'Create failed'
+    message.value = e.response?.data?.detail || t('datasets.createFailed')
     msgType.value = 'error'
   } finally {
     creating.value = false
@@ -213,35 +215,35 @@ async function addFile(event, datasetId) {
   if (!file) return
   try {
     await store.uploadFile(datasetId, file)
-    message.value = `Added ${file.name}`
+    message.value = t('datasets.added', { name: file.name })
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || 'Upload failed'
+    message.value = e.response?.data?.detail || t('datasets.uploadFailed')
     msgType.value = 'error'
   }
   event.target.value = ''
 }
 
 async function deleteFile(ds, f) {
-  if (!confirm(`Remove "${f.filename}" from "${ds.name}"?`)) return
+  if (!confirm(t('datasets.removeFileConfirm', { filename: f.filename, dataset: ds.name }))) return
   try {
     await store.deleteFile(ds.id, f.id)
-    message.value = `Removed ${f.filename}`
+    message.value = t('datasets.removed', { name: f.filename })
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || 'Delete failed'
+    message.value = e.response?.data?.detail || t('datasets.deleteFailed')
     msgType.value = 'error'
   }
 }
 
 async function deleteDs(d) {
-  if (!confirm(`Delete "${d.name}" and all its files? This removes it from all projects.`)) return
+  if (!confirm(t('datasets.deleteConfirm', { name: d.name }))) return
   try {
     await store.deleteDataset(d.id)
-    message.value = `Deleted ${d.name}`
+    message.value = t('datasets.deleted', { name: d.name })
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || 'Delete failed'
+    message.value = e.response?.data?.detail || t('datasets.deleteFailed')
     msgType.value = 'error'
   }
 }
@@ -261,15 +263,15 @@ async function toggleVersions(d) {
 }
 
 async function restoreVersion(d, v) {
-  if (!confirm(`Restore "${d.name}" to version ${v.version_number}? Current files will be replaced.`)) return
+  if (!confirm(t('datasets.restoreConfirm', { name: d.name, version: v.version_number }))) return
   try {
     await axios.post(`/api/datasets/${d.id}/versions/${v.id}/restore`)
-    message.value = `Restored to v${v.version_number}`
+    message.value = t('datasets.restored', { version: v.version_number })
     msgType.value = 'success'
     await store.fetchDatasets(filterTag.value || null, searchQuery.value || null)
     expandedVersions.value = null
   } catch (e) {
-    message.value = e.response?.data?.detail || 'Restore failed'
+    message.value = e.response?.data?.detail || t('datasets.restoreFailed')
     msgType.value = 'error'
   }
 }

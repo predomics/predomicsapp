@@ -1,30 +1,30 @@
 <template>
   <div class="comments-sidebar" :class="{ open: visible }">
     <div class="sidebar-header">
-      <h3>Notes</h3>
+      <h3>{{ $t('comments.notes') }}</h3>
       <button class="close-btn" @click="$emit('close')">&times;</button>
     </div>
 
     <div class="comments-list" ref="listEl">
-      <div v-if="loading" class="loading-msg">Loading...</div>
-      <div v-else-if="comments.length === 0" class="empty-msg">No notes yet. Be the first to add one.</div>
+      <div v-if="loading" class="loading-msg">{{ $t('comments.loading') }}</div>
+      <div v-else-if="comments.length === 0" class="empty-msg">{{ $t('comments.noNotes') }}</div>
       <div v-for="c in comments" :key="c.id" class="comment">
         <div class="comment-header">
           <span class="comment-user">{{ c.user_name }}</span>
           <span class="comment-time">{{ timeAgo(c.created_at) }}</span>
-          <span v-if="c.updated_at" class="comment-edited">(edited)</span>
+          <span v-if="c.updated_at" class="comment-edited">{{ $t('comments.edited') }}</span>
         </div>
         <div v-if="editingId === c.id" class="edit-form">
           <textarea v-model="editContent" rows="2" class="comment-textarea"></textarea>
           <div class="edit-actions">
-            <button class="btn-sm btn-primary" @click="saveEdit(c.id)">Save</button>
-            <button class="btn-sm btn-outline" @click="editingId = null">Cancel</button>
+            <button class="btn-sm btn-primary" @click="saveEdit(c.id)">{{ $t('comments.save') }}</button>
+            <button class="btn-sm btn-outline" @click="editingId = null">{{ $t('comments.cancel') }}</button>
           </div>
         </div>
         <div v-else class="comment-content">{{ c.content }}</div>
         <div v-if="c.user_id === currentUserId && editingId !== c.id" class="comment-actions">
-          <button class="action-btn" @click="startEdit(c)">Edit</button>
-          <button class="action-btn action-delete" @click="deleteComment(c.id)">Delete</button>
+          <button class="action-btn" @click="startEdit(c)">{{ $t('comments.editBtn') }}</button>
+          <button class="action-btn action-delete" @click="deleteComment(c.id)">{{ $t('comments.deleteBtn') }}</button>
         </div>
       </div>
     </div>
@@ -32,13 +32,13 @@
     <div class="add-comment">
       <textarea
         v-model="newContent"
-        placeholder="Add a note..."
+        :placeholder="$t('comments.placeholder')"
         rows="2"
         class="comment-textarea"
         @keydown.ctrl.enter="addComment"
       ></textarea>
       <button class="btn-sm btn-primary" :disabled="!newContent.trim()" @click="addComment">
-        Add
+        {{ $t('comments.add') }}
       </button>
     </div>
   </div>
@@ -46,8 +46,11 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth'
+
+const { t } = useI18n()
 
 const props = defineProps({
   projectId: String,
@@ -114,7 +117,7 @@ async function saveEdit(id) {
 }
 
 async function deleteComment(id) {
-  if (!confirm('Delete this note?')) return
+  if (!confirm(t('comments.deleteConfirm'))) return
   try {
     await axios.delete(`/api/projects/${props.projectId}/comments/${id}`)
     comments.value = comments.value.filter(c => c.id !== id)
@@ -127,12 +130,12 @@ function timeAgo(isoStr) {
   if (!isoStr) return ''
   const diff = Date.now() - new Date(isoStr).getTime()
   const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 1) return t('comments.justNow')
+  if (mins < 60) return t('comments.minutesAgo', { n: mins })
   const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
+  if (hrs < 24) return t('comments.hoursAgo', { n: hrs })
   const days = Math.floor(hrs / 24)
-  return `${days}d ago`
+  return t('comments.daysAgo', { n: days })
 }
 
 onMounted(() => {

@@ -2,79 +2,79 @@
   <div class="modal-overlay" @click.self="$emit('close')">
     <div class="modal">
       <div class="modal-header">
-        <h3>Validate on New Data</h3>
+        <h3>{{ $t('modals.validateTitle') }}</h3>
         <button class="close-btn" @click="$emit('close')">&times;</button>
       </div>
 
       <div class="modal-body">
-        <p class="hint">Upload an independent validation cohort to score against the trained model.</p>
+        <p class="hint">{{ $t('modals.validateDesc') }}</p>
 
         <label class="file-label">
-          X matrix (TSV) <span class="required">*</span>
+          {{ $t('modals.xMatrix') }} <span class="required">*</span>
           <input type="file" accept=".tsv,.csv,.txt" @change="onXFile" />
         </label>
 
         <label class="file-label">
-          Y labels (TSV) <em class="optional">optional — enables AUC/accuracy</em>
+          {{ $t('modals.yLabels') }} <em class="optional">{{ $t('modals.yLabelsOptional') }}</em>
           <input type="file" accept=".tsv,.csv,.txt" @change="onYFile" />
         </label>
 
         <label class="checkbox-label">
           <input type="checkbox" v-model="featuresInRows" />
-          Features in rows (standard gpredomics format)
+          {{ $t('modals.featuresInRows') }}
         </label>
 
         <button class="btn btn-primary" :disabled="!xFile || running" @click="runValidation">
-          {{ running ? 'Validating...' : 'Run Validation' }}
+          {{ running ? $t('modals.validating') : $t('modals.runValidation') }}
         </button>
 
         <div v-if="error" class="msg msg-error">{{ error }}</div>
 
         <!-- Results -->
         <div v-if="result" class="validation-results">
-          <h4>Validation Results</h4>
+          <h4>{{ $t('modals.validationResults') }}</h4>
 
           <div class="match-info">
-            <span class="badge badge-ok">{{ result.matched_features.length }} features matched</span>
-            <span v-if="result.missing_features.length" class="badge badge-warn">{{ result.missing_features.length }} missing</span>
-            <span class="badge">{{ result.n_samples }} samples</span>
+            <span class="badge badge-ok">{{ $t('modals.featuresMatched', { n: result.matched_features.length }) }}</span>
+            <span v-if="result.missing_features.length" class="badge badge-warn">{{ $t('modals.missing', { n: result.missing_features.length }) }}</span>
+            <span class="badge">{{ $t('modals.nSamples', { n: result.n_samples }) }}</span>
           </div>
 
           <!-- Evaluation metrics -->
           <div v-if="result.evaluation" class="metrics-grid">
             <div class="metric-card">
               <div class="metric-value">{{ result.evaluation.auc.toFixed(4) }}</div>
-              <div class="metric-label">AUC</div>
+              <div class="metric-label">{{ $t('results.auc') }}</div>
             </div>
             <div class="metric-card">
               <div class="metric-value">{{ result.evaluation.accuracy.toFixed(4) }}</div>
-              <div class="metric-label">Accuracy</div>
+              <div class="metric-label">{{ $t('results.accuracy') }}</div>
             </div>
             <div class="metric-card">
               <div class="metric-value">{{ result.evaluation.sensitivity.toFixed(4) }}</div>
-              <div class="metric-label">Sensitivity</div>
+              <div class="metric-label">{{ $t('results.sensitivity') }}</div>
             </div>
             <div class="metric-card">
               <div class="metric-value">{{ result.evaluation.specificity.toFixed(4) }}</div>
-              <div class="metric-label">Specificity</div>
+              <div class="metric-label">{{ $t('results.specificity') }}</div>
             </div>
           </div>
 
           <!-- Confusion matrix -->
           <div v-if="result.evaluation" class="confusion-section">
-            <h5>Confusion Matrix</h5>
+            <h5>{{ $t('modals.confusionMatrix') }}</h5>
             <table class="confusion-table">
               <thead>
-                <tr><th></th><th>Pred 1</th><th>Pred 0</th></tr>
+                <tr><th></th><th>{{ $t('modals.pred1') }}</th><th>{{ $t('modals.pred0') }}</th></tr>
               </thead>
               <tbody>
                 <tr>
-                  <td class="row-label">Real 1</td>
+                  <td class="row-label">{{ $t('modals.real1') }}</td>
                   <td class="tp">{{ result.evaluation.confusion_matrix.tp }}</td>
                   <td class="fn">{{ result.evaluation.confusion_matrix.fn }}</td>
                 </tr>
                 <tr>
-                  <td class="row-label">Real 0</td>
+                  <td class="row-label">{{ $t('modals.real0') }}</td>
                   <td class="fp">{{ result.evaluation.confusion_matrix.fp }}</td>
                   <td class="tn">{{ result.evaluation.confusion_matrix.tn }}</td>
                 </tr>
@@ -84,14 +84,14 @@
 
           <!-- Per-sample predictions table -->
           <div class="predictions-section">
-            <h5>Per-Sample Predictions ({{ result.sample_names.length }})</h5>
+            <h5>{{ $t('modals.perSamplePredictions', { n: result.sample_names.length }) }}</h5>
             <div class="predictions-scroll">
               <table class="predictions-table">
                 <thead>
                   <tr>
-                    <th>Sample</th>
-                    <th>Score</th>
-                    <th>Predicted</th>
+                    <th>{{ $t('modals.colSample') }}</th>
+                    <th>{{ $t('modals.colScore') }}</th>
+                    <th>{{ $t('modals.colPredicted') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -109,7 +109,7 @@
 
           <!-- Missing features -->
           <details v-if="result.missing_features.length > 0" class="missing-details">
-            <summary>{{ result.missing_features.length }} missing features (not in uploaded data)</summary>
+            <summary>{{ $t('modals.missingFeatures', { n: result.missing_features.length }) }}</summary>
             <ul>
               <li v-for="f in result.missing_features" :key="f">{{ f }}</li>
             </ul>
@@ -122,7 +122,10 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
+
+const { t } = useI18n()
 
 const props = defineProps({
   projectId: String,

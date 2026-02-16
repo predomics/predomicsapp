@@ -1,21 +1,21 @@
 <template>
   <div class="meta-analysis">
-    <h2>Multi-Cohort Meta-Analysis</h2>
-    <p class="subtitle">Compare models trained on different datasets to identify shared biomarkers and assess cross-cohort consistency.</p>
+    <h2>{{ $t('meta.title') }}</h2>
+    <p class="subtitle">{{ $t('meta.subtitle') }}</p>
 
     <!-- Job Picker -->
     <section class="section">
-      <h3>Select Jobs to Compare</h3>
+      <h3>{{ $t('meta.selectJobs') }}</h3>
       <div class="picker">
         <div class="search-row">
           <input
             type="text"
             v-model="searchQuery"
             class="search-input"
-            placeholder="Search jobs by project or job name..."
+            :placeholder="$t('meta.searchPlaceholder')"
             @input="debouncedSearch"
           />
-          <span class="chip-count">{{ selectedJobs.length }} / 10 selected</span>
+          <span class="chip-count">{{ $t('meta.selected', { n: selectedJobs.length }) }}</span>
         </div>
 
         <!-- Search results dropdown -->
@@ -32,13 +32,13 @@
               <span class="job-name">{{ job.job_name || job.job_id.slice(0, 8) }}</span>
             </div>
             <div class="search-item-meta">
-              <span v-if="job.best_auc != null">AUC {{ job.best_auc.toFixed(4) }}</span>
+              <span v-if="job.best_auc != null">{{ $t('results.auc') }} {{ job.best_auc.toFixed(4) }}</span>
               <span v-if="job.best_k != null">k={{ job.best_k }}</span>
               <span v-if="job.language">{{ job.language }}</span>
             </div>
           </div>
         </div>
-        <div v-if="searchLoading" class="search-loading">Searching...</div>
+        <div v-if="searchLoading" class="search-loading">{{ $t('meta.searching') }}</div>
 
         <!-- Selected job chips -->
         <div class="selected-chips" v-if="selectedJobs.length > 0">
@@ -54,7 +54,7 @@
           @click="runAnalysis"
           :disabled="selectedJobs.length < 2 || analysisLoading"
         >
-          {{ analysisLoading ? 'Analyzing...' : 'Run Meta-Analysis' }}
+          {{ analysisLoading ? $t('meta.analyzing') : $t('meta.runAnalysis') }}
         </button>
       </div>
     </section>
@@ -65,18 +65,18 @@
       <section class="section">
         <div class="meta-auc-card">
           <div class="meta-auc-value">{{ results.meta_auc?.toFixed(4) || '—' }}</div>
-          <div class="meta-auc-label">Meta-AUC (average across {{ results.jobs.length }} cohorts)</div>
+          <div class="meta-auc-label">{{ $t('meta.metaAuc', { n: results.jobs.length }) }}</div>
         </div>
       </section>
 
       <!-- Metrics Comparison Table -->
       <section class="section">
-        <h3>Metrics Comparison</h3>
+        <h3>{{ $t('meta.metricsComparison') }}</h3>
         <div class="table-wrap">
           <table class="metrics-table">
             <thead>
               <tr>
-                <th>Metric</th>
+                <th>{{ $t('results.metric') }}</th>
                 <th v-for="job in results.jobs" :key="job.job_id">
                   <div class="col-header">
                     <span class="col-project">{{ job.project_name }}</span>
@@ -103,27 +103,27 @@
 
       <!-- Feature Overlap Chart -->
       <section class="section">
-        <h3>Feature Overlap</h3>
-        <p class="info-text">Features shared across cohorts are more likely to be robust biomarkers.</p>
+        <h3>{{ $t('meta.featureOverlap') }}</h3>
+        <p class="info-text">{{ $t('meta.featureOverlapDesc') }}</p>
         <div ref="overlapChartEl" class="plotly-chart plotly-chart-tall"></div>
       </section>
 
       <!-- Concordance Matrix -->
       <section class="section">
-        <h3>Feature Concordance</h3>
+        <h3>{{ $t('meta.concordance') }}</h3>
         <p class="info-text">
-          Concordant features have the same coefficient sign across all cohorts.
-          <span class="concordant-count">{{ concordantCount }} / {{ totalFeatures }} concordant</span>
+          {{ $t('meta.concordanceDesc') }}
+          <span class="concordant-count">{{ concordantCount }} / {{ totalFeatures }} {{ $t('meta.concordant').toLowerCase() }}</span>
         </p>
         <div class="table-wrap">
           <table class="concordance-table">
             <thead>
               <tr>
-                <th>Feature</th>
+                <th>{{ $t('results.colFeature') }}</th>
                 <th v-for="job in results.jobs" :key="job.job_id" class="col-narrow">
                   {{ job.job_name || job.job_id.slice(0, 8) }}
                 </th>
-                <th>Status</th>
+                <th>{{ $t('meta.status') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -139,7 +139,7 @@
                 </td>
                 <td>
                   <span class="concordance-badge" :class="feat.concordant ? 'concordant' : 'discordant'">
-                    {{ feat.concordant ? 'Concordant' : 'Discordant' }}
+                    {{ feat.concordant ? $t('meta.concordant') : $t('meta.discordant') }}
                   </span>
                 </td>
               </tr>
@@ -155,9 +155,11 @@
 
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useChartTheme } from '../composables/useChartTheme'
 import axios from 'axios'
 
+const { t } = useI18n()
 const { chartColors, chartLayout, featureLabel } = useChartTheme()
 
 // Plotly lazy-load
@@ -179,15 +181,15 @@ const results = ref(null)
 const error = ref('')
 const overlapChartEl = ref(null)
 
-const metricRows = [
-  { key: 'best_auc', label: 'AUC' },
-  { key: 'accuracy', label: 'Accuracy' },
-  { key: 'sensitivity', label: 'Sensitivity' },
-  { key: 'specificity', label: 'Specificity' },
-  { key: 'best_k', label: 'Features (k)' },
-  { key: 'language', label: 'Language' },
-  { key: 'data_type', label: 'Data Type' },
-]
+const metricRows = computed(() => [
+  { key: 'best_auc', label: t('results.auc') },
+  { key: 'accuracy', label: t('results.accuracy') },
+  { key: 'sensitivity', label: t('results.sensitivity') },
+  { key: 'specificity', label: t('results.specificity') },
+  { key: 'best_k', label: t('results.featuresK') },
+  { key: 'language', label: t('results.language') },
+  { key: 'data_type', label: t('results.dataType') },
+])
 
 // Search
 let _searchTimer = null
@@ -353,7 +355,7 @@ function renderOverlapChart() {
     hovertemplate: '%{y}<br>Present in %{x} / ' + jobCount + ' cohorts<extra></extra>',
   }], chartLayout({
     xaxis: {
-      title: `Cohorts (out of ${jobCount})`,
+      title: t('meta.cohorts', { n: jobCount }),
       dtick: 1,
       range: [0, jobCount + 0.5],
       color: c.text,

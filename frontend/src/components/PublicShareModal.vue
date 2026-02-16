@@ -2,26 +2,26 @@
   <div class="modal-overlay" @click.self="$emit('close')">
     <div class="modal">
       <div class="modal-header">
-        <h3>Public Share Links</h3>
+        <h3>{{ $t('modals.publicShareLinks') }}</h3>
         <button class="close-btn" @click="$emit('close')">&times;</button>
       </div>
 
       <div class="modal-body">
-        <p class="hint">Create a read-only public link to share results without requiring login.</p>
+        <p class="hint">{{ $t('modals.publicShareDesc') }}</p>
 
         <!-- Create new link -->
         <div class="create-row">
           <label class="expiry-label">
-            Expires in:
+            {{ $t('modals.expiresIn') }}
             <select v-model="expiryDays">
-              <option :value="null">Never</option>
-              <option :value="7">7 days</option>
-              <option :value="30">30 days</option>
-              <option :value="90">90 days</option>
+              <option :value="null">{{ $t('modals.never') }}</option>
+              <option :value="7">{{ $t('modals.days7') }}</option>
+              <option :value="30">{{ $t('modals.days30') }}</option>
+              <option :value="90">{{ $t('modals.days90') }}</option>
             </select>
           </label>
           <button class="btn btn-primary" @click="createLink" :disabled="creating">
-            {{ creating ? 'Creating...' : 'Create Link' }}
+            {{ creating ? $t('modals.creating') : $t('modals.createLink') }}
           </button>
         </div>
 
@@ -32,18 +32,18 @@
           <div v-for="link in links" :key="link.id" class="link-row">
             <div class="link-url">
               <code>{{ buildUrl(link.token) }}</code>
-              <button class="btn-sm btn-outline" @click="copyLink(link.token)">Copy</button>
+              <button class="btn-sm btn-outline" @click="copyLink(link.token)">{{ $t('modals.copy') }}</button>
             </div>
             <div class="link-meta">
-              <span>Created {{ formatDate(link.created_at) }}</span>
-              <span v-if="link.expires_at">Expires {{ formatDate(link.expires_at) }}</span>
-              <span v-else class="no-expiry">No expiry</span>
-              <button class="btn-sm btn-danger" @click="revokeLink(link.id)">Revoke</button>
+              <span>{{ $t('modals.created') }} {{ formatDate(link.created_at) }}</span>
+              <span v-if="link.expires_at">{{ $t('modals.expires') }} {{ formatDate(link.expires_at) }}</span>
+              <span v-else class="no-expiry">{{ $t('modals.noExpiry') }}</span>
+              <button class="btn-sm btn-danger" @click="revokeLink(link.id)">{{ $t('modals.revoke') }}</button>
             </div>
           </div>
         </div>
-        <div v-else-if="!loading" class="empty">No public links yet.</div>
-        <div v-if="loading" class="loading-msg">Loading...</div>
+        <div v-else-if="!loading" class="empty">{{ $t('modals.noPublicLinks') }}</div>
+        <div v-if="loading" class="loading-msg">{{ $t('modals.loading') }}</div>
       </div>
     </div>
   </div>
@@ -51,7 +51,10 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
+
+const { t } = useI18n()
 
 const props = defineProps({
   projectId: String,
@@ -92,7 +95,7 @@ async function createLink() {
 }
 
 async function revokeLink(id) {
-  if (!confirm('Revoke this public link? Anyone with the link will lose access.')) return
+  if (!confirm(t('modals.revokeConfirm'))) return
   try {
     await axios.delete(`/api/projects/${props.projectId}/public/${id}`)
     links.value = links.value.filter(l => l.id !== id)
@@ -109,7 +112,7 @@ async function copyLink(token) {
   const url = buildUrl(token)
   try {
     await navigator.clipboard.writeText(url)
-    copiedMsg.value = 'Link copied to clipboard!'
+    copiedMsg.value = t('modals.linkCopied')
     setTimeout(() => { copiedMsg.value = '' }, 3000)
   } catch {
     copiedMsg.value = ''

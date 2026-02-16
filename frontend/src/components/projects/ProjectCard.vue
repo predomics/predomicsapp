@@ -13,9 +13,9 @@
       <span class="time">{{ relativeDate(project.updated_at || project.created_at) }}</span>
     </div>
     <div class="card-badges">
-      <span class="badge badge-dataset" v-if="datasetCount > 0">{{ datasetCount }} dataset{{ datasetCount > 1 ? 's' : '' }}</span>
-      <span class="badge badge-job" v-if="jobCount > 0">{{ jobCount }} job{{ jobCount > 1 ? 's' : '' }}</span>
-      <span class="badge badge-share" v-if="shareCount > 0">{{ shareCount }} shared</span>
+      <span class="badge badge-dataset" v-if="datasetCount > 0">{{ datasetCount }} {{ $t('components.dataset', datasetCount) }}</span>
+      <span class="badge badge-job" v-if="jobCount > 0">{{ jobCount }} {{ $t('components.job', jobCount) }}</span>
+      <span class="badge badge-share" v-if="shareCount > 0">{{ shareCount }} {{ $t('components.shared') }}</span>
       <span v-if="isShared" class="badge badge-role">{{ project.role }}</span>
     </div>
   </div>
@@ -23,6 +23,9 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -40,12 +43,12 @@ function relativeDate(iso) {
   if (!iso) return ''
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 1) return t('components.justNow')
+  if (mins < 60) return t('components.minutesAgo', { n: mins })
   const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
+  if (hrs < 24) return t('components.hoursAgo', { n: hrs })
   const days = Math.floor(hrs / 24)
-  if (days < 30) return `${days}d ago`
+  if (days < 30) return t('components.daysAgo', { n: days })
   return new Date(iso).toLocaleDateString()
 }
 </script>

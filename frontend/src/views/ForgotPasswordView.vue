@@ -1,38 +1,41 @@
 <template>
   <div class="forgot-page">
     <div class="forgot-card">
-      <h1>Reset Password</h1>
-      <p class="subtitle">Enter your email to receive a password reset link.</p>
+      <h1>{{ $t('auth.resetPassword') }}</h1>
+      <p class="subtitle">{{ $t('auth.resetDesc') }}</p>
 
       <form @submit.prevent="submit" v-if="!sent">
         <div class="field">
-          <label>Email</label>
-          <input v-model="email" type="email" placeholder="email@example.com" required />
+          <label>{{ $t('auth.email') }}</label>
+          <input v-model="email" type="email" :placeholder="$t('auth.emailPlaceholder')" required />
         </div>
         <p v-if="error" class="error">{{ error }}</p>
         <button type="submit" class="btn-primary" :disabled="loading">
-          {{ loading ? 'Sending...' : 'Send Reset Link' }}
+          {{ loading ? $t('auth.sending') : $t('auth.sendResetLink') }}
         </button>
       </form>
 
       <div v-else class="success-msg">
-        <p>If an account exists for <strong>{{ email }}</strong>, a reset link has been sent.</p>
+        <p>{{ $t('auth.emailSentMsg') }}</p>
         <p v-if="devToken" class="dev-token">
-          <strong>Dev mode:</strong> No SMTP configured. Use this token:<br/>
+          {{ $t('auth.devModeMsg') }}<br/>
           <code>{{ devToken }}</code>
           <br/>
-          <router-link :to="`/reset-password?token=${devToken}`">Reset now</router-link>
+          <router-link :to="`/reset-password?token=${devToken}`">{{ $t('auth.resetNow') }}</router-link>
         </p>
       </div>
 
-      <router-link to="/login" class="back-link">Back to Login</router-link>
+      <router-link to="/login" class="back-link">{{ $t('auth.backToLogin') }}</router-link>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
+
+const { t } = useI18n()
 
 const email = ref('')
 const loading = ref(false)

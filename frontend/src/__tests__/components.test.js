@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import i18n from '../i18n/index.js'
 
 // Mock matchMedia for theme store
 vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
@@ -73,7 +74,7 @@ describe('OnboardingTour', () => {
     const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
     // Render with disabled Teleport
     const wrapper = mount(OnboardingTour, {
-      global: { stubs: { Teleport: { template: '<div><slot /></div>' } } },
+      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
     })
     // Component should render (visible becomes true in onMounted)
     await wrapper.vm.$nextTick()
@@ -85,7 +86,7 @@ describe('OnboardingTour', () => {
     localStorage.setItem('predomics_onboarding_dismissed', 'true')
     const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
     const wrapper = mount(OnboardingTour, {
-      global: { stubs: { Teleport: { template: '<div><slot /></div>' } } },
+      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
     })
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.tour-overlay').exists()).toBe(false)
@@ -94,7 +95,7 @@ describe('OnboardingTour', () => {
   it('navigates through steps', async () => {
     const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
     const wrapper = mount(OnboardingTour, {
-      global: { stubs: { Teleport: { template: '<div><slot /></div>' } } },
+      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
     })
     await wrapper.vm.$nextTick()
 
@@ -108,7 +109,7 @@ describe('OnboardingTour', () => {
   it('dismiss hides tour overlay', async () => {
     const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
     const wrapper = mount(OnboardingTour, {
-      global: { stubs: { Teleport: { template: '<div><slot /></div>' } } },
+      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
     })
     await wrapper.vm.$nextTick()
 

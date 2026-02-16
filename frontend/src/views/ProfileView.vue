@@ -1,39 +1,39 @@
 <template>
   <div class="profile">
-    <h2>Profile</h2>
+    <h2>{{ $t('profile.title') }}</h2>
 
     <section class="card">
-      <h3>Account Info</h3>
+      <h3>{{ $t('profile.accountInfo') }}</h3>
       <div class="info-row">
-        <span class="label">Email</span>
+        <span class="label">{{ $t('profile.email') }}</span>
         <span class="value">{{ auth.user?.email }}</span>
       </div>
       <div class="info-row">
-        <span class="label">Joined</span>
+        <span class="label">{{ $t('profile.joined') }}</span>
         <span class="value">{{ auth.user?.created_at ? new Date(auth.user.created_at).toLocaleDateString() : '' }}</span>
       </div>
     </section>
 
     <section class="card">
-      <h3>Edit Name</h3>
+      <h3>{{ $t('profile.editName') }}</h3>
       <form @submit.prevent="saveName">
         <div class="form-group">
-          <label>Full Name</label>
-          <input v-model="fullName" type="text" placeholder="Your name" />
+          <label>{{ $t('profile.fullName') }}</label>
+          <input v-model="fullName" type="text" :placeholder="$t('profile.yourName')" />
         </div>
         <button type="submit" class="btn btn-primary" :disabled="savingName">
-          {{ savingName ? 'Saving...' : 'Save' }}
+          {{ savingName ? $t('profile.saving') : $t('profile.save') }}
         </button>
         <span v-if="nameMsg" class="msg success">{{ nameMsg }}</span>
       </form>
     </section>
 
     <section class="card">
-      <h3>Preferences</h3>
+      <h3>{{ $t('profile.preferences') }}</h3>
       <div class="pref-row">
         <div>
-          <span class="pref-label">Browser Notifications</span>
-          <span class="pref-desc">Get notified when jobs complete or fail</span>
+          <span class="pref-label">{{ $t('profile.browserNotifications') }}</span>
+          <span class="pref-desc">{{ $t('profile.notifDesc') }}</span>
         </div>
         <button class="btn btn-small" @click="toggleNotifications">
           {{ notifStatus }}
@@ -41,28 +41,28 @@
       </div>
       <div class="pref-row">
         <div>
-          <span class="pref-label">Onboarding Tour</span>
-          <span class="pref-desc">Show the welcome tour again on next visit</span>
+          <span class="pref-label">{{ $t('profile.onboardingTour') }}</span>
+          <span class="pref-desc">{{ $t('profile.tourDesc') }}</span>
         </div>
-        <button class="btn btn-small" @click="resetTour">Reset Tour</button>
+        <button class="btn btn-small" @click="resetTour">{{ $t('profile.resetTour') }}</button>
       </div>
       <span v-if="prefMsg" class="msg success">{{ prefMsg }}</span>
     </section>
 
     <!-- API Keys Section -->
     <section class="card">
-      <h3>API Keys</h3>
-      <p class="card-desc">Generate API keys for programmatic access. Keys are shown only once on creation.</p>
+      <h3>{{ $t('profile.apiKeys') }}</h3>
+      <p class="card-desc">{{ $t('profile.apiKeysDesc') }}</p>
 
       <div class="api-key-create">
-        <input v-model="apiKeyName" placeholder="Key name (e.g. CI pipeline)" class="form-input" @keyup.enter="createApiKey" />
+        <input v-model="apiKeyName" :placeholder="$t('profile.keyNamePlaceholder')" class="form-input" @keyup.enter="createApiKey" />
         <button class="btn btn-primary" @click="createApiKey" :disabled="!apiKeyName.trim() || creatingKey">
-          {{ creatingKey ? 'Creating...' : 'Create Key' }}
+          {{ creatingKey ? $t('profile.creating') : $t('profile.createKey') }}
         </button>
       </div>
 
       <div v-if="newKeySecret" class="new-key-alert">
-        <strong>Copy this key now — it won't be shown again:</strong>
+        <strong>{{ $t('profile.copyKeyNow') }}</strong>
         <code>{{ newKeySecret }}</code>
       </div>
 
@@ -71,29 +71,29 @@
           <div>
             <span class="key-name">{{ k.name }}</span>
             <span class="key-prefix">{{ k.prefix }}...</span>
-            <span v-if="k.last_used_at" class="key-used">Last used: {{ new Date(k.last_used_at).toLocaleDateString() }}</span>
+            <span v-if="k.last_used_at" class="key-used">{{ $t('profile.lastUsed') }} {{ new Date(k.last_used_at).toLocaleDateString() }}</span>
           </div>
-          <button class="btn-danger-sm" @click="revokeApiKey(k)">Revoke</button>
+          <button class="btn-danger-sm" @click="revokeApiKey(k)">{{ $t('profile.revoke') }}</button>
         </div>
       </div>
-      <div v-else class="empty-hint">No API keys yet.</div>
+      <div v-else class="empty-hint">{{ $t('profile.noApiKeys') }}</div>
     </section>
 
     <!-- Webhooks Section -->
     <section class="card">
-      <h3>Webhooks</h3>
-      <p class="card-desc">Receive HTTP POST notifications when jobs complete or fail.</p>
+      <h3>{{ $t('profile.webhooks') }}</h3>
+      <p class="card-desc">{{ $t('profile.webhooksDesc') }}</p>
 
       <div class="webhook-create">
-        <input v-model="webhookName" placeholder="Webhook name" class="form-input" />
-        <input v-model="webhookUrl" placeholder="https://example.com/webhook" class="form-input flex-1" />
+        <input v-model="webhookName" :placeholder="$t('profile.webhookName')" class="form-input" />
+        <input v-model="webhookUrl" :placeholder="$t('profile.webhookUrlPlaceholder')" class="form-input flex-1" />
         <button class="btn btn-primary" @click="createWebhook" :disabled="!webhookName.trim() || !webhookUrl.trim() || creatingWebhook">
-          {{ creatingWebhook ? 'Creating...' : 'Add Webhook' }}
+          {{ creatingWebhook ? $t('profile.creating') : $t('profile.addWebhook') }}
         </button>
       </div>
 
       <div v-if="newWebhookSecret" class="new-key-alert">
-        <strong>Webhook secret (copy now):</strong>
+        <strong>{{ $t('profile.webhookSecret') }}</strong>
         <code>{{ newWebhookSecret }}</code>
       </div>
 
@@ -102,31 +102,31 @@
           <div>
             <span class="key-name">{{ w.name }}</span>
             <span class="key-prefix">{{ w.url }}</span>
-            <span class="key-used">Events: {{ w.events?.join(', ') }}</span>
+            <span class="key-used">{{ $t('profile.events') }} {{ w.events?.join(', ') }}</span>
           </div>
           <div class="key-actions">
-            <button class="btn-test-sm" @click="testWebhook(w)">Test</button>
-            <button class="btn-danger-sm" @click="deleteWebhook(w)">Delete</button>
+            <button class="btn-test-sm" @click="testWebhook(w)">{{ $t('profile.test') }}</button>
+            <button class="btn-danger-sm" @click="deleteWebhook(w)">{{ $t('profile.deleteWebhook') }}</button>
           </div>
         </div>
       </div>
-      <div v-else class="empty-hint">No webhooks configured.</div>
+      <div v-else class="empty-hint">{{ $t('profile.noWebhooks') }}</div>
       <span v-if="webhookMsg" class="msg" :class="webhookMsgType">{{ webhookMsg }}</span>
     </section>
 
     <section class="card">
-      <h3>Change Password</h3>
+      <h3>{{ $t('profile.changePassword') }}</h3>
       <form @submit.prevent="savePassword">
         <div class="form-group">
-          <label>Current Password</label>
+          <label>{{ $t('profile.currentPassword') }}</label>
           <input v-model="currentPw" type="password" />
         </div>
         <div class="form-group">
-          <label>New Password</label>
+          <label>{{ $t('profile.newPassword') }}</label>
           <input v-model="newPw" type="password" />
         </div>
         <button type="submit" class="btn btn-primary" :disabled="savingPw || !currentPw || !newPw">
-          {{ savingPw ? 'Saving...' : 'Change Password' }}
+          {{ savingPw ? $t('profile.saving') : $t('profile.changePasswordBtn') }}
         </button>
         <span v-if="pwMsg" class="msg" :class="pwError ? 'error' : 'success'">{{ pwMsg }}</span>
       </form>
@@ -139,8 +139,10 @@ import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth'
 import { isSupported, requestPermission } from '../utils/notify'
+import { useI18n } from 'vue-i18n'
 
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const fullName = ref('')
 const savingName = ref(false)
@@ -169,11 +171,11 @@ const webhookMsg = ref('')
 const webhookMsgType = ref('success')
 
 const notifStatus = computed(() => {
-  if (!isSupported()) return 'Not supported'
-  if (localStorage.getItem('predomics_notifications') === 'denied') return 'Disabled'
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') return 'Enabled'
-  if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return 'Blocked'
-  return 'Enable'
+  if (!isSupported()) return t('profile.notSupported')
+  if (localStorage.getItem('predomics_notifications') === 'denied') return t('profile.disabled')
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') return t('profile.enabled')
+  if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return t('profile.blocked')
+  return t('profile.enable')
 })
 
 async function toggleNotifications() {
@@ -181,20 +183,20 @@ async function toggleNotifications() {
   if (localStorage.getItem('predomics_notifications') === 'denied') {
     localStorage.removeItem('predomics_notifications')
     await requestPermission()
-    prefMsg.value = 'Notifications re-enabled'
+    prefMsg.value = t('profile.notifReEnabled')
   } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     localStorage.setItem('predomics_notifications', 'denied')
-    prefMsg.value = 'Notifications disabled'
+    prefMsg.value = t('profile.notifDisabled')
   } else {
     const granted = await requestPermission()
-    prefMsg.value = granted ? 'Notifications enabled' : 'Permission denied by browser'
+    prefMsg.value = granted ? t('profile.notifEnabled') : t('profile.notifDenied')
   }
   setTimeout(() => { prefMsg.value = '' }, 3000)
 }
 
 function resetTour() {
   localStorage.removeItem('predomics_onboarding_dismissed')
-  prefMsg.value = 'Tour will show on next page load'
+  prefMsg.value = t('profile.tourReset')
   setTimeout(() => { prefMsg.value = '' }, 3000)
 }
 

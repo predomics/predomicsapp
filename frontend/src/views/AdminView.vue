@@ -1,21 +1,21 @@
 <template>
   <div class="admin-page">
-    <h2>User Administration</h2>
+    <h2>{{ $t('admin.userAdmin') }}</h2>
 
-    <div v-if="loading" class="loading">Loading users...</div>
+    <div v-if="loading" class="loading">{{ $t('admin.loadingUsers') }}</div>
     <div v-else-if="error" class="error-msg">{{ error }}</div>
 
     <table v-else class="user-table">
       <thead>
         <tr>
-          <th>Email</th>
-          <th>Name</th>
-          <th>Active</th>
-          <th>Admin</th>
-          <th>Projects</th>
-          <th>Datasets</th>
-          <th>Created</th>
-          <th>Actions</th>
+          <th>{{ $t('admin.colEmail') }}</th>
+          <th>{{ $t('admin.colName') }}</th>
+          <th>{{ $t('admin.colActive') }}</th>
+          <th>{{ $t('admin.colAdmin') }}</th>
+          <th>{{ $t('admin.colProjects') }}</th>
+          <th>{{ $t('admin.colDatasets') }}</th>
+          <th>{{ $t('admin.colCreated') }}</th>
+          <th>{{ $t('admin.colActions') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -29,7 +29,7 @@
               @click="toggleActive(u)"
               :disabled="u.id === currentUser.id"
             >
-              {{ u.is_active ? 'Yes' : 'No' }}
+              {{ u.is_active ? $t('admin.yes') : $t('admin.no') }}
             </button>
           </td>
           <td>
@@ -39,7 +39,7 @@
               @click="toggleAdmin(u)"
               :disabled="u.id === currentUser.id"
             >
-              {{ u.is_admin ? 'Yes' : 'No' }}
+              {{ u.is_admin ? $t('admin.yes') : $t('admin.no') }}
             </button>
           </td>
           <td class="count">{{ u.project_count }}</td>
@@ -51,7 +51,7 @@
               @click="deleteUser(u)"
               :disabled="u.id === currentUser.id"
             >
-              Delete
+              {{ $t('admin.delete') }}
             </button>
           </td>
         </tr>
@@ -59,15 +59,15 @@
     </table>
 
     <!-- Default Parameters Section -->
-    <h2 class="section-title">Default Parameters</h2>
-    <p class="section-desc">These defaults are applied to all new analysis runs (users can override them).</p>
+    <h2 class="section-title">{{ $t('admin.defaultParams') }}</h2>
+    <p class="section-desc">{{ $t('admin.defaultParamsDesc') }}</p>
 
-    <div v-if="defaultsLoading" class="loading">Loading defaults...</div>
+    <div v-if="defaultsLoading" class="loading">{{ $t('admin.loadingDefaults') }}</div>
     <div v-else class="defaults-grid">
       <div v-for="(field, idx) in defaultFields" :key="idx" class="default-field">
         <label :for="'df-' + idx">{{ field.label }}</label>
         <select v-if="field.options" :id="'df-' + idx" v-model="defaults[field.key]">
-          <option :value="undefined">— use hardcoded —</option>
+          <option :value="undefined">{{ $t('admin.useHardcoded') }}</option>
           <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
         </select>
         <input
@@ -78,9 +78,9 @@
           :placeholder="field.placeholder || ''"
         />
         <select v-else-if="field.type === 'boolean'" :id="'df-' + idx" v-model="defaults[field.key]">
-          <option :value="undefined">— use hardcoded —</option>
-          <option :value="true">Yes</option>
-          <option :value="false">No</option>
+          <option :value="undefined">{{ $t('admin.useHardcoded') }}</option>
+          <option :value="true">{{ $t('admin.yes') }}</option>
+          <option :value="false">{{ $t('admin.no') }}</option>
         </select>
         <input
           v-else
@@ -93,24 +93,24 @@
     </div>
     <div class="defaults-actions">
       <button class="btn-save" @click="saveDefaults" :disabled="defaultsSaving">
-        {{ defaultsSaving ? 'Saving...' : 'Save Defaults' }}
+        {{ defaultsSaving ? $t('admin.saving') : $t('admin.saveDefaults') }}
       </button>
-      <button class="btn-reset" @click="resetDefaults">Reset All</button>
-      <span v-if="defaultsSaved" class="save-ok">Saved!</span>
+      <button class="btn-reset" @click="resetDefaults">{{ $t('admin.resetAll') }}</button>
+      <span v-if="defaultsSaved" class="save-ok">{{ $t('admin.saved') }}</span>
     </div>
 
     <!-- Project Templates Section -->
-    <h2 class="section-title">Project Templates</h2>
-    <p class="section-desc">Parameter presets available to all users in the Parameters tab.</p>
+    <h2 class="section-title">{{ $t('admin.projectTemplates') }}</h2>
+    <p class="section-desc">{{ $t('admin.templatesDesc') }}</p>
 
     <div class="template-create">
-      <input v-model="tplName" placeholder="Template name" class="tpl-input" />
-      <input v-model="tplDesc" placeholder="Description (optional)" class="tpl-input tpl-desc" />
+      <input v-model="tplName" :placeholder="$t('admin.templateName')" class="tpl-input" />
+      <input v-model="tplDesc" :placeholder="$t('admin.templateDesc')" class="tpl-input tpl-desc" />
       <button class="btn-save" @click="createTemplate" :disabled="!tplName.trim() || tplSaving">
-        {{ tplSaving ? 'Saving...' : 'Create Template' }}
+        {{ tplSaving ? $t('admin.saving') : $t('admin.createTemplate') }}
       </button>
     </div>
-    <p class="section-desc">Template config is captured from current admin defaults. Edit defaults first, then create a template.</p>
+    <p class="section-desc">{{ $t('admin.templateConfigHint') }}</p>
 
     <div v-if="tplTemplates.length > 0" class="tpl-list">
       <div v-for="t in tplTemplates" :key="t.id" class="tpl-card">
@@ -118,32 +118,32 @@
           <strong>{{ t.name }}</strong>
           <span v-if="t.description" class="tpl-desc-text">{{ t.description }}</span>
         </div>
-        <button class="btn-delete" @click="deleteTemplate(t)">Delete</button>
+        <button class="btn-delete" @click="deleteTemplate(t)">{{ $t('admin.delete') }}</button>
       </div>
     </div>
-    <div v-else class="empty-state">No templates yet.</div>
+    <div v-else class="empty-state">{{ $t('admin.noTemplates') }}</div>
 
     <!-- Audit Log Section -->
-    <h2 class="section-title">Audit Log</h2>
-    <p class="section-desc">Track user actions across the system.</p>
+    <h2 class="section-title">{{ $t('admin.auditLog') }}</h2>
+    <p class="section-desc">{{ $t('admin.auditLogDesc') }}</p>
 
     <div class="audit-filters">
       <select v-model="auditAction" @change="fetchAuditLog(1)" class="audit-select">
-        <option value="">All actions</option>
+        <option value="">{{ $t('admin.allActions') }}</option>
         <option v-for="a in auditActions" :key="a" :value="a">{{ a }}</option>
       </select>
-      <button class="btn-reset" @click="auditAction = ''; fetchAuditLog(1)">Clear</button>
-      <span class="audit-total" v-if="auditTotal > 0">{{ auditTotal }} entries</span>
+      <button class="btn-reset" @click="auditAction = ''; fetchAuditLog(1)">{{ $t('admin.clear') }}</button>
+      <span class="audit-total" v-if="auditTotal > 0">{{ auditTotal }} {{ $t('admin.entries') }}</span>
     </div>
 
     <table v-if="auditEntries.length > 0" class="user-table audit-table">
       <thead>
         <tr>
-          <th>Time</th>
-          <th>User</th>
-          <th>Action</th>
-          <th>Resource</th>
-          <th>Details</th>
+          <th>{{ $t('admin.colTime') }}</th>
+          <th>{{ $t('admin.colUser') }}</th>
+          <th>{{ $t('admin.colAction') }}</th>
+          <th>{{ $t('admin.colResource') }}</th>
+          <th>{{ $t('admin.colDetails') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -158,45 +158,45 @@
     </table>
 
     <div v-if="auditTotal > auditPerPage" class="audit-pagination">
-      <button :disabled="auditPage <= 1" @click="fetchAuditLog(auditPage - 1)">Prev</button>
-      <span>Page {{ auditPage }} / {{ Math.ceil(auditTotal / auditPerPage) }}</span>
-      <button :disabled="auditPage >= Math.ceil(auditTotal / auditPerPage)" @click="fetchAuditLog(auditPage + 1)">Next</button>
+      <button :disabled="auditPage <= 1" @click="fetchAuditLog(auditPage - 1)">{{ $t('admin.prev') }}</button>
+      <span>{{ $t('admin.page') }} {{ auditPage }} / {{ Math.ceil(auditTotal / auditPerPage) }}</span>
+      <button :disabled="auditPage >= Math.ceil(auditTotal / auditPerPage)" @click="fetchAuditLog(auditPage + 1)">{{ $t('admin.next') }}</button>
     </div>
 
     <!-- System Backup & Restore Section -->
-    <h2 class="section-title">System Backup &amp; Restore</h2>
-    <p class="section-desc">Create full system backups (database + files) or restore from a previous backup.</p>
+    <h2 class="section-title">{{ $t('admin.backupRestore') }}</h2>
+    <p class="section-desc">{{ $t('admin.backupRestoreDesc') }}</p>
 
     <div class="backup-actions">
       <div class="backup-create">
-        <input v-model="backupDescription" placeholder="Backup description (optional)" class="backup-desc-input" />
+        <input v-model="backupDescription" :placeholder="$t('admin.backupDescPlaceholder')" class="backup-desc-input" />
         <button class="btn-save" @click="createBackup" :disabled="backupCreating">
-          {{ backupCreating ? 'Creating...' : 'Create Backup' }}
+          {{ backupCreating ? $t('admin.creating') : $t('admin.createBackup') }}
         </button>
       </div>
       <div class="backup-restore">
         <label class="btn-restore">
-          Restore from file...
+          {{ $t('admin.restoreFromFile') }}
           <input type="file" accept=".tar.gz,.tgz" @change="handleRestoreFile" style="display:none" />
         </label>
         <select v-model="restoreMode" class="restore-mode-select">
-          <option value="replace">Replace (wipe existing)</option>
-          <option value="merge">Merge (skip conflicts)</option>
+          <option value="replace">{{ $t('admin.replaceMode') }}</option>
+          <option value="merge">{{ $t('admin.mergeMode') }}</option>
         </select>
       </div>
     </div>
 
     <div v-if="backupMessage" :class="['backup-msg', backupMsgType]">{{ backupMessage }}</div>
 
-    <div v-if="backupLoading" class="loading">Loading backups...</div>
+    <div v-if="backupLoading" class="loading">{{ $t('admin.loadingBackups') }}</div>
     <table v-else-if="backups.length > 0" class="user-table backup-table">
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Description</th>
-          <th>Size</th>
-          <th>Records</th>
-          <th>Actions</th>
+          <th>{{ $t('admin.colDate') }}</th>
+          <th>{{ $t('admin.colDescription') }}</th>
+          <th>{{ $t('admin.colSize') }}</th>
+          <th>{{ $t('admin.colRecords') }}</th>
+          <th>{{ $t('admin.colActions') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -211,21 +211,23 @@
             <span v-else>—</span>
           </td>
           <td>
-            <button class="btn-download" @click="downloadBackup(b)">Download</button>
-            <button class="btn-delete" @click="deleteBackupConfirm(b)">Delete</button>
+            <button class="btn-download" @click="downloadBackup(b)">{{ $t('admin.download') }}</button>
+            <button class="btn-delete" @click="deleteBackupConfirm(b)">{{ $t('admin.delete') }}</button>
           </td>
         </tr>
       </tbody>
     </table>
-    <div v-else-if="!backupLoading" class="empty-state">No backups yet. Create one to get started.</div>
+    <div v-else-if="!backupLoading" class="empty-state">{{ $t('admin.noBackups') }}</div>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import axios from 'axios'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const currentUser = auth.user
 
@@ -281,14 +283,14 @@ async function saveDefaults() {
     defaultsSaved.value = true
     setTimeout(() => { defaultsSaved.value = false }, 3000)
   } catch (e) {
-    alert('Failed to save defaults: ' + (e.response?.data?.detail || e.message))
+    alert(t('admin.saveFailed', { error: e.response?.data?.detail || e.message }))
   } finally {
     defaultsSaving.value = false
   }
 }
 
 function resetDefaults() {
-  if (!confirm('Reset all default parameters to hardcoded values?')) return
+  if (!confirm(t('admin.resetConfirm'))) return
   Object.keys(defaults).forEach(k => delete defaults[k])
   saveDefaults()
 }
@@ -329,7 +331,7 @@ async function toggleAdmin(u) {
 }
 
 async function deleteUser(u) {
-  if (!confirm(`Delete user "${u.email}" and ALL their data? This cannot be undone.`)) return
+  if (!confirm(t('admin.deleteUserConfirm', { email: u.email }))) return
   try {
     await axios.delete(`/api/admin/users/${u.id}`)
     users.value = users.value.filter(x => x.id !== u.id)

@@ -1,32 +1,32 @@
 <template>
   <div class="reset-page">
     <div class="reset-card">
-      <h1>Set New Password</h1>
+      <h1>{{ $t('auth.setNewPassword') }}</h1>
 
       <div v-if="!token" class="error-msg">
-        <p>Missing reset token. Please use the link from your email.</p>
-        <router-link to="/forgot-password" class="back-link">Request a new link</router-link>
+        <p>{{ $t('auth.missingToken') }}</p>
+        <router-link to="/forgot-password" class="back-link">{{ $t('auth.requestNewLink') }}</router-link>
       </div>
 
       <form v-else-if="!done" @submit.prevent="submit">
         <div class="field">
-          <label>New Password</label>
+          <label>{{ $t('auth.newPassword') }}</label>
           <input v-model="password" type="password" placeholder="Enter new password" required minlength="6" />
         </div>
         <div class="field">
-          <label>Confirm Password</label>
+          <label>{{ $t('auth.confirmPassword') }}</label>
           <input v-model="confirm" type="password" placeholder="Confirm password" required />
         </div>
         <p v-if="error" class="error">{{ error }}</p>
         <button type="submit" class="btn-primary" :disabled="loading || !password || password !== confirm">
-          {{ loading ? 'Resetting...' : 'Reset Password' }}
+          {{ loading ? $t('auth.resetting') : $t('auth.resetBtn') }}
         </button>
       </form>
 
       <div v-else class="success-msg">
-        <p>Password reset successfully!</p>
+        <p>{{ $t('auth.resetSuccess') }}</p>
         <router-link to="/login" class="btn-primary" style="display:inline-block;margin-top:1rem;text-align:center;text-decoration:none;">
-          Go to Login
+          {{ $t('auth.goToLogin') }}
         </router-link>
       </div>
     </div>
@@ -35,8 +35,11 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+
+const { t } = useI18n()
 
 const route = useRoute()
 const token = ref(route.query.token || '')
@@ -48,7 +51,7 @@ const done = ref(false)
 
 async function submit() {
   if (password.value !== confirm.value) {
-    error.value = 'Passwords do not match'
+    error.value = t('auth.passwordsMismatch')
     return
   }
   error.value = ''

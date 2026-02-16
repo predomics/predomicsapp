@@ -1,11 +1,11 @@
 <template>
   <div class="public-view">
     <div class="public-header">
-      <h1>PredomicsApp</h1>
-      <span class="public-badge">Public View</span>
+      <h1>{{ $t('publicShare.appTitle') }}</h1>
+      <span class="public-badge">{{ $t('publicShare.publicView') }}</span>
     </div>
 
-    <div v-if="loading" class="loading">Loading shared results...</div>
+    <div v-if="loading" class="loading">{{ $t('publicShare.loadingResults') }}</div>
     <div v-else-if="error" class="error-box">{{ error }}</div>
 
     <template v-else-if="projectData">
@@ -16,7 +16,7 @@
 
       <!-- Job list -->
       <div class="jobs-section" v-if="projectData.jobs.length > 0">
-        <h3>Completed Jobs</h3>
+        <h3>{{ $t('publicShare.completedJobs') }}</h3>
         <div class="job-cards">
           <div
             v-for="j in projectData.jobs" :key="j.job_id"
@@ -26,8 +26,8 @@
           >
             <div class="job-name">{{ j.name || j.job_id.slice(0, 8) }}</div>
             <div class="job-metrics">
-              <span v-if="j.best_auc != null">AUC: {{ j.best_auc.toFixed(4) }}</span>
-              <span v-if="j.best_k != null">k: {{ j.best_k }}</span>
+              <span v-if="j.best_auc != null">{{ $t('publicShare.auc') }} {{ j.best_auc.toFixed(4) }}</span>
+              <span v-if="j.best_k != null">{{ $t('publicShare.k') }} {{ j.best_k }}</span>
             </div>
             <div class="job-date">{{ formatDate(j.completed_at) }}</div>
           </div>
@@ -36,39 +36,39 @@
 
       <!-- Selected job results -->
       <div v-if="jobResults" class="results-section">
-        <h3>Results</h3>
+        <h3>{{ $t('publicShare.results') }}</h3>
 
         <!-- Summary metrics -->
         <div class="metrics-grid">
           <div class="metric-card" v-if="best.auc != null">
             <div class="metric-value">{{ best.auc.toFixed(4) }}</div>
-            <div class="metric-label">AUC</div>
+            <div class="metric-label">{{ $t('publicShare.aucLabel') }}</div>
           </div>
           <div class="metric-card" v-if="best.accuracy != null">
             <div class="metric-value">{{ best.accuracy.toFixed(4) }}</div>
-            <div class="metric-label">Accuracy</div>
+            <div class="metric-label">{{ $t('publicShare.accuracyLabel') }}</div>
           </div>
           <div class="metric-card" v-if="best.sensitivity != null">
             <div class="metric-value">{{ best.sensitivity.toFixed(4) }}</div>
-            <div class="metric-label">Sensitivity</div>
+            <div class="metric-label">{{ $t('publicShare.sensitivityLabel') }}</div>
           </div>
           <div class="metric-card" v-if="best.specificity != null">
             <div class="metric-value">{{ best.specificity.toFixed(4) }}</div>
-            <div class="metric-label">Specificity</div>
+            <div class="metric-label">{{ $t('publicShare.specificityLabel') }}</div>
           </div>
           <div class="metric-card" v-if="best.k != null">
             <div class="metric-value">{{ best.k }}</div>
-            <div class="metric-label">Features (k)</div>
+            <div class="metric-label">{{ $t('publicShare.featuresK') }}</div>
           </div>
           <div class="metric-card" v-if="best.language">
             <div class="metric-value">{{ best.language }}</div>
-            <div class="metric-label">Language</div>
+            <div class="metric-label">{{ $t('publicShare.languageLabel') }}</div>
           </div>
         </div>
 
         <!-- Feature coefficients -->
         <div v-if="bestFeatures.length > 0" class="features-section">
-          <h4>Model Features</h4>
+          <h4>{{ $t('publicShare.modelFeatures') }}</h4>
           <div class="feature-chips">
             <span
               v-for="f in bestFeatures" :key="f.name"
@@ -81,11 +81,11 @@
         </div>
       </div>
 
-      <div v-if="jobLoading" class="loading">Loading job results...</div>
+      <div v-if="jobLoading" class="loading">{{ $t('publicShare.loadingJobResults') }}</div>
     </template>
 
     <div class="public-footer">
-      Shared via <strong>PredomicsApp</strong> — Predictive Models from Omics Data
+      {{ $t('publicShare.sharedVia') }} — {{ $t('publicShare.footerSubtitle') }}
     </div>
   </div>
 </template>
@@ -94,7 +94,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const route = useRoute()
 const token = computed(() => route.params.token)
 
@@ -128,7 +130,7 @@ async function loadProject() {
       selectJob(data.jobs[0].job_id)
     }
   } catch (e) {
-    error.value = e.response?.data?.detail || 'This share link is invalid or has expired.'
+    error.value = e.response?.data?.detail || t('publicShare.invalidLink')
   } finally {
     loading.value = false
   }

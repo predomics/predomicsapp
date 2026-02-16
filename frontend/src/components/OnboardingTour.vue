@@ -20,15 +20,15 @@
         </div>
 
         <div class="tour-actions">
-          <button v-if="step > 0" class="tour-btn secondary" @click="step--">Back</button>
+          <button v-if="step > 0" class="tour-btn secondary" @click="step--">{{ $t('components.back') }}</button>
           <span v-else />
-          <button v-if="step < steps.length - 1" class="tour-btn primary" @click="step++">Next</button>
-          <button v-else class="tour-btn primary" @click="dismiss">Get Started</button>
+          <button v-if="step < steps.length - 1" class="tour-btn primary" @click="step++">{{ $t('components.next') }}</button>
+          <button v-else class="tour-btn primary" @click="dismiss">{{ $t('components.getStarted') }}</button>
         </div>
 
         <label class="tour-dismiss-label">
           <input type="checkbox" v-model="dontShowAgain" />
-          Don't show this again
+          {{ $t('components.dontShowAgain') }}
         </label>
       </div>
     </div>
@@ -36,7 +36,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const STORAGE_KEY = 'predomics_onboarding_dismissed'
 
@@ -44,38 +47,38 @@ const visible = ref(false)
 const step = ref(0)
 const dontShowAgain = ref(false)
 
-const steps = [
+const steps = computed(() => [
   {
     icon: '\u{1F44B}',
-    title: 'Welcome to PredomicsApp',
-    description: 'This quick tour will walk you through the main workflow: from uploading your data to viewing analysis results. It only takes a moment!',
+    title: t('components.tourWelcomeTitle'),
+    description: t('components.tourWelcomeDesc'),
   },
   {
     icon: '\u{1F4C1}',
-    title: 'Step 1: Create a Project',
-    description: 'Start by clicking the "+" button in the Projects page to create a new project. Projects organize your datasets, parameters, and analysis results together.',
+    title: t('components.tourStep1Title'),
+    description: t('components.tourStep1Desc'),
   },
   {
     icon: '\u{1F4E4}',
-    title: 'Step 2: Upload Your Data',
-    description: 'In the Data tab, upload your training and test files (Xtrain, Ytrain, Xtest, Ytest). Supported formats: TSV, CSV. You can also manage datasets in the Dataset Library.',
+    title: t('components.tourStep2Title'),
+    description: t('components.tourStep2Desc'),
   },
   {
     icon: '\u{2699}\u{FE0F}',
-    title: 'Step 3: Configure Parameters',
-    description: 'Switch to the "Parameters & Run" tab to configure the analysis. Adjust algorithm settings (GA, BEAM, MCMC), cross-validation, and feature importance options — or use the defaults.',
+    title: t('components.tourStep3Title'),
+    description: t('components.tourStep3Desc'),
   },
   {
     icon: '\u{1F680}',
-    title: 'Step 4: Launch Analysis',
-    description: 'Click "Launch Job" to start the analysis. A live console shows real-time progress. You\'ll be notified when it completes — feel free to navigate away.',
+    title: t('components.tourStep4Title'),
+    description: t('components.tourStep4Desc'),
   },
   {
     icon: '\u{1F4CA}',
-    title: 'Step 5: Explore Results',
-    description: 'View detailed results in the Results tab: model summaries, feature importance charts, performance metrics, and prediction plots. Export as CSV, HTML report, or a reproducible notebook.',
+    title: t('components.tourStep5Title'),
+    description: t('components.tourStep5Desc'),
   },
-]
+])
 
 function dismiss() {
   visible.value = false
