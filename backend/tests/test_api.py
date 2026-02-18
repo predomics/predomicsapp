@@ -3028,3 +3028,484 @@ class TestSharing:
 
         resp = await auth_client.delete(f"/api/projects/{pid}/shares/nonexistent")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Signature Zoo
+# ---------------------------------------------------------------------------
+
+class TestSignatureZoo:
+    """Tests for the /api/signature-zoo endpoints (file-based JSON storage)."""
+
+    ZOO_FILE = os.path.join(os.environ["PREDOMICS_DATA_DIR"], "signature_zoo.json")
+
+    def _cleanup_zoo(self):
+        if os.path.exists(self.ZOO_FILE):
+            os.remove(self.ZOO_FILE)
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        self._cleanup_zoo()
+        yield
+        self._cleanup_zoo()
+
+    def _sig_payload(self, name="TestSig", disease="obesity", method="binary",
+                     features=None, tags=None):
+        return {
+            "name": name,
+            "disease": disease,
+            "method": method,
+            "features": features or [
+                {"name": "Bacteroides", "coefficient": 1.2, "direction": "enriched"},
+                {"name": "Prevotella", "coefficient": -0.8, "direction": "depleted"},
+            ],
+            "performance": {"auc": 0.89},
+            "tags": tags or ["gut", "microbiome"],
+        }
+
+    @pytest.mark.asyncio
+    async def test_list_empty(self, client):
+        resp = await client.get("/api/signature-zoo/")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_create_signature(self, auth_client):
+        resp = await auth_client.post("/api/signature-zoo/", json=self._sig_payload())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "id" in data
+        assert data["name"] == "TestSig"
+        assert "created_at" in data
+        assert data["created_by"] == "test@example.com"
+
+    @pytest.mark.asyncio
+    async def test_create_requires_auth(self, client):
+        resp = await client.post("/api/signature-zoo/", json=self._sig_payload())
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.asyncio
+    async def test_list_after_create(self, auth_client):
+        await auth_client.post("/api/signature-zoo/", json=self._sig_payload())
+        resp = await auth_client.get("/api/signature-zoo/")
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        assert items[0]["name"] == "TestSig"
+
+    @pytest.mark.asyncio
+    async def test_get_by_id(self, auth_client):
+        create_resp = await auth_client.post("/api/signature-zoo/", json=self._sig_payload())
+        sig_id = create_resp.json()["id"]
+
+        resp = await auth_client.get(f"/api/signature-zoo/{sig_id}")
+        assert resp.status_code == 200
+        assert resp.json()["id"] == sig_id
+        assert resp.json()["name"] == "TestSig"
+
+    @pytest.mark.asyncio
+    async def test_get_nonexistent(self, client):
+        resp = await client.get("/api/signature-zoo/nonexistent_id_999")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_filter_by_disease(self, auth_client):
+        await auth_client.post("/api/signature-zoo/", json=self._sig_payload(name="Sig1", disease="obesity"))
+        await auth_client.post("/api/signature-zoo/", json=self._sig_payload(name="Sig2", disease="diabetes"))
+
+        resp = await auth_client.get("/api/signature-zoo/", params={"disease": "obesity"})
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        assert items[0]["name"] == "Sig1"
+
+    @pytest.mark.asyncio
+    async def test_filter_by_search(self, auth_client):
+        await auth_client.post("/api/signature-zoo/", json=self._sig_payload(
+            name="AlphaSig",
+            features=[{"name": "Akkermansia", "coefficient": 1.0, "direction": "enriched"}],
+            tags=["oral"],
+        ))
+        await auth_client.post("/api/signature-zoo/", json=self._sig_payload(
+            name="BetaSig",
+            features=[{"name": "Streptococcus", "coefficient": 0.5, "direction": "enriched"}],
+            tags=["cardiac"],
+        ))
+
+        # Search by feature name
+        resp = await auth_client.get("/api/signature-zoo/", params={"search": "Akkermansia"})
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        assert items[0]["name"] == "AlphaSig"
+
+        # Search by tag
+        resp = await auth_client.get("/api/signature-zoo/", params={"search": "cardiac"})
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        assert items[0]["name"] == "BetaSig"
+
+    @pytest.mark.asyncio
+    async def test_update_signature(self, auth_client):
+        create_resp = await auth_client.post("/api/signature-zoo/", json=self._sig_payload(name="OrigName"))
+        sig_id = create_resp.json()["id"]
+
+        updated_payload = self._sig_payload(name="UpdatedName")
+        resp = await auth_client.put(f"/api/signature-zoo/{sig_id}", json=updated_payload)
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "UpdatedName"
+
+        # Verify by fetching
+        get_resp = await auth_client.get(f"/api/signature-zoo/{sig_id}")
+        assert get_resp.json()["name"] == "UpdatedName"
+
+    @pytest.mark.asyncio
+    async def test_delete_requires_admin(self, auth_client):
+        create_resp = await auth_client.post("/api/signature-zoo/", json=self._sig_payload())
+        sig_id = create_resp.json()["id"]
+
+        # Regular user should get 403
+        resp = await auth_client.delete(f"/api/signature-zoo/{sig_id}")
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_delete_as_admin(self, auth_client, db_session):
+        create_resp = await auth_client.post("/api/signature-zoo/", json=self._sig_payload())
+        sig_id = create_resp.json()["id"]
+
+        # Promote user to admin
+        from sqlalchemy import text
+        await db_session.execute(text("UPDATE users SET is_admin = true WHERE email = 'test@example.com'"))
+        await db_session.commit()
+
+        resp = await auth_client.delete(f"/api/signature-zoo/{sig_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+
+        # Verify it's gone
+        get_resp = await auth_client.get(f"/api/signature-zoo/{sig_id}")
+        assert get_resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_compare_signatures(self, auth_client):
+        # Sig A: features Bacteroides, Prevotella, Akkermansia
+        resp_a = await auth_client.post("/api/signature-zoo/", json=self._sig_payload(
+            name="SigA",
+            features=[
+                {"name": "Bacteroides", "coefficient": 1.0, "direction": "enriched"},
+                {"name": "Prevotella", "coefficient": -0.5, "direction": "depleted"},
+                {"name": "Akkermansia", "coefficient": 0.8, "direction": "enriched"},
+            ],
+        ))
+        id_a = resp_a.json()["id"]
+
+        # Sig B: features Bacteroides, Faecalibacterium, Akkermansia
+        resp_b = await auth_client.post("/api/signature-zoo/", json=self._sig_payload(
+            name="SigB",
+            features=[
+                {"name": "Bacteroides", "coefficient": 0.9, "direction": "enriched"},
+                {"name": "Faecalibacterium", "coefficient": 0.6, "direction": "enriched"},
+                {"name": "Akkermansia", "coefficient": 0.7, "direction": "enriched"},
+            ],
+        ))
+        id_b = resp_b.json()["id"]
+
+        resp = await auth_client.get("/api/signature-zoo/compare", params={"ids": f"{id_a},{id_b}"})
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert "feature_presence" in data
+        assert "common_features" in data
+        assert "overlap_matrix" in data
+        assert "performance_comparison" in data
+
+        # Common features: Bacteroides and Akkermansia
+        assert set(data["common_features"]) == {"Bacteroides", "Akkermansia"}
+
+        # Overlap matrix: 2x2, diagonal jaccard should be 1.0
+        assert len(data["overlap_matrix"]) == 2
+        assert data["overlap_matrix"][0][0]["jaccard"] == 1.0
+        assert data["overlap_matrix"][1][1]["jaccard"] == 1.0
+
+        # Off-diagonal: intersection=2 (Bacteroides, Akkermansia), union=4
+        # Jaccard = 2/4 = 0.5
+        assert data["overlap_matrix"][0][1]["jaccard"] == 0.5
+        assert data["overlap_matrix"][0][1]["shared"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------
+
+class TestComments:
+    """Tests for the /api/projects/{project_id}/comments endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_create_comment(self, auth_client):
+        resp = await auth_client.post("/api/projects/", params={"name": "CommentProj"})
+        pid = resp.json()["project_id"]
+
+        resp = await auth_client.post(
+            f"/api/projects/{pid}/comments",
+            json={"content": "This is a test comment."},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["content"] == "This is a test comment."
+        assert data["project_id"] == pid
+        assert "id" in data
+        assert "created_at" in data
+
+    @pytest.mark.asyncio
+    async def test_create_empty_comment_fails(self, auth_client):
+        resp = await auth_client.post("/api/projects/", params={"name": "EmptyCommentProj"})
+        pid = resp.json()["project_id"]
+
+        resp = await auth_client.post(
+            f"/api/projects/{pid}/comments",
+            json={"content": "   "},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_list_comments(self, auth_client):
+        resp = await auth_client.post("/api/projects/", params={"name": "ListComments"})
+        pid = resp.json()["project_id"]
+
+        await auth_client.post(f"/api/projects/{pid}/comments", json={"content": "Comment 1"})
+        await auth_client.post(f"/api/projects/{pid}/comments", json={"content": "Comment 2"})
+
+        resp = await auth_client.get(f"/api/projects/{pid}/comments")
+        assert resp.status_code == 200
+        comments = resp.json()
+        assert len(comments) == 2
+        assert comments[0]["content"] == "Comment 1"
+        assert comments[1]["content"] == "Comment 2"
+
+    @pytest.mark.asyncio
+    async def test_update_comment(self, auth_client):
+        resp = await auth_client.post("/api/projects/", params={"name": "UpdateComment"})
+        pid = resp.json()["project_id"]
+
+        create_resp = await auth_client.post(
+            f"/api/projects/{pid}/comments",
+            json={"content": "Original content"},
+        )
+        comment_id = create_resp.json()["id"]
+
+        resp = await auth_client.put(
+            f"/api/projects/{pid}/comments/{comment_id}",
+            json={"content": "Updated content"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "Updated content"
+
+    @pytest.mark.asyncio
+    async def test_update_other_users_comment_fails(self, auth_client, client, db_session):
+        # Create project as user1 (auth_client)
+        resp = await auth_client.post("/api/projects/", params={"name": "OtherUserComment"})
+        pid = resp.json()["project_id"]
+
+        # Add comment as user1
+        create_resp = await auth_client.post(
+            f"/api/projects/{pid}/comments",
+            json={"content": "User1 comment"},
+        )
+        comment_id = create_resp.json()["id"]
+
+        # Register user2 and share the project so user2 has access
+        await client.post("/api/auth/register", json={
+            "email": "user2@example.com",
+            "password": "testpass123",
+            "full_name": "User Two",
+        })
+        login_resp = await client.post("/api/auth/login", json={
+            "email": "user2@example.com",
+            "password": "testpass123",
+        })
+        token2 = login_resp.json()["access_token"]
+        headers2 = {"Authorization": f"Bearer {token2}"}
+
+        # Share the project with user2 as editor so they have access
+        await auth_client.post(
+            f"/api/projects/{pid}/share",
+            json={"email": "user2@example.com", "role": "editor"},
+        )
+
+        # User2 tries to update user1's comment -> 403
+        resp = await client.put(
+            f"/api/projects/{pid}/comments/{comment_id}",
+            json={"content": "Hijacked!"},
+            headers=headers2,
+        )
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_delete_comment(self, auth_client):
+        resp = await auth_client.post("/api/projects/", params={"name": "DeleteComment"})
+        pid = resp.json()["project_id"]
+
+        create_resp = await auth_client.post(
+            f"/api/projects/{pid}/comments",
+            json={"content": "To be deleted"},
+        )
+        comment_id = create_resp.json()["id"]
+
+        resp = await auth_client.delete(f"/api/projects/{pid}/comments/{comment_id}")
+        assert resp.status_code == 200
+
+        # Verify deleted
+        resp = await auth_client.get(f"/api/projects/{pid}/comments")
+        assert resp.json() == []
+
+
+# ---------------------------------------------------------------------------
+# Predict
+# ---------------------------------------------------------------------------
+
+class TestPredict:
+    """Tests for the /api/predict/{job_id} endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_predict_basic(self, auth_client, db_session):
+        pid, job_id = await _create_completed_job(auth_client, db_session)
+
+        # The mock results have features {5: 1, 12: -1, 37: 1} and
+        # feature_names = ["feature_0", ..., "feature_49"].
+        # So the named features are feature_5, feature_12, feature_37.
+        # We send a prediction request with those feature columns.
+        features = {
+            "feature_5": [0.5, 0.3],
+            "feature_12": [0.2, 0.8],
+            "feature_37": [0.9, 0.1],
+        }
+        resp = await auth_client.post(
+            f"/api/predict/{job_id}",
+            json={"features": features, "sample_names": ["s1", "s2"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "sample_names" in data
+        assert data["sample_names"] == ["s1", "s2"]
+        assert "scores" in data
+        assert len(data["scores"]) == 2
+        assert "predicted_classes" in data
+        assert len(data["predicted_classes"]) == 2
+        assert "threshold" in data
+        assert data["n_samples"] == 2
+
+    @pytest.mark.asyncio
+    async def test_predict_nonexistent_job(self, auth_client):
+        resp = await auth_client.post(
+            "/api/predict/nonexistent_job_id_999",
+            json={"features": {"f1": [0.1]}},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_predict_requires_auth(self, client):
+        resp = await client.post(
+            "/api/predict/any_job_id",
+            json={"features": {"f1": [0.1]}},
+        )
+        assert resp.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Templates (admin)
+# ---------------------------------------------------------------------------
+
+class TestTemplates:
+    """Tests for the /api/admin/templates endpoints."""
+
+    TEMPLATES_FILE = os.path.join(os.environ["PREDOMICS_DATA_DIR"], "templates.json")
+
+    def _cleanup_templates(self):
+        if os.path.exists(self.TEMPLATES_FILE):
+            os.remove(self.TEMPLATES_FILE)
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        self._cleanup_templates()
+        yield
+        self._cleanup_templates()
+
+    def _template_payload(self, name="TestTemplate", category="general"):
+        return {
+            "name": name,
+            "description": "A test template",
+            "category": category,
+            "params": {
+                "general": {"algo": "ga", "language": "bin"},
+                "ga": {"population_size": 100, "max_epochs": 5},
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_list_empty(self, client):
+        resp = await client.get("/api/admin/templates/public")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_create_template(self, auth_client, db_session):
+        # Promote to admin
+        from sqlalchemy import text
+        await db_session.execute(text("UPDATE users SET is_admin = true WHERE email = 'test@example.com'"))
+        await db_session.commit()
+
+        resp = await auth_client.post("/api/admin/templates/", json=self._template_payload())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "TestTemplate"
+        assert "id" in data
+        assert data["category"] == "general"
+        assert "params" in data
+
+    @pytest.mark.asyncio
+    async def test_create_requires_admin(self, auth_client):
+        resp = await auth_client.post("/api/admin/templates/", json=self._template_payload())
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_update_template(self, auth_client, db_session):
+        from sqlalchemy import text
+        await db_session.execute(text("UPDATE users SET is_admin = true WHERE email = 'test@example.com'"))
+        await db_session.commit()
+
+        create_resp = await auth_client.post("/api/admin/templates/", json=self._template_payload())
+        template_id = create_resp.json()["id"]
+
+        resp = await auth_client.put(
+            f"/api/admin/templates/{template_id}",
+            json={"name": "RenamedTemplate"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "RenamedTemplate"
+
+    @pytest.mark.asyncio
+    async def test_delete_template(self, auth_client, db_session):
+        from sqlalchemy import text
+        await db_session.execute(text("UPDATE users SET is_admin = true WHERE email = 'test@example.com'"))
+        await db_session.commit()
+
+        create_resp = await auth_client.post("/api/admin/templates/", json=self._template_payload())
+        template_id = create_resp.json()["id"]
+
+        resp = await auth_client.delete(f"/api/admin/templates/{template_id}")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+
+        # Verify deleted
+        resp = await auth_client.get("/api/admin/templates/public")
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent(self, auth_client, db_session):
+        from sqlalchemy import text
+        await db_session.execute(text("UPDATE users SET is_admin = true WHERE email = 'test@example.com'"))
+        await db_session.commit()
+
+        resp = await auth_client.delete("/api/admin/templates/nonexistent_id_999")
+        assert resp.status_code == 404
