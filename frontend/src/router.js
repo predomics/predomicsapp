@@ -56,6 +56,11 @@ const routes = [
     component: () => import('./views/MetaAnalysisView.vue'),
   },
   {
+    path: '/signature-zoo',
+    name: 'SignatureZoo',
+    component: () => import('./views/SignatureZooView.vue'),
+  },
+  {
     path: '/admin',
     name: 'Admin',
     component: () => import('./views/AdminView.vue'),

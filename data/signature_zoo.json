@@ -1,0 +1,171 @@
+[
+  {
+    "id": "zoo_cirrhosis1",
+    "name": "Cirrhosis signature \u2014 Qin et al. 2014",
+    "disease": "cirrhosis",
+    "phenotype": "liver cirrhosis",
+    "method": "Random Forest",
+    "publication": {
+      "author": "Qin N, Yang F, Li A, et al.",
+      "year": 2014,
+      "journal": "Nature",
+      "doi": "10.1038/nature13568"
+    },
+    "cohort_info": {
+      "n_samples": 232,
+      "n_cases": 123,
+      "n_controls": 109,
+      "population": "Chinese",
+      "country": "China"
+    },
+    "features": [
+      {"name": "Veillonella parvula", "coefficient": 1.0, "direction": "enriched"},
+      {"name": "Veillonella atypica", "coefficient": 0.85, "direction": "enriched"},
+      {"name": "Streptococcus salivarius", "coefficient": 0.78, "direction": "enriched"},
+      {"name": "Streptococcus parasanguinis", "coefficient": 0.72, "direction": "enriched"},
+      {"name": "Clostridium bartlettii", "coefficient": 0.65, "direction": "enriched"},
+      {"name": "Haemophilus parainfluenzae", "coefficient": 0.62, "direction": "enriched"},
+      {"name": "Lactobacillus salivarius", "coefficient": 0.58, "direction": "enriched"},
+      {"name": "Streptococcus thermophilus", "coefficient": 0.55, "direction": "enriched"},
+      {"name": "Prevotella copri", "coefficient": -0.90, "direction": "depleted"},
+      {"name": "Faecalibacterium prausnitzii", "coefficient": -0.88, "direction": "depleted"},
+      {"name": "Coprococcus comes", "coefficient": -0.75, "direction": "depleted"},
+      {"name": "Eubacterium rectale", "coefficient": -0.70, "direction": "depleted"},
+      {"name": "Alistipes putredinis", "coefficient": -0.62, "direction": "depleted"},
+      {"name": "Roseburia intestinalis", "coefficient": -0.58, "direction": "depleted"},
+      {"name": "Bacteroides uniformis", "coefficient": -0.52, "direction": "depleted"}
+    ],
+    "performance": {
+      "auc": 0.9397,
+      "accuracy": 0.8700,
+      "sensitivity": 0.8900,
+      "specificity": 0.8500
+    },
+    "tags": ["gut", "shotgun", "metagenomic", "liver", "microbiome"],
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "created_by": "system"
+  },
+  {
+    "id": "zoo_crc_zeller",
+    "name": "CRC signature \u2014 Zeller et al. 2014",
+    "disease": "CRC",
+    "phenotype": "colorectal cancer",
+    "method": "LASSO",
+    "publication": {
+      "author": "Zeller G, Tap J, Voigt AY, et al.",
+      "year": 2014,
+      "journal": "Molecular Systems Biology",
+      "doi": "10.15252/msb.20145645"
+    },
+    "cohort_info": {
+      "n_samples": 199,
+      "n_cases": 91,
+      "n_controls": 108,
+      "population": "European",
+      "country": "France/Germany"
+    },
+    "features": [
+      {"name": "Fusobacterium nucleatum", "coefficient": 1.0, "direction": "enriched"},
+      {"name": "Peptostreptococcus stomatis", "coefficient": 0.82, "direction": "enriched"},
+      {"name": "Porphyromonas asaccharolytica", "coefficient": 0.75, "direction": "enriched"},
+      {"name": "Parvimonas micra", "coefficient": 0.70, "direction": "enriched"},
+      {"name": "Clostridium symbiosum", "coefficient": 0.65, "direction": "enriched"},
+      {"name": "Gemella morbillorum", "coefficient": 0.58, "direction": "enriched"},
+      {"name": "Solobacterium moorei", "coefficient": 0.52, "direction": "enriched"},
+      {"name": "Faecalibacterium prausnitzii", "coefficient": -0.60, "direction": "depleted"},
+      {"name": "Roseburia intestinalis", "coefficient": -0.55, "direction": "depleted"},
+      {"name": "Bifidobacterium longum", "coefficient": -0.48, "direction": "depleted"}
+    ],
+    "performance": {
+      "auc": 0.8400,
+      "accuracy": 0.7800,
+      "sensitivity": 0.7700,
+      "specificity": 0.7900
+    },
+    "tags": ["gut", "shotgun", "metagenomic", "cancer", "microbiome"],
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "created_by": "system"
+  },
+  {
+    "id": "zoo_obesity_lc",
+    "name": "Obesity signature \u2014 Le Chatelier et al. 2013",
+    "disease": "obesity",
+    "phenotype": "obesity (low gene count)",
+    "method": "Gene richness cutoff",
+    "publication": {
+      "author": "Le Chatelier E, Nielsen T, Qin J, et al.",
+      "year": 2013,
+      "journal": "Nature",
+      "doi": "10.1038/nature12506"
+    },
+    "cohort_info": {
+      "n_samples": 292,
+      "n_cases": 169,
+      "n_controls": 123,
+      "population": "European",
+      "country": "Denmark"
+    },
+    "features": [
+      {"name": "Bacteroides fragilis", "coefficient": 0.80, "direction": "enriched"},
+      {"name": "Ruminococcus gnavus", "coefficient": 0.72, "direction": "enriched"},
+      {"name": "Campylobacter concisus", "coefficient": 0.55, "direction": "enriched"},
+      {"name": "Dialister invisus", "coefficient": 0.48, "direction": "enriched"},
+      {"name": "Faecalibacterium prausnitzii", "coefficient": -0.92, "direction": "depleted"},
+      {"name": "Roseburia inulinivorans", "coefficient": -0.78, "direction": "depleted"},
+      {"name": "Akkermansia muciniphila", "coefficient": -0.75, "direction": "depleted"},
+      {"name": "Methanobrevibacter smithii", "coefficient": -0.60, "direction": "depleted"}
+    ],
+    "performance": {
+      "auc": 0.7900,
+      "accuracy": 0.7200,
+      "sensitivity": 0.7500,
+      "specificity": 0.6900
+    },
+    "tags": ["gut", "shotgun", "metagenomic", "metabolic", "gene-richness", "microbiome"],
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "created_by": "system"
+  },
+  {
+    "id": "zoo_t2d_karl",
+    "name": "T2D signature \u2014 Karlsson et al. 2013",
+    "disease": "T2D",
+    "phenotype": "type 2 diabetes",
+    "method": "Random Forest",
+    "publication": {
+      "author": "Karlsson FH, Tremaroli V, Nookaew I, et al.",
+      "year": 2013,
+      "journal": "Nature",
+      "doi": "10.1038/nature12198"
+    },
+    "cohort_info": {
+      "n_samples": 145,
+      "n_cases": 53,
+      "n_controls": 92,
+      "population": "European",
+      "country": "Sweden"
+    },
+    "features": [
+      {"name": "Lactobacillus gasseri", "coefficient": 0.85, "direction": "enriched"},
+      {"name": "Streptococcus mutans", "coefficient": 0.72, "direction": "enriched"},
+      {"name": "Clostridium clostridioforme", "coefficient": 0.65, "direction": "enriched"},
+      {"name": "Escherichia coli", "coefficient": 0.58, "direction": "enriched"},
+      {"name": "Desulfovibrio piger", "coefficient": 0.50, "direction": "enriched"},
+      {"name": "Roseburia intestinalis", "coefficient": -0.90, "direction": "depleted"},
+      {"name": "Roseburia inulinivorans", "coefficient": -0.82, "direction": "depleted"},
+      {"name": "Eubacterium eligens", "coefficient": -0.75, "direction": "depleted"},
+      {"name": "Faecalibacterium prausnitzii", "coefficient": -0.70, "direction": "depleted"},
+      {"name": "Clostridium sp. SS2/1", "coefficient": -0.62, "direction": "depleted"},
+      {"name": "Butyrivibrio crossotus", "coefficient": -0.55, "direction": "depleted"},
+      {"name": "Eubacterium rectale", "coefficient": -0.48, "direction": "depleted"}
+    ],
+    "performance": {
+      "auc": 0.8100,
+      "accuracy": 0.7400,
+      "sensitivity": 0.7200,
+      "specificity": 0.7500
+    },
+    "tags": ["gut", "shotgun", "metagenomic", "metabolic", "diabetes", "microbiome"],
+    "created_at": "2024-01-01T00:00:00+00:00",
+    "created_by": "system"
+  }
+]

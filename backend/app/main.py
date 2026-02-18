@@ -14,7 +14,7 @@ from sqlalchemy import text
 from .core.config import settings
 from .core.database import engine, Base
 from .models import db_models  # noqa: F401 — ensure models are registered
-from .routers import health, projects, analysis, auth, samples, datasets, sharing, admin, data_explore, export, websocket, templates, webhook_router, predict, dashboard, comments, public, meta_analysis
+from .routers import health, projects, analysis, auth, samples, datasets, sharing, admin, data_explore, export, websocket, templates, webhook_router, predict, dashboard, comments, public, meta_analysis, signature_zoo
 from .routers.datasets import _infer_role
 from .services.storage import ensure_dirs
 
@@ -1157,6 +1157,7 @@ app.include_router(dashboard.router, prefix="/api")
 app.include_router(comments.router, prefix="/api")
 app.include_router(public.router, prefix="/api")
 app.include_router(meta_analysis.router, prefix="/api")
+app.include_router(signature_zoo.router, prefix="/api")
 app.include_router(websocket.router)  # WebSocket (no /api prefix, uses /ws/)
 
 # Serve Vue.js frontend (production: built into backend/static/)

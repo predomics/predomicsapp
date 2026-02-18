@@ -10,6 +10,7 @@
         <router-link v-if="auth.isLoggedIn" to="/projects">{{ $t('nav.projects') }}</router-link>
         <router-link v-if="auth.isLoggedIn" to="/datasets">{{ $t('nav.datasets') }}</router-link>
         <router-link v-if="auth.isLoggedIn" to="/meta-analysis">{{ $t('nav.metaAnalysis') }}</router-link>
+        <router-link v-if="auth.isLoggedIn" to="/signature-zoo">{{ $t('nav.signatureZoo') }}</router-link>
         <router-link v-if="auth.isLoggedIn && auth.isAdmin" to="/admin">{{ $t('nav.admin') }}</router-link>
         <router-link to="/credits">{{ $t('nav.credits') }}</router-link>
       </div>
