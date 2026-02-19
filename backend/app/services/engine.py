@@ -121,7 +121,7 @@ def write_param_yaml(
     cv = _merge("cv", {
         "outer_folds": 5, "inner_folds": 5, "overfit_penalty": 0.0,
         "resampling_inner_folds_epochs": 0, "fit_on_valid": True,
-        "cv_best_models_ci_alpha": 0.05, "stratify_by": "",
+        "cv_best_models_ci_alpha": 0.05, "cv_fbm_ci_method": "wilson", "stratify_by": "",
     })
 
     importance = _merge("importance", {
@@ -130,7 +130,7 @@ def write_param_yaml(
     })
 
     voting = _merge("voting", {
-        "vote": False, "fbm_ci_alpha": 0.05, "prune_before_voting": False,
+        "vote": False, "fbm_ci_alpha": 0.05, "fbm_ci_method": "wilson", "prune_before_voting": False,
         "min_experts": 0, "max_experts": 0,
         "min_perf": 0.5, "min_diversity": 5, "method": "Majority",
         "method_threshold": 0.5, "threshold_windows_pct": 5, "complete_display": False,

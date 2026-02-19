@@ -133,12 +133,14 @@
 
     <!-- Sub-tabs -->
     <nav class="sub-tabs" v-if="detail">
+      <button :class="{ active: subTab === 'insights' }" @click="subTab = 'insights'">{{ $t('results.insights') }}</button>
       <button :class="{ active: subTab === 'summary' }" @click="subTab = 'summary'">{{ $t('results.summary') }}</button>
       <button :class="{ active: subTab === 'bestmodel' }" @click="subTab = 'bestmodel'">{{ $t('results.bestModel') }}</button>
       <button :class="{ active: subTab === 'population' }" @click="subTab = 'population'">{{ $t('results.population') }}</button>
       <button v-if="juryData" :class="{ active: subTab === 'jury' }" @click="subTab = 'jury'">{{ $t('results.jury') }}</button>
       <button :class="{ active: subTab === 'comparative' }" @click="subTab = 'comparative'">{{ $t('results.comparative') }}</button>
       <button v-if="population.length > 1" :class="{ active: subTab === 'copresence' }" @click="subTab = 'copresence'">{{ $t('results.copresence') }}</button>
+      <button :class="{ active: subTab === 'enrichment' }" @click="subTab = 'enrichment'">{{ $t('results.enrichment') }}</button>
       <button :class="{ active: subTab === 'ecosystem' }" @click="subTab = 'ecosystem'">{{ $t('results.ecosystem') }}</button>
       <button v-if="population.length > 1" :class="{ active: subTab === 'stability' }" @click="subTab = 'stability'">{{ $t('results.stability') }}</button>
       <button :class="{ active: subTab === 'basket' }" @click="subTab = 'basket'">{{ $t('results.basket') }}<span v-if="basketCount > 0" class="basket-badge">{{ basketCount }}</span></button>
@@ -162,6 +164,21 @@
         </div>
       </div>
     </nav>
+
+    <!-- ============================================================ -->
+    <!-- INSIGHTS SUB-TAB                                             -->
+    <!-- ============================================================ -->
+    <div v-if="detail && subTab === 'insights'" class="sub-content">
+      <InsightsTab
+        :projectId="route.params.id"
+        :jobId="selectedJobId || ''"
+        :population="population"
+        :juryData="juryData"
+        :detail="detail"
+        :mspAnnotations="mspAnnotations"
+        :active="subTab === 'insights'"
+      />
+    </div>
 
     <!-- ============================================================ -->
     <!-- SUMMARY SUB-TAB                                              -->
@@ -366,8 +383,11 @@
             <span class="fbm-badge" v-if="fbmEnabled">{{ fbmCount }} / {{ population.length }}</span>
           </label>
           <select v-if="fbmEnabled" v-model="fbmMethod" class="fbm-method-select">
-            <option value="standard">{{ $t('results.fbmStandard') }}</option>
-            <option value="blaise">{{ $t('results.fbmBlaise') }}</option>
+            <option value="wald">{{ $t('results.fbmWald') }}</option>
+            <option value="wald_continuity">{{ $t('results.fbmWaldContinuity') }}</option>
+            <option value="wilson">{{ $t('results.fbmWilson') }}</option>
+            <option value="agresti_coull">{{ $t('results.fbmAgrestiCoull') }}</option>
+            <option value="clopper_pearson">{{ $t('results.fbmClopperPearson') }}</option>
           </select>
         </div>
 
@@ -787,8 +807,11 @@
             <span class="fbm-badge" v-if="copresenceFBM">{{ fbmCount }} / {{ population.length }}</span>
           </label>
           <select v-if="copresenceFBM" v-model="fbmMethod" class="fbm-method-select">
-            <option value="standard">{{ $t('results.fbmStandard') }}</option>
-            <option value="blaise">{{ $t('results.fbmBlaise') }}</option>
+            <option value="wald">{{ $t('results.fbmWald') }}</option>
+            <option value="wald_continuity">{{ $t('results.fbmWaldContinuity') }}</option>
+            <option value="wilson">{{ $t('results.fbmWilson') }}</option>
+            <option value="agresti_coull">{{ $t('results.fbmAgrestiCoull') }}</option>
+            <option value="clopper_pearson">{{ $t('results.fbmClopperPearson') }}</option>
           </select>
           <label class="topn-control" style="margin-left: 1rem;">
             {{ $t('results.minPrevalence') }}
@@ -931,6 +954,21 @@
       <p v-if="population.length < 2" class="info-text">
         {{ $t('results.copresenceRequires2') }}
       </p>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- ENRICHMENT SUB-TAB                                          -->
+    <!-- ============================================================ -->
+    <div v-if="detail && subTab === 'enrichment'" class="sub-content">
+      <EnrichmentTab
+        :projectId="route.params.id"
+        :jobId="selectedJobId || ''"
+        :population="population"
+        :juryData="juryData"
+        :detail="detail"
+        :mspAnnotations="mspAnnotations"
+        :active="subTab === 'enrichment'"
+      />
     </div>
 
     <!-- ============================================================ -->
@@ -1142,6 +1180,8 @@ import ValidateModal from '../components/ValidateModal.vue'
 import { useI18n } from 'vue-i18n'
 import SvgIcon from '../components/SvgIcon.vue'
 import EcosystemTab from '../components/results/EcosystemTab.vue'
+import EnrichmentTab from '../components/results/EnrichmentTab.vue'
+import InsightsTab from '../components/results/InsightsTab.vue'
 import StabilityTab from '../components/results/StabilityTab.vue'
 import { useDebugMode } from '../composables/useDebugMode'
 import { useModelBasket } from '../composables/useModelBasket'
@@ -1186,7 +1226,7 @@ const population = ref([])
 const generationTracking = ref([])
 const mspAnnotations = ref({})
 const moduleFilterData = ref(null)
-const subTab = ref('summary')
+const subTab = ref('insights')
 const selectedJobId = ref('')
 const expandedRank = ref(null)
 const popPage = ref(0)
@@ -1201,7 +1241,7 @@ const importanceData = ref(null)
 const selectedLanguages = ref([])
 const selectedDataTypes = ref([])
 const fbmEnabled = ref(false)
-const fbmMethod = ref('standard')
+const fbmMethod = ref('wilson')
 
 // PCoA on FBM features state
 const popPcoaData = ref(null)
@@ -1386,19 +1426,100 @@ const availableDataTypes = computed(() =>
   [...new Set(population.value.map(i => i.metrics?.data_type).filter(Boolean))].sort()
 )
 
-// FBM filter function (P2.3)
-// Standard: threshold = r - z * sqrt(r*(1-r)/n)
-// Blaise:   threshold = r - (0.5/n + z * sqrt(r*(1-r)/n))
+// FBM filter function — 5 binomial CI methods
+// Computes the lower bound of the CI for the best model's accuracy,
+// then keeps all models whose fit >= that lower bound.
 function filterFBM(pop) {
   if (pop.length === 0) return []
   const bestFit = pop[0].metrics?.fit
   if (bestFit == null) return pop
   const n = detail.value?.sample_count || pop.length
-  const z = 1.96 // for alpha=0.05
-  const se = Math.sqrt(bestFit * (1 - bestFit) / n)
-  const correction = fbmMethod.value === 'blaise' ? 0.5 / n : 0
-  const threshold = bestFit - (correction + z * se)
+  const alpha = 0.05
+  const z = 1.96 // normal quantile for alpha/2 = 0.025
+  const p = bestFit
+  const se = Math.sqrt(p * (1 - p) / n)
+
+  let lower
+  switch (fbmMethod.value) {
+    case 'wald':
+      lower = p - z * se
+      break
+    case 'wald_continuity':
+      lower = p - (0.5 / n + z * se)
+      break
+    case 'wilson':
+      lower = (p + z * z / (2 * n) - z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / (1 + z * z / n)
+      break
+    case 'agresti_coull': {
+      const nt = n + z * z
+      const pt = (p * n + z * z / 2) / nt
+      lower = pt - z * Math.sqrt(pt * (1 - pt) / nt)
+      break
+    }
+    case 'clopper_pearson': {
+      // Exact CI using Beta distribution inverse CDF
+      const x = Math.round(p * n)
+      if (x === 0) { lower = 0 }
+      else { lower = jstatBetaInv(alpha / 2, x, n - x + 1) }
+      break
+    }
+    default:
+      lower = p - z * se
+  }
+  const threshold = Math.max(0, lower)
   return pop.filter(ind => ind.metrics?.fit >= threshold)
+}
+
+// Minimal Beta distribution inverse CDF for Clopper-Pearson CI
+// Uses the regularized incomplete beta function via Newton's method
+function jstatBetaInv(p, a, b) {
+  // Approximation of Beta quantile using bisection
+  let lo = 0, hi = 1
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2
+    if (betaRegularized(mid, a, b) < p) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+function betaRegularized(x, a, b) {
+  // Regularized incomplete beta function I_x(a,b) via continued fraction
+  if (x <= 0) return 0
+  if (x >= 1) return 1
+  if (x > (a + 1) / (a + b + 2)) return 1 - betaRegularized(1 - x, b, a)
+  const lnBeta = lnGamma(a) + lnGamma(b) - lnGamma(a + b)
+  const front = Math.exp(Math.log(x) * a + Math.log(1 - x) * b - lnBeta) / a
+  // Lentz's continued fraction
+  let f = 1, c = 1, d = 1 - (a + b) * x / (a + 1)
+  if (Math.abs(d) < 1e-30) d = 1e-30
+  d = 1 / d; f = d
+  for (let m = 1; m <= 200; m++) {
+    let num = m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m))
+    d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d
+    c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30
+    f *= d * c
+    num = -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))
+    d = 1 + num * d; if (Math.abs(d) < 1e-30) d = 1e-30; d = 1 / d
+    c = 1 + num / c; if (Math.abs(c) < 1e-30) c = 1e-30
+    const delta = d * c; f *= delta
+    if (Math.abs(delta - 1) < 1e-10) break
+  }
+  return front * f
+}
+
+function lnGamma(z) {
+  // Lanczos approximation for ln(Gamma(z))
+  const g = 7
+  const coef = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7]
+  if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lnGamma(1 - z)
+  z -= 1
+  let x = coef[0]
+  for (let i = 1; i < g + 2; i++) x += coef[i] / (z + i)
+  const t = z + g + 0.5
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x)
 }
 
 // Filtered population: language + data_type checkboxes, then optional FBM

@@ -14,6 +14,8 @@ from ..models.db_models import User, Project
 from ..services import data_analysis
 from ..services import msp_annotations
 from ..services import coabundance
+from ..services import enrichment
+from ..services import insights as insights_service
 from ..services import storage
 
 router = APIRouter(prefix="/data-explore", tags=["data-explore"])
@@ -674,3 +676,141 @@ async def get_msp_annotations(
         raise HTTPException(400, "Provide a 'features' list")
     annotations = msp_annotations.get_annotations(feature_names[:2000])
     return {"annotations": annotations}
+
+
+@router.post("/{project_id}/enrichment")
+async def compute_feature_enrichment(
+    project_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compute taxonomic/functional enrichment of a signature vs. background.
+
+    Body: {
+        "job_id": "...",
+        "signature_level": "individual" | "fbm" | "jury",
+        "model_index": 0,
+        "annotation_type": "phylum" | "family" | "butyrate" | "inflammation" | "transit" | "oralisation"
+    }
+    """
+    project = await get_project_with_access(project_id, user, db, require_role="viewer")
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    job_id = body.get("job_id")
+    signature_level = body.get("signature_level", "individual")
+    model_index = body.get("model_index", 0)
+    annotation_type = body.get("annotation_type", "phylum")
+
+    if annotation_type not in ("phylum", "family", "butyrate", "inflammation", "transit", "oralisation"):
+        raise HTTPException(400, f"Invalid annotation_type: {annotation_type}")
+    if signature_level not in ("individual", "fbm", "jury"):
+        raise HTTPException(400, f"Invalid signature_level: {signature_level}")
+
+    results = storage.get_job_result(project_id, job_id)
+    if not results:
+        raise HTTPException(404, "Job results not found")
+
+    feature_names = results.get("feature_names", [])
+    population = results.get("population", [])
+    sample_count = results.get("sample_count", len(population))
+
+    # Extract signature features based on level
+    if signature_level == "individual":
+        if model_index < 0 or model_index >= len(population):
+            raise HTTPException(400, f"model_index {model_index} out of range")
+        sig_features = list(population[model_index].get("named_features", {}).keys())
+    elif signature_level == "fbm":
+        fbm_pop = enrichment.filter_fbm_python(population, sample_count)
+        sig_features = list({
+            feat for ind in fbm_pop
+            for feat in ind.get("named_features", {}).keys()
+        })
+    elif signature_level == "jury":
+        jury_data = results.get("jury")
+        expert_count = jury_data.get("expert_count", 0) if jury_data else 0
+        if expert_count <= 0:
+            raise HTTPException(400, "No jury data available for this run")
+        fbm_pop = enrichment.filter_fbm_python(population, sample_count)
+        jury_experts = fbm_pop[:expert_count]
+        sig_features = list({
+            feat for ind in jury_experts
+            for feat in ind.get("named_features", {}).keys()
+        })
+    else:
+        sig_features = []
+
+    if not sig_features:
+        raise HTTPException(400, "No features found for the selected signature")
+
+    # Fetch annotations for all background features
+    annotations = msp_annotations.get_annotations(feature_names)
+
+    result = enrichment.compute_enrichment(
+        signature_features=sig_features,
+        background_features=feature_names,
+        annotations=annotations,
+        annotation_type=annotation_type,
+    )
+    result["signature_level"] = signature_level
+    return result
+
+
+@router.get("/{project_id}/insights/{job_id}")
+async def get_experiment_insights(
+    project_id: str,
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Compute automated insights for a completed experiment.
+
+    Synthesizes findings across performance, robustness, biology, jury,
+    and generates actionable recommendations.
+    """
+    project = await get_project_with_access(project_id, user, db, require_role="viewer")
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    results = storage.get_job_result(project_id, job_id)
+    if not results:
+        raise HTTPException(404, "Job results not found")
+
+    feature_names = results.get("feature_names", [])
+    population = results.get("population", [])
+
+    # Fetch MSP annotations for biological context
+    annotations = msp_annotations.get_annotations(feature_names)
+
+    # Run phylum enrichment on best model automatically
+    enrichment_results = None
+    if population:
+        sig_features = list(population[0].get("named_features", {}).keys())
+        if sig_features:
+            try:
+                enrichment_results = enrichment.compute_enrichment(
+                    signature_features=sig_features,
+                    background_features=feature_names,
+                    annotations=annotations,
+                    annotation_type="phylum",
+                )
+            except Exception:
+                pass  # enrichment is optional for insights
+
+    # Load job config for recommendation context
+    from ..models.db_models import Job
+    from sqlalchemy import select
+    job_config = None
+    stmt = select(Job).where(Job.id == job_id, Job.project_id == project_id)
+    result_row = await db.execute(stmt)
+    job = result_row.scalar_one_or_none()
+    if job and job.config:
+        job_config = job.config
+
+    return insights_service.compute_insights(
+        results=results,
+        annotations=annotations,
+        enrichment_results=enrichment_results,
+        job_config=job_config,
+    )

@@ -63,7 +63,7 @@ export const PARAM_DEFS = [
   },
   {
     key: 'cv', label: 'Cross-validation', category: 'general', level: 'basic', inputType: 'checkbox', defaultValue: false,
-    description: 'Enable cross-validation for more robust model evaluation.',
+    description: 'Enable k-fold cross-validation. The dataset is split into outer folds; the algorithm trains on k-1 folds and validates on the held-out fold. This is a primary defense against overfitting and provides honest performance estimates. Combine with overfit_penalty for inner-fold regularization.',
   },
   {
     key: 'gpu', label: 'GPU acceleration', category: 'general', level: 'basic', inputType: 'checkbox', defaultValue: false,
@@ -88,19 +88,19 @@ export const PARAM_DEFS = [
   },
   {
     key: 'threshold_ci_n_bootstrap', label: 'Bootstrap samples (CI)', category: 'general', level: 'advanced', inputType: 'number', defaultValue: 0,
-    description: 'Number of bootstrap samples for threshold confidence interval. 0 = disabled.', min: 0, step: 100,
+    description: 'Number of bootstrap resamples for threshold confidence interval estimation. Since microbiome features are compositional (relative abundances), thresholds can be fragile and may not generalize across cohorts. Bootstrap CI quantifies this uncertainty by computing lower/upper bounds; samples falling in the uncertainty zone are rejected. Recommended: 200-1000. 0 = disabled.', min: 0, step: 100,
   },
   {
     key: 'threshold_ci_penalty', label: 'CI penalty', category: 'general', level: 'advanced', inputType: 'number', defaultValue: 0.5,
-    description: 'If threshold CI exists, penalizes evolution: rejection_rate * penalty.', min: 0, max: 1, step: 0.05,
+    description: 'During evolution, models with wide threshold CI (many rejected samples) are penalized: fitness -= rejection_rate × penalty. This steers evolution toward models with stable, generalizable thresholds. Higher values (e.g. 0.8) strongly favor narrow CI; lower values (e.g. 0.2) allow more tolerance. Default 0.5 provides a balanced trade-off.', min: 0, max: 1, step: 0.05,
   },
   {
     key: 'threshold_ci_alpha', label: 'CI alpha', category: 'general', level: 'advanced', inputType: 'number', defaultValue: 0.05,
-    description: 'Alpha for constructing threshold confidence interval.', min: 0.001, max: 0.5, step: 0.01,
+    description: 'Significance level for the bootstrap threshold confidence interval. Alpha=0.05 gives a 95% CI; alpha=0.10 gives a 90% CI (narrower, fewer rejections but less conservative). Smaller alpha = wider CI = more samples rejected in the uncertainty zone.', min: 0.001, max: 0.5, step: 0.01,
   },
   {
     key: 'threshold_ci_frac_bootstrap', label: 'Bootstrap fraction', category: 'general', level: 'advanced', inputType: 'number', defaultValue: 1.0,
-    description: '1.0 = Efron method (with replacement); < 1.0 = Politis & Romano method (without replacement).', min: 0.01, max: 1.0, step: 0.1,
+    description: 'Fraction of samples drawn per bootstrap replicate. 1.0 = classical Efron bootstrap (n samples drawn with replacement). Values < 1.0 use the Politis & Romano subsampling method (drawn without replacement), which can provide better coverage for dependent or heavy-tailed data. Try 0.632 for a common alternative.', min: 0.01, max: 1.0, step: 0.1,
   },
   {
     key: 'user_feature_penalties_weight', label: 'User penalty weight', category: 'general', level: 'advanced', inputType: 'number', defaultValue: 1.0,
@@ -175,11 +175,11 @@ export const PARAM_DEFS = [
   },
   {
     key: 'random_sampling_pct', label: 'Random sampling %', category: 'ga', level: 'advanced', inputType: 'number', defaultValue: 0,
-    description: 'If > 0%, each generation is fitted on only this percentage of random samples.', min: 0, max: 100, step: 5, unit: '%',
+    description: 'Stochastic subsampling: each generation is evaluated on a random subset of this percentage of training samples. Acts as implicit regularization by preventing models from overfitting to the full training set. Recommended: 70-90% for datasets with > 100 samples. 0 = use all samples (no subsampling).', min: 0, max: 100, step: 5, unit: '%',
   },
   {
     key: 'random_sampling_epochs', label: 'Sampling epoch gap', category: 'ga', level: 'advanced', inputType: 'number', defaultValue: 1,
-    description: 'Epochs during which the same randomized dataset is kept.', min: 1, step: 1, unit: 'epochs',
+    description: 'Number of consecutive epochs using the same random subsample before redrawing. 1 = fresh subsample every generation (maximum stochasticity). Higher values (e.g. 5) give more stable fitness estimates per epoch but less regularization effect.', min: 1, step: 1, unit: 'epochs',
   },
   {
     key: 'n_epochs_before_global', label: 'Epochs before global', category: 'ga', level: 'advanced', inputType: 'number', defaultValue: 0,
@@ -230,19 +230,19 @@ export const PARAM_DEFS = [
   // ===================== CV (7) =====================
   {
     key: 'outer_folds', label: 'Outer folds', category: 'cv', level: 'basic', inputType: 'number', defaultValue: 5,
-    description: 'Number of outer cross-validation folds. Algorithm runs on each k-1 fold set, then merges FBMs.', min: 2, max: 20, step: 1,
+    description: 'Number of outer cross-validation folds. The algorithm trains independently on each combination of k-1 folds, producing separate FBMs that are then merged. More folds = better variance estimate but longer runtime. 5 or 10 folds are standard choices.', min: 2, max: 20, step: 1,
   },
   {
     key: 'inner_folds', label: 'Inner folds', category: 'cv', level: 'basic', inputType: 'number', defaultValue: 5,
-    description: 'Number of folds used to penalize overfitting (when overfit_penalty > 0).', min: 2, max: 20, step: 1,
+    description: 'Number of inner folds for overfitting penalty estimation. Within each outer fold, the training set is further split into inner folds. The penalty is computed as the gap between training and held-out inner fold performance. Only active when overfit_penalty > 0.', min: 2, max: 20, step: 1,
   },
   {
     key: 'overfit_penalty', label: 'Overfit penalty', category: 'cv', level: 'basic', inputType: 'number', defaultValue: 0,
-    description: 'Penalty: fit -= mean(fit on k-1 - |delta with last fold|) * penalty. 0 = disabled.', min: 0, max: 1, step: 0.01,
+    description: 'Inner-fold overfitting penalty. During evolution, each model is evaluated on inner folds; the gap between training and validation performance is penalized: fitness -= mean_gap × penalty. This discourages models that memorize training data. Recommended: 0.1-0.5 for moderate regularization. 0 = disabled (no inner-fold penalty).', min: 0, max: 1, step: 0.01,
   },
   {
     key: 'resampling_inner_folds_epochs', label: 'Resample inner folds', category: 'cv', level: 'advanced', inputType: 'number', defaultValue: 0,
-    description: 'Resplit inner folds every N epochs to avoid learning about fold composition. 0 = never.', min: 0, step: 5, unit: 'epochs',
+    description: 'Reshuffle inner fold assignments every N epochs. Prevents the evolutionary algorithm from implicitly learning which samples are in which fold (a subtle form of information leakage). Recommended: 5-20 epochs when using overfit_penalty. 0 = never reshuffle (static folds).', min: 0, step: 5, unit: 'epochs',
   },
   {
     key: 'fit_on_valid', label: 'Fit on validation', category: 'cv', level: 'advanced', inputType: 'checkbox', defaultValue: true,
@@ -284,6 +284,17 @@ export const PARAM_DEFS = [
   {
     key: 'fbm_ci_alpha', label: 'FBM CI alpha', category: 'voting', level: 'basic', inputType: 'number', defaultValue: 0.05,
     description: 'Alpha for Family of Best Models confidence interval. Smaller = larger best_model range.', min: 0.001, max: 0.5, step: 0.01,
+  },
+  {
+    key: 'fbm_ci_method', label: 'FBM CI method', category: 'voting', level: 'basic', inputType: 'select', defaultValue: 'wilson',
+    description: 'Binomial CI method for Family of Best Models (FBM) selection. Wilson (recommended) provides near-nominal coverage for all sample sizes. Clopper-Pearson is conservative (widest CI, more models). Wald is simplest but has poor coverage near p=0 or p=1.',
+    options: [
+      { value: 'wald', label: 'Wald (standard)' },
+      { value: 'wald_continuity', label: 'Wald + continuity (Blaise)' },
+      { value: 'wilson', label: 'Wilson score' },
+      { value: 'agresti_coull', label: 'Agresti-Coull' },
+      { value: 'clopper_pearson', label: 'Clopper-Pearson (exact)' },
+    ],
   },
   {
     key: 'prune_before_voting', label: 'Prune before voting', category: 'voting', level: 'basic', inputType: 'checkbox', defaultValue: false,
