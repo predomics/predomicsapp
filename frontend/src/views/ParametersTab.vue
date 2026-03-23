@@ -202,7 +202,7 @@ const batchJobCount = computed(() => {
 
 // Split categories into left/right columns
 const leftCatIds = ['general', 'cv']
-const rightCatIds = ['ga', 'beam', 'mcmc', 'rf', 'svm', 'logistic', 'xgboost', 'lightgbm', 'extra_trees', 'adaboost', 'knn', 'importance', 'voting', 'gpu']
+const rightCatIds = ['ga', 'beam', 'mcmc', 'rf', 'svm', 'logistic', 'xgboost', 'lightgbm', 'extra_trees', 'adaboost', 'knn', 'clinical', 'importance', 'voting', 'gpu']
 const leftCategories = computed(() => CATEGORIES.filter(c => leftCatIds.includes(c.id)))
 const rightCategories = computed(() => CATEGORIES.filter(c => rightCatIds.includes(c.id)))
 
@@ -276,12 +276,14 @@ const xTrainDs = computed(() => findFile('xtrain'))
 const yTrainDs = computed(() => findFile('ytrain'))
 const xTestDs = computed(() => findFile('xtest'))
 const yTestDs = computed(() => findFile('ytest'))
+const clinicalDs = computed(() => findFile('clinical'))
 const canLaunch = computed(() => xTrainDs.value && yTrainDs.value)
 
 function _fileParams() {
   const params = { x_file_id: xTrainDs.value.id, y_file_id: yTrainDs.value.id }
   if (xTestDs.value) params.xtest_file_id = xTestDs.value.id
   if (yTestDs.value) params.ytest_file_id = yTestDs.value.id
+  if (clinicalDs.value) params.clinical_file_id = clinicalDs.value.id
   return params
 }
 

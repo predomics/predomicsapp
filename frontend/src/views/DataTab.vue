@@ -354,11 +354,13 @@ const xTrainDs = computed(() => findFile('xtrain'))
 const yTrainDs = computed(() => findFile('ytrain'))
 const xTestDs = computed(() => findFile('xtest'))
 const yTestDs = computed(() => findFile('ytest'))
+const clinicalDs = computed(() => findFile('clinical'))
 const dsSlots = computed(() => [
   { role: 'xtrain', label: 'X train', ds: xTrainDs.value, required: true },
   { role: 'ytrain', label: 'y train', ds: yTrainDs.value, required: true },
   { role: 'xtest', label: 'X test', ds: xTestDs.value, required: false },
   { role: 'ytest', label: 'y test', ds: yTestDs.value, required: false },
+  { role: 'clinical', label: 'Clinical metadata', ds: clinicalDs.value, required: false },
 ])
 const hasTrainData = computed(() => xTrainDs.value && yTrainDs.value)
 

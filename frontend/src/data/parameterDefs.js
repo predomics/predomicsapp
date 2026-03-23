@@ -21,6 +21,7 @@ export const CATEGORIES = [
   { id: 'adaboost', label: 'AdaBoost', colorVar: '--cat-adaboost', algoFilter: 'adaboost' },
   { id: 'knn', label: 'KNN', colorVar: '--cat-knn', algoFilter: 'knn' },
   { id: 'cv', label: 'Cross-Validation', colorVar: '--cat-cv', enabledBy: 'general.cv' },
+  { id: 'clinical', label: 'Clinical Integration', colorVar: '--cat-clinical', enabledBy: 'clinical.enabled' },
   { id: 'importance', label: 'Feature Importance', colorVar: '--cat-importance', gpredomicsOnly: true },
   { id: 'voting', label: 'Voting Ensemble', colorVar: '--cat-voting', gpredomicsOnly: true },
   { id: 'gpu', label: 'GPU Settings', colorVar: '--cat-gpu', enabledBy: 'general.gpu', gpredomicsOnly: true },
@@ -463,5 +464,28 @@ export const PARAM_DEFS = [
   {
     key: 'max_buffer_size_mb', label: 'Max buffer size', category: 'gpu', level: 'basic', inputType: 'number', defaultValue: 128,
     description: 'Maximum GPU memory in MB for a single buffer.', min: 16, step: 32, unit: 'MB',
+  },
+
+  // ===================== CLINICAL INTEGRATION (4) =====================
+  {
+    key: 'enabled', label: 'Enable clinical integration', category: 'clinical', level: 'basic', inputType: 'checkbox', defaultValue: false,
+    description: 'Combine gpredomics omics scores with clinical variables (age, BMI, lab values, etc.) to improve predictions. Requires a clinical metadata file uploaded in the Data tab.',
+  },
+  {
+    key: 'method', label: 'Integration method', category: 'clinical', level: 'basic', inputType: 'select', defaultValue: 'stacking',
+    description: 'How to combine omics and clinical data.',
+    options: [
+      { value: 'stacking', label: 'Stacking (logistic regression)' },
+      { value: 'stacking_l1', label: 'Stacking (L1 sparse)' },
+      { value: 'calibrated', label: 'Calibrated combination' },
+    ],
+  },
+  {
+    key: 'interactions', label: 'Interaction terms', category: 'clinical', level: 'basic', inputType: 'checkbox', defaultValue: false,
+    description: 'Add interaction terms (omics_score × each clinical variable). Captures effect modification, e.g., omics score is more predictive in younger patients.',
+  },
+  {
+    key: 'columns', label: 'Clinical columns', category: 'clinical', level: 'basic', inputType: 'text', defaultValue: '',
+    description: 'Comma-separated column names to use from the clinical file. Leave empty to use all numeric columns.',
   },
 ]

@@ -326,6 +326,92 @@ def _parse_importance_from_display(display_text):
     return items if items else None
 
 
+def _run_clinical_integration(experiment, param_yaml: dict, clinical_cfg: dict) -> dict:
+    """Run clinical data integration after gpredomics fit."""
+    clinical_path = clinical_cfg["path"]
+    method = clinical_cfg.get("method", "stacking")
+    interactions = clinical_cfg.get("interactions", False)
+    columns_str = clinical_cfg.get("columns", "")
+
+    # Load clinical data
+    clinical_df = pd.read_csv(clinical_path, sep="\t", index_col=0)
+
+    # Filter to requested columns
+    if columns_str.strip():
+        cols = [c.strip() for c in columns_str.split(",") if c.strip()]
+        clinical_df = clinical_df[[c for c in cols if c in clinical_df.columns]]
+
+    # Keep only numeric columns
+    clinical_df = clinical_df.select_dtypes(include=[np.number])
+    if clinical_df.empty:
+        print("[worker] No numeric clinical columns found, skipping integration", flush=True)
+        return None
+
+    # Align clinical samples with training data
+    train_samples = experiment.sample_names()
+    common = [s for s in train_samples if s in clinical_df.index]
+    if len(common) < 10:
+        print(f"[worker] Only {len(common)} samples overlap between clinical and training data, skipping", flush=True)
+        return None
+
+    # Get omics scores from best model
+    scores_train = np.array(experiment.predict_scores_train())
+    y_train = np.array(experiment.train_labels())
+
+    # Subset to common samples
+    train_idx = [train_samples.index(s) for s in common]
+    scores_common = scores_train[train_idx]
+    y_common = y_train[train_idx]
+    clinical_common = clinical_df.loc[common].values
+
+    # Fill NaN with column medians
+    col_medians = np.nanmedian(clinical_common, axis=0)
+    for j in range(clinical_common.shape[1]):
+        mask = np.isnan(clinical_common[:, j])
+        clinical_common[mask, j] = col_medians[j]
+
+    from gpredomicspy.clinical import StackingIntegrator, CalibratedCombiner
+
+    result = {"method": method, "clinical_columns": list(clinical_df.columns), "n_samples": len(common)}
+
+    if method in ("stacking", "stacking_l1"):
+        integrator = StackingIntegrator(
+            method="logistic_l1" if method == "stacking_l1" else "logistic",
+            interactions=interactions,
+        )
+        integrator.fit(scores_common, clinical_common, y_common,
+                      clinical_feature_names=list(clinical_df.columns))
+        _, train_proba = integrator.predict(scores_common, clinical_common)
+
+        from sklearn.metrics import roc_auc_score
+        result["train_auc_combined"] = round(float(roc_auc_score(y_common, train_proba)), 6)
+        result["train_auc_omics_only"] = round(float(roc_auc_score(y_common, scores_common)), 6)
+        result["feature_importances"] = integrator.feature_importances()
+        result["summary"] = integrator.summary()
+
+        # Test data if available
+        try:
+            scores_test = np.array(experiment.predict_scores_test())
+            y_test = np.array(experiment.test_labels())
+            test_samples = experiment.sample_names()  # TODO: need test sample names
+            # For now, skip test clinical integration (need test sample names from experiment)
+        except Exception:
+            pass
+
+    elif method == "calibrated":
+        # Use first clinical column as the clinical risk score
+        combiner = CalibratedCombiner()
+        combiner.fit(scores_common, clinical_common[:, 0], y_common)
+        _, combined_proba = combiner.predict(scores_common, clinical_common[:, 0])
+
+        from sklearn.metrics import roc_auc_score
+        result["train_auc_combined"] = round(float(roc_auc_score(y_common, combined_proba)), 6)
+        result["train_auc_omics_only"] = round(float(roc_auc_score(y_common, scores_common)), 6)
+        result["summary"] = combiner.summary()
+
+    return result
+
+
 def _run_sklearn_worker(param_yaml: dict, results_path: str):
     """Run a sklearn classifier and save results."""
     from .sklearn_runner import run_sklearn
@@ -470,6 +556,22 @@ def main():
     }
     if stability_data is not None:
         results["stability"] = stability_data
+
+    # Clinical integration (if enabled)
+    clinical_cfg = _param_yaml.get("clinical", {})
+    if clinical_cfg.get("enabled") and clinical_cfg.get("path"):
+        t_clin = _time.monotonic()
+        try:
+            clinical_results = _run_clinical_integration(experiment, _param_yaml, clinical_cfg)
+            if clinical_results:
+                results["clinical_integration"] = clinical_results
+                print(f"[worker] Clinical integration complete: {clinical_results.get('method', '?')}", flush=True)
+            clin_dur = _time.monotonic() - t_clin
+            timing.append({"label": "Clinical integration", "duration_s": round(clin_dur, 2)})
+        except Exception as e:
+            clin_dur = _time.monotonic() - t_clin
+            print(f"[worker] Clinical integration failed: {e}", flush=True)
+            timing.append({"label": "Clinical integration (failed)", "duration_s": round(clin_dur, 2)})
 
     # Save results first — display_results() may panic in Rust and kill the process
     with open(results_path, "w") as f:

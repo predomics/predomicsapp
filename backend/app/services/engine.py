@@ -73,6 +73,7 @@ def write_param_yaml(
     y_path: str,
     xtest_path: str = "",
     ytest_path: str = "",
+    clinical_path: str = "",
     output_dir: str = "/tmp",
 ) -> str:
     """Write a gpredomics param.yaml from API config dict.
@@ -211,6 +212,17 @@ def write_param_yaml(
         "mcmc": mcmc_out,
         "gpu": gpu,
     }
+
+    # Add clinical integration config if enabled
+    clinical_cfg = config.get("clinical", {})
+    if clinical_cfg.get("enabled") and clinical_path:
+        param["clinical"] = {
+            "enabled": True,
+            "path": clinical_path,
+            "method": clinical_cfg.get("method", "stacking"),
+            "interactions": clinical_cfg.get("interactions", False),
+            "columns": clinical_cfg.get("columns", ""),
+        }
 
     yaml_path = Path(output_dir) / "param.yaml"
     with open(yaml_path, "w") as f:

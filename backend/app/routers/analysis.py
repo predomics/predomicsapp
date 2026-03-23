@@ -57,6 +57,7 @@ async def run_analysis(
     y_file_id: str,
     xtest_file_id: str = "",
     ytest_file_id: str = "",
+    clinical_file_id: str = "",
     job_name: str = "",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -78,10 +79,13 @@ async def run_analysis(
 
     xtest_path = ""
     ytest_path = ""
+    clinical_path = ""
     if xtest_file_id:
         xtest_path = await _resolve_file(xtest_file_id) or ""
     if ytest_file_id:
         ytest_path = await _resolve_file(ytest_file_id) or ""
+    if clinical_file_id:
+        clinical_path = await _resolve_file(clinical_file_id) or ""
 
     # Compute config hash for duplicate detection (nulls stripped for stability)
     config_hash = _compute_config_hash(config.model_dump(), {
@@ -109,6 +113,7 @@ async def run_analysis(
         y_path=str(y_path),
         xtest_path=xtest_path,
         ytest_path=ytest_path,
+        clinical_path=clinical_path,
         output_dir=str(job_dir),
     )
 
@@ -160,6 +165,7 @@ async def run_batch(
     y_file_id: str,
     xtest_file_id: str = "",
     ytest_file_id: str = "",
+    clinical_file_id: str = "",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     background_tasks: BackgroundTasks = None,
@@ -200,6 +206,7 @@ async def run_batch(
         raise HTTPException(status_code=404, detail="Dataset file not found")
     xtest_path = await _resolve(xtest_file_id)
     ytest_path = await _resolve(ytest_file_id)
+    clinical_path = await _resolve(clinical_file_id)
 
     batch_id = uuid.uuid4().hex[:12]
     base_config = config.model_dump()
@@ -742,6 +749,7 @@ async def rerun_job(
     y_path = ytrain.disk_path
     xtest_path = file_map["xtest"].disk_path if "xtest" in file_map else ""
     ytest_path = file_map["ytest"].disk_path if "ytest" in file_map else ""
+    clinical_path = file_map["clinical"].disk_path if "clinical" in file_map else ""
 
     config_dict = original.config
     xtest_file = file_map.get("xtest")
@@ -771,6 +779,7 @@ async def rerun_job(
         y_path=str(y_path),
         xtest_path=xtest_path,
         ytest_path=ytest_path,
+        clinical_path=clinical_path,
         output_dir=str(job_dir),
     )
 

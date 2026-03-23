@@ -148,6 +148,13 @@ class KnnParams(BaseModel):
     weights: str = "uniform"
 
 
+class ClinicalParams(BaseModel):
+    enabled: bool = False
+    method: str = "stacking"
+    interactions: bool = False
+    columns: str = ""
+
+
 class DataConfig(BaseModel):
     features_in_rows: bool = True
     inverse_classes: bool = False
@@ -215,6 +222,7 @@ class RunConfig(BaseModel):
     knn: KnnParams = KnnParams()
     data: DataConfig = DataConfig()
     cv: CvParams = CvParams()
+    clinical: ClinicalParams = ClinicalParams()
     importance: ImportanceParams = ImportanceParams()
     voting: VotingParams = VotingParams()
     gpu: GpuParams = GpuParams()
