@@ -144,6 +144,7 @@
       <button :class="{ active: subTab === 'ecosystem' }" @click="subTab = 'ecosystem'">{{ $t('results.ecosystem') }}</button>
       <button v-if="population.length > 1" :class="{ active: subTab === 'stability' }" @click="subTab = 'stability'">{{ $t('results.stability') }}</button>
       <button v-if="pheromoneData && pheromoneData.length > 0" :class="{ active: subTab === 'pheromone' }" @click="subTab = 'pheromone'">Pheromone</button>
+      <button v-if="hasExplorationData" :class="{ active: subTab === 'exploration' }" @click="subTab = 'exploration'">Exploration</button>
       <button :class="{ active: subTab === 'basket' }" @click="subTab = 'basket'">{{ $t('results.basket') }}<span v-if="basketCount > 0" class="basket-badge">{{ basketCount }}</span></button>
       <button :class="{ active: subTab === 'console' }" @click="subTab = 'console'; loadConsoleLog()">{{ $t('results.console') }}</button>
       <div class="export-dropdown-wrap" v-if="detail">
@@ -999,6 +1000,33 @@
     </div>
 
     <!-- ============================================================ -->
+    <!-- EXPLORATION SUB-TAB                                          -->
+    <!-- ============================================================ -->
+    <div v-if="detail && subTab === 'exploration' && hasExplorationData" class="sub-content">
+      <section class="section">
+        <div class="section-title">Search Space Exploration — k × fit density</div>
+        <p class="info-text" style="margin-bottom: 12px;">
+          Each dot represents a model explored by the algorithm. Density shows where the search concentrates over iterations.
+          Use the slider to animate through generations or view all at once.
+        </p>
+        <div class="exploration-controls" style="display:flex; gap:16px; align-items:center; margin-bottom:12px;">
+          <label>Generation:
+            <input type="range" v-model.number="explorationGen" :min="-1" :max="generationTracking.length - 1" style="width:200px" />
+            <span style="min-width:60px; display:inline-block">{{ explorationGen === -1 ? 'All' : explorationGen }}</span>
+          </label>
+          <button class="btn-sm btn-outline" @click="animateExploration">▶ Animate</button>
+          <div style="flex:1"></div>
+          <div class="exploration-stats" v-if="explorationStats">
+            <span><strong>Total models:</strong> {{ explorationStats.totalModels.toLocaleString() }}</span>
+            <span style="margin-left:16px"><strong>Unique (sampled):</strong> {{ explorationStats.uniqueSampled.toLocaleString() }}</span>
+            <span style="margin-left:16px"><strong>Generations:</strong> {{ explorationStats.nGens }}</span>
+          </div>
+        </div>
+        <div ref="explorationChartEl" class="plotly-chart" style="min-height: 500px;"></div>
+      </section>
+    </div>
+
+    <!-- ============================================================ -->
     <!-- PHEROMONE SUB-TAB (ACO only)                                 -->
     <!-- ============================================================ -->
     <div v-if="detail && subTab === 'pheromone' && pheromoneData" class="sub-content">
@@ -1258,6 +1286,11 @@ const importanceData = ref(null)
 const pheromoneData = ref(null)
 const pheromoneTopN = ref(30)
 const pheromoneChartEl = ref(null)
+const explorationChartEl = ref(null)
+const explorationGen = ref(-1) // -1 = all generations
+const hasExplorationData = computed(() => {
+  return generationTracking.value.some(g => g.k_fit_sample && g.k_fit_sample.length > 0)
+})
 
 // Population filter state (P2.2 + P2.3)
 const selectedLanguages = ref([])
@@ -4059,6 +4092,118 @@ function renderBasketCharts() {
   renderBasketHeatmap()
 }
 
+const explorationStats = computed(() => {
+  if (!generationTracking.value.length) return null
+  const totalModels = generationTracking.value.reduce((s, g) => s + (g.population_size || 0), 0)
+  const allSamples = generationTracking.value.flatMap(g => g.k_fit_sample || [])
+  const uniqueSet = new Set(allSamples.map(([k, f]) => `${k}_${f}`))
+  return { totalModels, uniqueSampled: uniqueSet.size, nGens: generationTracking.value.length }
+})
+
+function renderExplorationChart() {
+  if (!explorationChartEl.value || !generationTracking.value.length) return
+  const Plotly = window.Plotly
+  if (!Plotly) return
+
+  const isDark = document.documentElement.classList.contains('dark')
+  const textColor = isDark ? '#ccc' : '#333'
+  const bgColor = 'rgba(0,0,0,0)'
+
+  // Collect data points
+  let ks = [], fits = [], colors = []
+  const nGens = generationTracking.value.length
+
+  if (explorationGen.value === -1) {
+    // All generations — color by generation
+    for (let g = 0; g < nGens; g++) {
+      const samples = generationTracking.value[g].k_fit_sample || []
+      for (const [k, f] of samples) {
+        ks.push(k)
+        fits.push(f)
+        colors.push(g)
+      }
+    }
+  } else {
+    // Single generation
+    const samples = generationTracking.value[explorationGen.value]?.k_fit_sample || []
+    for (const [k, f] of samples) {
+      ks.push(k)
+      fits.push(f)
+      colors.push(explorationGen.value)
+    }
+  }
+
+  if (ks.length === 0) return
+
+  const traces = [{
+    type: 'histogram2d',
+    x: ks,
+    y: fits,
+    colorscale: isDark ? 'Hot' : 'YlOrRd',
+    reversescale: true,
+    nbinsx: 40,
+    nbinsy: 40,
+    colorbar: { title: { text: 'Density', font: { color: textColor } }, tickfont: { color: textColor } },
+  }, {
+    type: 'scatter',
+    mode: 'markers',
+    x: ks,
+    y: fits,
+    marker: {
+      size: 3,
+      color: colors,
+      colorscale: 'Viridis',
+      opacity: 0.3,
+    },
+    hovertemplate: 'k=%{x}, fit=%{y:.4f}<extra></extra>',
+    showlegend: false,
+  }]
+
+  // Add best trajectory
+  const bestKs = generationTracking.value.map(g => g.best_k)
+  const bestFits = generationTracking.value.map(g => g.best_fit || g.best_auc)
+  traces.push({
+    type: 'scatter',
+    mode: 'lines+markers',
+    x: bestKs,
+    y: bestFits,
+    name: 'Best model trajectory',
+    marker: { size: 6, color: '#00ff88', symbol: 'star' },
+    line: { color: '#00ff88', width: 2 },
+    hovertemplate: 'Gen %{customdata}: k=%{x}, fit=%{y:.4f}<extra>Best</extra>',
+    customdata: generationTracking.value.map((_, i) => i),
+  })
+
+  const genLabel = explorationGen.value === -1 ? 'All generations' : `Generation ${explorationGen.value}`
+  const layout = {
+    title: { text: `Search Space Exploration — ${genLabel} (${ks.length} models)`, font: { color: textColor, size: 14 } },
+    xaxis: { title: { text: 'k (model complexity)', font: { color: textColor } }, tickfont: { color: textColor } },
+    yaxis: { title: { text: 'Penalized fitness', font: { color: textColor } }, tickfont: { color: textColor } },
+    height: 500,
+    margin: { l: 60, r: 30, t: 40, b: 50 },
+    paper_bgcolor: bgColor,
+    plot_bgcolor: bgColor,
+    legend: { font: { color: textColor }, x: 0.01, y: 0.99 },
+  }
+
+  Plotly.react(explorationChartEl.value, traces, layout, { responsive: true })
+}
+
+let _animTimer = null
+function animateExploration() {
+  if (_animTimer) { clearInterval(_animTimer); _animTimer = null; return }
+  explorationGen.value = 0
+  _animTimer = setInterval(() => {
+    if (explorationGen.value >= generationTracking.value.length - 1) {
+      clearInterval(_animTimer)
+      _animTimer = null
+      explorationGen.value = -1 // show all at end
+      return
+    }
+    explorationGen.value++
+  }, 200)
+}
+
 function renderPheromoneChart() {
   if (!pheromoneData.value || !pheromoneChartEl.value) return
   const Plotly = window.Plotly
@@ -4130,6 +4275,7 @@ async function renderActiveTab() {
   else if (subTab.value === 'jury') renderJuryCharts()
   else if (subTab.value === 'comparative') renderComparativeCharts()
   else if (subTab.value === 'copresence') renderCoPresenceCharts()
+  else if (subTab.value === 'exploration') renderExplorationChart()
   else if (subTab.value === 'pheromone') renderPheromoneChart()
   else if (subTab.value === 'basket') renderBasketCharts()
 }
@@ -4155,6 +4301,11 @@ watch(() => route.params.jobId, (newId) => {
 watch(basketItems, () => {
   if (subTab.value === 'basket') nextTick(() => renderBasketCharts())
 }, { deep: true })
+
+// Re-render exploration chart when generation slider changes
+watch(explorationGen, () => {
+  if (subTab.value === 'exploration') nextTick(() => renderExplorationChart())
+})
 
 // Re-render pheromone chart when topN changes
 watch(pheromoneTopN, () => {

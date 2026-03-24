@@ -511,6 +511,23 @@ def main():
             test_auc = _evaluate_one_generation(gen_best, test_ctx)
             if test_auc is not None:
                 entry["best_auc_test"] = test_auc
+
+        # Sample k×fit pairs for exploration visualization (max 100 per generation)
+        pop_size = len(gen_pop)
+        sample_size = min(100, pop_size)
+        step = max(1, pop_size // sample_size)
+        k_fit_sample = []
+        fit_values = []
+        for idx in range(0, pop_size, step):
+            ind = gen_pop.get_individual(idx)
+            m = dict(ind.get_metrics())
+            k_fit_sample.append([m["k"], round(m["fit"], 4)])
+            fit_values.append(m["fit"])
+        entry["k_fit_sample"] = k_fit_sample[:100]
+        if fit_values:
+            entry["fit_mean"] = round(float(np.mean(fit_values)), 4)
+            entry["fit_std"] = round(float(np.std(fit_values)), 4)
+
         generation_tracking.append(entry)
 
     gen_dur = _time.monotonic() - t_gen
