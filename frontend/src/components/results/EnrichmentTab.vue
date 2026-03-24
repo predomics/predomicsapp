@@ -114,7 +114,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 import { useChartTheme } from '../../composables/useChartTheme'
@@ -152,6 +152,13 @@ const chartEl = ref(null)
 const significantCount = computed(() => {
   if (!enrichmentData.value) return 0
   return enrichmentData.value.results.filter(r => r.significant).length
+})
+
+// Auto-run enrichment when tab becomes active
+watch(() => props.active, (isActive) => {
+  if (isActive && !enrichmentData.value && !loading.value && props.jobId) {
+    runEnrichment()
+  }
 })
 
 async function runEnrichment() {
