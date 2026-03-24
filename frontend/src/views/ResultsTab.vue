@@ -4507,6 +4507,20 @@ watch(subTab, async () => {
 
 watch(() => themeStore.isDark, () => renderActiveTab())
 
+// Reset state when switching projects
+watch(() => route.params.id, () => {
+  selectedJobId.value = null
+  detail.value = null
+  population.value = []
+  generationTracking.value = []
+  juryData.value = null
+  importanceData.value = null
+  pheromoneData.value = null
+  fullResults.value = null
+  subTab.value = 'insights'
+  loadJobList()
+})
+
 watch(() => route.params.jobId, (newId) => {
   if (newId && newId !== selectedJobId.value) {
     selectedJobId.value = newId
