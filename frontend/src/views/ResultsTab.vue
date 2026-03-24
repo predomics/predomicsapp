@@ -143,6 +143,7 @@
       <button :class="{ active: subTab === 'enrichment' }" @click="subTab = 'enrichment'">{{ $t('results.enrichment') }}</button>
       <button :class="{ active: subTab === 'ecosystem' }" @click="subTab = 'ecosystem'">{{ $t('results.ecosystem') }}</button>
       <button v-if="population.length > 1" :class="{ active: subTab === 'stability' }" @click="subTab = 'stability'">{{ $t('results.stability') }}</button>
+      <button v-if="pheromoneData && pheromoneData.length > 0" :class="{ active: subTab === 'pheromone' }" @click="subTab = 'pheromone'">Pheromone</button>
       <button :class="{ active: subTab === 'basket' }" @click="subTab = 'basket'">{{ $t('results.basket') }}<span v-if="basketCount > 0" class="basket-badge">{{ basketCount }}</span></button>
       <button :class="{ active: subTab === 'console' }" @click="subTab = 'console'; loadConsoleLog()">{{ $t('results.console') }}</button>
       <div class="export-dropdown-wrap" v-if="detail">
@@ -998,6 +999,24 @@
     </div>
 
     <!-- ============================================================ -->
+    <!-- PHEROMONE SUB-TAB (ACO only)                                 -->
+    <!-- ============================================================ -->
+    <div v-if="detail && subTab === 'pheromone' && pheromoneData" class="sub-content">
+      <section class="section">
+        <div class="section-title">Pheromone Heatmap — Feature Importance from Ant Colony</div>
+        <p class="info-text" style="margin-bottom: 12px;">
+          Pheromone values reflect how frequently and successfully each feature was used by ants.
+          Higher pheromone = feature consistently appears in good models.
+          Blue = positive coefficient, red = negative coefficient.
+        </p>
+        <div class="pheromone-controls">
+          <label>Top features: <input type="number" v-model.number="pheromoneTopN" min="5" max="200" step="5" style="width:60px" /></label>
+        </div>
+        <div ref="pheromoneChartEl" class="plotly-chart" style="min-height: 400px;"></div>
+      </section>
+    </div>
+
+    <!-- ============================================================ -->
     <!-- BASKET SUB-TAB                                               -->
     <!-- ============================================================ -->
     <div v-if="subTab === 'basket'" class="sub-content">
@@ -1233,9 +1252,12 @@ const popPage = ref(0)
 const popPageSize = 10
 const topNModels = ref(50)
 
-// Jury & importance state
+// Jury, importance & pheromone state
 const juryData = ref(null)
 const importanceData = ref(null)
+const pheromoneData = ref(null)
+const pheromoneTopN = ref(30)
+const pheromoneChartEl = ref(null)
 
 // Population filter state (P2.2 + P2.3)
 const selectedLanguages = ref([])
@@ -3883,6 +3905,7 @@ async function loadJobResults() {
       generationTracking.value = raw.generation_tracking || []
       juryData.value = raw.jury || null
       importanceData.value = raw.importance || null
+      pheromoneData.value = raw.pheromone || null
       contributionData.value = null
       shapData.value = null
       // Reset filters for new job
@@ -3897,6 +3920,7 @@ async function loadJobResults() {
       generationTracking.value = []
       juryData.value = null
       importanceData.value = null
+      pheromoneData.value = null
     }
 
     await loadMspAnnotations()
@@ -4035,6 +4059,69 @@ function renderBasketCharts() {
   renderBasketHeatmap()
 }
 
+function renderPheromoneChart() {
+  if (!pheromoneData.value || !pheromoneChartEl.value) return
+  const Plotly = window.Plotly
+  if (!Plotly) return
+
+  const topN = pheromoneTopN.value || 30
+  const data = pheromoneData.value.slice(0, topN).reverse() // reverse for horizontal bar (bottom=highest)
+
+  const features = data.map(d => d.feature || `feature_${d.feature_idx}`)
+  const tauPos = data.map(d => d.tau_positive)
+  const tauNeg = data.map(d => -d.tau_negative) // negative for left side
+
+  const isDark = document.documentElement.classList.contains('dark')
+  const textColor = isDark ? '#ccc' : '#333'
+  const bgColor = 'rgba(0,0,0,0)'
+
+  const traces = [
+    {
+      name: 'Positive (τ+)',
+      type: 'bar',
+      orientation: 'h',
+      y: features,
+      x: tauPos,
+      marker: { color: 'rgba(66, 133, 244, 0.8)' },
+      hovertemplate: '%{y}: τ+ = %{x:.4f}<extra></extra>',
+    },
+    {
+      name: 'Negative (τ−)',
+      type: 'bar',
+      orientation: 'h',
+      y: features,
+      x: tauNeg,
+      marker: { color: 'rgba(234, 67, 53, 0.8)' },
+      hovertemplate: '%{y}: τ− = %{customdata:.4f}<extra></extra>',
+      customdata: data.map(d => d.tau_negative),
+    },
+  ]
+
+  const height = Math.max(400, topN * 22 + 80)
+
+  const layout = {
+    barmode: 'overlay',
+    title: { text: `Top ${topN} Features by Pheromone`, font: { color: textColor, size: 14 } },
+    xaxis: {
+      title: { text: 'Pheromone (τ)', font: { color: textColor } },
+      tickfont: { color: textColor },
+      zeroline: true,
+      zerolinecolor: isDark ? '#555' : '#ccc',
+    },
+    yaxis: {
+      tickfont: { color: textColor, size: 10 },
+      automargin: true,
+    },
+    height,
+    margin: { l: 200, r: 30, t: 40, b: 50 },
+    paper_bgcolor: bgColor,
+    plot_bgcolor: bgColor,
+    legend: { font: { color: textColor }, x: 0.7, y: 1 },
+  }
+
+  Plotly.react(pheromoneChartEl.value, traces, layout, { responsive: true })
+}
+
 async function renderActiveTab() {
   await ensurePlotly()
   if (subTab.value === 'summary') renderSummaryCharts()
@@ -4043,6 +4130,7 @@ async function renderActiveTab() {
   else if (subTab.value === 'jury') renderJuryCharts()
   else if (subTab.value === 'comparative') renderComparativeCharts()
   else if (subTab.value === 'copresence') renderCoPresenceCharts()
+  else if (subTab.value === 'pheromone') renderPheromoneChart()
   else if (subTab.value === 'basket') renderBasketCharts()
 }
 
@@ -4067,6 +4155,11 @@ watch(() => route.params.jobId, (newId) => {
 watch(basketItems, () => {
   if (subTab.value === 'basket') nextTick(() => renderBasketCharts())
 }, { deep: true })
+
+// Re-render pheromone chart when topN changes
+watch(pheromoneTopN, () => {
+  if (subTab.value === 'pheromone') nextTick(() => renderPheromoneChart())
+})
 
 // Reset job page on search change
 watch(jobSearch, () => { jobPage.value = 0 })
