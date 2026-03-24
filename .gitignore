@@ -50,4 +50,5 @@ certbot/
 .project_planning.md
 
 # Other
-private/
+private/data/datasets/
+data/scapis_network.json
