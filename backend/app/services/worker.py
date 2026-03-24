@@ -573,6 +573,24 @@ def main():
             print(f"[worker] Clinical integration failed: {e}", flush=True)
             timing.append({"label": "Clinical integration (failed)", "duration_s": round(clin_dur, 2)})
 
+    # Extract ACO pheromone data (if available)
+    try:
+        if experiment.has_pheromone():
+            pheromone_data = experiment.get_pheromone()
+            results["pheromone"] = [
+                {
+                    "feature": dict(p)["feature_name"],
+                    "feature_idx": dict(p)["feature_idx"],
+                    "tau_positive": round(dict(p)["tau_positive"], 6),
+                    "tau_negative": round(dict(p)["tau_negative"], 6),
+                    "tau_total": round(dict(p)["tau_total"], 6),
+                }
+                for p in pheromone_data
+            ]
+            print(f"[worker] Extracted pheromone data: {len(results['pheromone'])} features", flush=True)
+    except Exception as e:
+        print(f"[worker] Pheromone extraction skipped: {e}", flush=True)
+
     # Save results first — display_results() may panic in Rust and kill the process
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
