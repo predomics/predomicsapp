@@ -15,6 +15,7 @@ class Algorithm(str, Enum):
     beam = "beam"
     mcmc = "mcmc"
     aco = "aco"
+    sa = "sa"
     rf = "rf"
     svm = "svm"
     logistic = "logistic"
@@ -102,6 +103,16 @@ class McmcParams(BaseModel):
     n_burn: int = 5000
     lambda_: float = Field(0.001, alias="lambda")
     nmin: int = 10
+
+
+class SaParams(BaseModel):
+    initial_temperature: float = 1.0
+    cooling_rate: float = 0.999
+    min_temperature: float = 0.001
+    max_iterations: int = 10000
+    snapshot_interval: int = 100
+    k_min: int = 1
+    k_max: int = 50
 
 
 class AcoParams(BaseModel):
@@ -229,6 +240,7 @@ class RunConfig(BaseModel):
     beam: BeamParams = BeamParams()
     mcmc: McmcParams = McmcParams()
     aco: AcoParams = AcoParams()
+    sa: SaParams = SaParams()
     rf: RfParams = RfParams()
     svm: SvmParams = SvmParams()
     logistic: LogisticParams = LogisticParams()

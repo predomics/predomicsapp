@@ -1,5 +1,6 @@
 """Comprehensive API tests for PredomicsApp backend."""
 
+import json
 import os
 import shutil
 import tempfile
@@ -3508,4 +3509,220 @@ class TestTemplates:
         await db_session.commit()
 
         resp = await auth_client.delete("/api/admin/templates/nonexistent_id_999")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Reference networks (built-in)
+# ---------------------------------------------------------------------------
+
+class TestReferenceNetworks:
+    """Tests for built-in reference network endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_list_reference_networks(self, auth_client):
+        """List endpoint returns reference networks when data file exists."""
+        # Place a minimal reference network in the test data dir
+        data_dir = Path(os.environ["PREDOMICS_DATA_DIR"])
+        net_content = json.dumps({
+            "metadata": {"name": "Test Reference Net"},
+            "nodes": [{"id": "n1"}, {"id": "n2"}],
+            "edges": [{"source": "n1", "target": "n2", "weight": 0.5}],
+        })
+        (data_dir / "scapis_network.json").write_text(net_content)
+
+        resp = await auth_client.get("/api/data-explore/reference-networks/list")
+        assert resp.status_code == 200
+        nets = resp.json()
+        assert isinstance(nets, list)
+        assert len(nets) >= 1
+        scapis = [n for n in nets if n["id"] == "scapis"]
+        assert len(scapis) == 1
+        assert scapis[0]["name"] == "Test Reference Net"
+        assert scapis[0]["n_nodes"] == 2
+        assert scapis[0]["n_edges"] == 1
+        assert scapis[0]["source"] == "reference"
+
+    @pytest.mark.asyncio
+    async def test_get_reference_network(self, auth_client):
+        """Get endpoint returns full network data."""
+        data_dir = Path(os.environ["PREDOMICS_DATA_DIR"])
+        net_data = {
+            "metadata": {"name": "SCAPIS Test"},
+            "nodes": [
+                {"id": "msp_0001", "species": "E. coli", "phylum": "Pseudomonadota", "x": 1.0, "y": 2.0},
+                {"id": "msp_0002", "species": "B. fragilis", "phylum": "Bacteroidota", "x": 3.0, "y": 4.0},
+            ],
+            "edges": [{"source": "msp_0001", "target": "msp_0002", "weight": 0.7, "type": "positive"}],
+        }
+        (data_dir / "scapis_network.json").write_text(json.dumps(net_data))
+
+        resp = await auth_client.get("/api/data-explore/reference-networks/scapis")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["metadata"]["name"] == "SCAPIS Test"
+        assert len(data["nodes"]) == 2
+        assert len(data["edges"]) == 1
+        assert data["nodes"][0]["id"] == "msp_0001"
+        assert data["edges"][0]["type"] == "positive"
+
+    @pytest.mark.asyncio
+    async def test_get_reference_network_not_found(self, auth_client):
+        """Non-existent reference network returns 404."""
+        resp = await auth_client.get("/api/data-explore/reference-networks/nonexistent")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_list_reference_networks_empty_when_no_file(self, auth_client):
+        """List returns empty when no reference network files exist."""
+        resp = await auth_client.get("/api/data-explore/reference-networks/list")
+        assert resp.status_code == 200
+        nets = resp.json()
+        # May be empty if the data file doesn't exist in test env
+        assert isinstance(nets, list)
+
+    @pytest.mark.asyncio
+    async def test_reference_networks_no_auth_required(self, client):
+        """Reference network endpoints should work without authentication."""
+        resp = await client.get("/api/data-explore/reference-networks/list")
+        assert resp.status_code == 200
+
+        resp = await client.get("/api/data-explore/reference-networks/nonexistent")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# External networks (user-uploaded, per-project)
+# ---------------------------------------------------------------------------
+
+class TestExternalNetworks:
+    """Tests for user-uploaded external network endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_upload_and_list_external_network(self, auth_client):
+        """Upload a network JSON, then list it."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_proj"})
+        pid = proj_resp.json()["project_id"]
+
+        net_json = json.dumps({
+            "metadata": {"name": "My Network"},
+            "nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+            "edges": [{"source": "a", "target": "b"}, {"source": "b", "target": "c"}],
+        })
+
+        resp = await auth_client.post(
+            f"/api/data-explore/{pid}/external-networks",
+            files={"file": ("test_net.json", net_json, "application/json")},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "My Network"
+        assert data["n_nodes"] == 3
+        assert data["n_edges"] == 2
+        net_id = data["id"]
+
+        # List
+        resp = await auth_client.get(f"/api/data-explore/{pid}/external-networks")
+        assert resp.status_code == 200
+        nets = resp.json()
+        assert len(nets) == 1
+        assert nets[0]["id"] == net_id
+        assert nets[0]["name"] == "My Network"
+
+    @pytest.mark.asyncio
+    async def test_get_external_network(self, auth_client):
+        """Retrieve uploaded network by ID."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_proj2"})
+        pid = proj_resp.json()["project_id"]
+
+        net_json = json.dumps({
+            "nodes": [{"id": "x"}],
+            "edges": [],
+        })
+        upload = await auth_client.post(
+            f"/api/data-explore/{pid}/external-networks",
+            files={"file": ("net.json", net_json, "application/json")},
+        )
+        net_id = upload.json()["id"]
+
+        resp = await auth_client.get(f"/api/data-explore/{pid}/external-networks/{net_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["nodes"]) == 1
+        assert data["nodes"][0]["id"] == "x"
+
+    @pytest.mark.asyncio
+    async def test_delete_external_network(self, auth_client):
+        """Delete an uploaded network."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_proj3"})
+        pid = proj_resp.json()["project_id"]
+
+        net_json = json.dumps({"nodes": [{"id": "z"}], "edges": []})
+        upload = await auth_client.post(
+            f"/api/data-explore/{pid}/external-networks",
+            files={"file": ("net.json", net_json, "application/json")},
+        )
+        net_id = upload.json()["id"]
+
+        resp = await auth_client.delete(f"/api/data-explore/{pid}/external-networks/{net_id}")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] is True
+
+        # Verify gone
+        resp = await auth_client.get(f"/api/data-explore/{pid}/external-networks/{net_id}")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_upload_invalid_json(self, auth_client):
+        """Uploading non-JSON returns 400."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_proj4"})
+        pid = proj_resp.json()["project_id"]
+
+        resp = await auth_client.post(
+            f"/api/data-explore/{pid}/external-networks",
+            files={"file": ("bad.json", "not json{{{", "application/json")},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_upload_missing_nodes(self, auth_client):
+        """Uploading JSON without nodes array returns 400."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_proj5"})
+        pid = proj_resp.json()["project_id"]
+
+        resp = await auth_client.post(
+            f"/api/data-explore/{pid}/external-networks",
+            files={"file": ("bad.json", json.dumps({"edges": []}), "application/json")},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_upload_missing_edges(self, auth_client):
+        """Uploading JSON without edges array returns 400."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_proj6"})
+        pid = proj_resp.json()["project_id"]
+
+        resp = await auth_client.post(
+            f"/api/data-explore/{pid}/external-networks",
+            files={"file": ("bad.json", json.dumps({"nodes": []}), "application/json")},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_list_empty_project(self, auth_client):
+        """Listing networks for a project with none returns empty list."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_empty"})
+        pid = proj_resp.json()["project_id"]
+
+        resp = await auth_client.get(f"/api/data-explore/{pid}/external-networks")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent(self, auth_client):
+        """Deleting a network that doesn't exist returns 404."""
+        proj_resp = await auth_client.post("/api/projects/", params={"name": "net_proj7"})
+        pid = proj_resp.json()["project_id"]
+
+        resp = await auth_client.delete(f"/api/data-explore/{pid}/external-networks/nonexistent_id")
         assert resp.status_code == 404

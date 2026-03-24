@@ -430,6 +430,8 @@
     "ecoExternalTitle": "External Network",
     "ecoSelectNetwork": "Select network...",
     "ecoUploadNetwork": "Upload network",
+    "ecoReferenceNetworks": "Built-in reference",
+    "ecoUploadedNetworks": "My uploads",
     "ecoFbmFilterTitle": "FBM Module Filter",
     "ecoFbmFilterDesc": "Filter the Family of Best Models by ecosystem module membership. Keep only models whose features belong to the same ecological niche.",
     "ecoFbmApplyFilter": "Apply filter",

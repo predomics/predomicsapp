@@ -220,6 +220,7 @@ def write_param_yaml(
         "beam": beam_out,
         "mcmc": mcmc_out,
         "aco": aco,
+        "sa": _merge("sa", {"initial_temperature": 1.0, "cooling_rate": 0.999, "min_temperature": 0.001, "max_iterations": 10000, "snapshot_interval": 100, "k_min": 1, "k_max": 50}),
         "gpu": gpu,
     }
 

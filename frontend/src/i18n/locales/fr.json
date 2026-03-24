@@ -430,6 +430,8 @@
     "ecoExternalTitle": "Réseau externe",
     "ecoSelectNetwork": "Sélectionner un réseau...",
     "ecoUploadNetwork": "Importer un réseau",
+    "ecoReferenceNetworks": "Réseaux de référence",
+    "ecoUploadedNetworks": "Mes imports",
     "ecoFbmFilterTitle": "Filtre FBM par module",
     "ecoFbmFilterDesc": "Filtrer la Famille des Meilleurs Modèles par appartenance aux modules de l'écosystème. Ne conserver que les modèles dont les variables appartiennent à la même niche écologique.",
     "ecoFbmApplyFilter": "Appliquer le filtre",

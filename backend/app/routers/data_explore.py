@@ -17,6 +17,7 @@ from ..services import coabundance
 from ..services import enrichment
 from ..services import insights as insights_service
 from ..services import storage
+from ..core.config import settings
 
 router = APIRouter(prefix="/data-explore", tags=["data-explore"])
 
@@ -444,7 +445,7 @@ async def upload_external_network(
     net_name = net_data.get("metadata", {}).get("name", file.filename or "external")
 
     storage.ensure_project_dirs(project_id)
-    net_dir = Path(storage.config.project_dir) / project_id / "networks"
+    net_dir = settings.project_dir / project_id / "networks"
     net_dir.mkdir(parents=True, exist_ok=True)
     dest = net_dir / f"{net_id}.json"
     dest.write_bytes(content)
@@ -467,7 +468,7 @@ async def list_external_networks(
     """List uploaded external networks for a project."""
     project, _ = await get_project_with_access(project_id, user, db, require_role="viewer")
 
-    net_dir = Path(storage.config.project_dir) / project_id / "networks"
+    net_dir = settings.project_dir / project_id / "networks"
     if not net_dir.exists():
         return []
 
@@ -496,7 +497,7 @@ async def get_external_network(
     """Retrieve an uploaded external network."""
     project, _ = await get_project_with_access(project_id, user, db, require_role="viewer")
 
-    net_path = Path(storage.config.project_dir) / project_id / "networks" / f"{network_id}.json"
+    net_path = settings.project_dir / project_id / "networks" / f"{network_id}.json"
     if not net_path.exists():
         raise HTTPException(404, "Network not found")
 
@@ -514,12 +515,59 @@ async def delete_external_network(
     """Delete an uploaded external network."""
     project, _ = await get_project_with_access(project_id, user, db, require_role="editor")
 
-    net_path = Path(storage.config.project_dir) / project_id / "networks" / f"{network_id}.json"
+    net_path = settings.project_dir / project_id / "networks" / f"{network_id}.json"
     if not net_path.exists():
         raise HTTPException(404, "Network not found")
 
     net_path.unlink()
     return {"deleted": True}
+
+
+# --- Reference (built-in) networks ---
+
+_REFERENCE_NETWORKS_DIR = Path(settings.data_dir)
+_REFERENCE_NETWORK_FILES = {
+    "scapis": "scapis_network.json",
+}
+
+
+@router.get("/reference-networks/list")
+async def list_reference_networks():
+    """List built-in reference networks shipped with the application."""
+    result = []
+    for net_id, filename in _REFERENCE_NETWORK_FILES.items():
+        path = _REFERENCE_NETWORKS_DIR / filename
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+            meta = data.get("metadata", {})
+            result.append({
+                "id": net_id,
+                "name": meta.get("name", net_id),
+                "description": meta.get("description", ""),
+                "n_nodes": len(data.get("nodes", [])),
+                "n_edges": len(data.get("edges", [])),
+                "source": "reference",
+            })
+        except Exception:
+            continue
+    return result
+
+
+@router.get("/reference-networks/{network_id}")
+async def get_reference_network(network_id: str):
+    """Retrieve a built-in reference network."""
+    filename = _REFERENCE_NETWORK_FILES.get(network_id)
+    if not filename:
+        raise HTTPException(404, f"Reference network '{network_id}' not found")
+
+    path = _REFERENCE_NETWORKS_DIR / filename
+    if not path.exists():
+        raise HTTPException(404, f"Reference network file missing")
+
+    data = json.loads(path.read_text())
+    return data
 
 
 @router.post("/{project_id}/fbm-module-filter")

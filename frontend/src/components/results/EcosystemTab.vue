@@ -145,17 +145,24 @@
       <div class="eco-external-header">
         <h4>{{ $t('results.ecoExternalTitle') }}</h4>
         <div class="eco-external-controls">
-          <select v-model="selectedExternalId" class="eco-external-select" v-if="externalNetworks.length > 0">
+          <select v-model="selectedExternalId" class="eco-external-select" v-if="allNetworks.length > 0">
             <option value="">{{ $t('results.ecoSelectNetwork') }}</option>
-            <option v-for="net in externalNetworks" :key="net.id" :value="net.id">
-              {{ net.name }} ({{ net.n_nodes }} {{ $t('results.ecoNodes') }})
-            </option>
+            <optgroup v-if="referenceNetworks.length" :label="$t('results.ecoReferenceNetworks')">
+              <option v-for="net in referenceNetworks" :key="net.id" :value="net.id">
+                {{ net.name }} ({{ net.n_nodes }} {{ $t('results.ecoNodes') }})
+              </option>
+            </optgroup>
+            <optgroup v-if="externalNetworks.length" :label="$t('results.ecoUploadedNetworks')">
+              <option v-for="net in externalNetworks" :key="net.id" :value="net.id">
+                {{ net.name }} ({{ net.n_nodes }} {{ $t('results.ecoNodes') }})
+              </option>
+            </optgroup>
           </select>
           <label class="eco-external-upload btn-sm btn-outline">
             {{ $t('results.ecoUploadNetwork') }}
             <input type="file" accept=".json" @change="uploadExternalNetwork" hidden />
           </label>
-          <button v-if="selectedExternalId" class="btn-sm btn-danger-outline" @click="deleteExternalNetwork">
+          <button v-if="selectedExternalId && allNetworks.find(n => n.id === selectedExternalId)?.source === 'uploaded'" class="btn-sm btn-danger-outline" @click="deleteExternalNetwork">
             {{ $t('common.delete') }}
           </button>
         </div>
@@ -325,6 +332,7 @@ const networkChartEl = ref(null)
 
 // External network state
 const externalNetworks = ref([])
+const referenceNetworks = ref([])
 const selectedExternalId = ref('')
 const externalNetworkData = ref(null)
 const externalChartEl = ref(null)
@@ -993,10 +1001,19 @@ watch(() => props.active, (active) => {
 
 async function fetchExternalNetworks() {
   try {
-    const { data } = await axios.get(`/api/data-explore/${props.projectId}/external-networks`)
-    externalNetworks.value = data
+    const [userRes, refRes] = await Promise.all([
+      axios.get(`/api/data-explore/${props.projectId}/external-networks`),
+      axios.get('/api/data-explore/reference-networks/list'),
+    ])
+    externalNetworks.value = userRes.data.map(n => ({ ...n, source: 'uploaded' }))
+    referenceNetworks.value = refRes.data.map(n => ({ ...n, source: 'reference' }))
   } catch { /* ignore */ }
 }
+
+const allNetworks = computed(() => [
+  ...referenceNetworks.value,
+  ...externalNetworks.value,
+])
 
 async function uploadExternalNetwork(event) {
   const file = event.target.files?.[0]
@@ -1031,7 +1048,11 @@ async function loadExternalNetwork(id) {
   if (!id) { externalNetworkData.value = null; return }
   loadingExternal.value = true
   try {
-    const { data } = await axios.get(`/api/data-explore/${props.projectId}/external-networks/${id}`)
+    const net = allNetworks.value.find(n => n.id === id)
+    const url = net?.source === 'reference'
+      ? `/api/data-explore/reference-networks/${id}`
+      : `/api/data-explore/${props.projectId}/external-networks/${id}`
+    const { data } = await axios.get(url)
     externalNetworkData.value = data
     await nextTick()
     renderExternalNetwork()

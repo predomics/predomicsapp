@@ -194,6 +194,8 @@ onMounted(() => {
   gap: 0;
   border-bottom: 2px solid var(--border-light);
   margin-bottom: 1rem;
+  position: relative;
+  z-index: 11;
 }
 
 .tab {

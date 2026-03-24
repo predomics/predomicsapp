@@ -12,6 +12,7 @@ export const CATEGORIES = [
   { id: 'ga', label: 'Genetic Algorithm', colorVar: '--cat-ga', algoFilter: 'ga' },
   { id: 'beam', label: 'Beam Search', colorVar: '--cat-beam', algoFilter: 'beam' },
   { id: 'mcmc', label: 'MCMC', colorVar: '--cat-mcmc', algoFilter: 'mcmc' },
+  { id: 'sa', label: 'Simulated Annealing', colorVar: '--cat-sa', algoFilter: 'sa' },
   { id: 'aco', label: 'Ant Colony Optimization', colorVar: '--cat-aco', algoFilter: 'aco' },
   { id: 'rf', label: 'Random Forest', colorVar: '--cat-rf', algoFilter: 'rf' },
   { id: 'svm', label: 'SVM', colorVar: '--cat-svm', algoFilter: 'svm' },
@@ -34,7 +35,7 @@ export const PARAM_DEFS = [
     key: 'algo', label: 'Algorithm', category: 'general', level: 'basic', inputType: 'select', defaultValue: 'ga',
     description: 'Optimization algorithm: GA (Genetic Algorithm), Beam (Beam Search), or MCMC (Markov Chain Monte Carlo).',
     options: [
-      { value: 'ga', label: 'Genetic Algorithm' }, { value: 'beam', label: 'Beam Search' }, { value: 'mcmc', label: 'MCMC' }, { value: 'aco', label: 'Ant Colony Optimization' },
+      { value: 'ga', label: 'Genetic Algorithm' }, { value: 'beam', label: 'Beam Search' }, { value: 'mcmc', label: 'MCMC' }, { value: 'aco', label: 'Ant Colony Optimization' }, { value: 'sa', label: 'Simulated Annealing' },
       { value: 'rf', label: 'Random Forest' }, { value: 'svm', label: 'SVM' }, { value: 'logistic', label: 'Logistic Regression' },
       { value: 'xgboost', label: 'XGBoost' }, { value: 'lightgbm', label: 'LightGBM' }, { value: 'extra_trees', label: 'Extra Trees' },
       { value: 'adaboost', label: 'AdaBoost' }, { value: 'knn', label: 'KNN' },
@@ -240,6 +241,28 @@ export const PARAM_DEFS = [
   {
     key: 'nmin', label: 'nmin', category: 'mcmc', level: 'basic', inputType: 'number', defaultValue: 10,
     description: 'Minimum features in a model after feature elimination. 0 = keep all features (disable SBS).', min: 0, step: 1,
+  },
+
+  // ===================== SA (5) =====================
+  {
+    key: 'initial_temperature', label: 'Initial temperature', category: 'sa', level: 'basic', inputType: 'number', defaultValue: 1.0,
+    description: 'Starting temperature. Higher = more initial exploration (accepts worse solutions more freely).', min: 0.01, max: 10, step: 0.1,
+  },
+  {
+    key: 'cooling_rate', label: 'Cooling rate', category: 'sa', level: 'basic', inputType: 'number', defaultValue: 0.999,
+    description: 'Temperature multiplier per iteration. Closer to 1.0 = slower cooling, more thorough search. 0.999 ≈ 7000 iterations to reach 0.001.', min: 0.9, max: 0.9999, step: 0.001,
+  },
+  {
+    key: 'max_iterations', label: 'Max iterations', category: 'sa', level: 'basic', inputType: 'number', defaultValue: 10000,
+    description: 'Maximum number of propose-accept/reject iterations.', min: 100, step: 1000,
+  },
+  {
+    key: 'k_min', label: 'k min', category: 'sa', level: 'basic', inputType: 'number', defaultValue: 1,
+    description: 'Minimum number of features per model.', min: 1, step: 1,
+  },
+  {
+    key: 'k_max', label: 'k max', category: 'sa', level: 'basic', inputType: 'number', defaultValue: 50,
+    description: 'Maximum number of features per model.', min: 1, step: 10,
   },
 
   // ===================== ACO (10) =====================
