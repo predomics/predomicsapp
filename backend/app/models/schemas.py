@@ -16,6 +16,8 @@ class Algorithm(str, Enum):
     mcmc = "mcmc"
     aco = "aco"
     sa = "sa"
+    lasso = "lasso"
+    ils = "ils"
     rf = "rf"
     svm = "svm"
     logistic = "logistic"
@@ -104,6 +106,20 @@ class McmcParams(BaseModel):
     lambda_: float = Field(0.001, alias="lambda")
     nmin: int = 10
 
+
+class LassoParams(BaseModel):
+    alpha_min: float = 0.001
+    alpha_max: float = 1.0
+    n_alphas: int = 100
+    l1_ratio: float = 1.0
+
+class IlsParams(BaseModel):
+    max_iterations: int = 100
+    perturbation_size: int = 3
+    local_search_steps: int = 50
+    max_no_improve: int = 20
+    k_min: int = 1
+    k_max: int = 50
 
 class SaParams(BaseModel):
     initial_temperature: float = 1.0
@@ -241,6 +257,8 @@ class RunConfig(BaseModel):
     mcmc: McmcParams = McmcParams()
     aco: AcoParams = AcoParams()
     sa: SaParams = SaParams()
+    lasso: LassoParams = LassoParams()
+    ils: IlsParams = IlsParams()
     rf: RfParams = RfParams()
     svm: SvmParams = SvmParams()
     logistic: LogisticParams = LogisticParams()

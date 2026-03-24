@@ -202,7 +202,7 @@ const batchJobCount = computed(() => {
 
 // Split categories into left/right columns
 const leftCatIds = ['general', 'cv']
-const rightCatIds = ['ga', 'beam', 'mcmc', 'aco', 'sa', 'rf', 'svm', 'logistic', 'xgboost', 'lightgbm', 'extra_trees', 'adaboost', 'knn', 'clinical', 'importance', 'voting', 'gpu']
+const rightCatIds = ['ga', 'beam', 'mcmc', 'aco', 'sa', 'lasso', 'ils', 'rf', 'svm', 'logistic', 'xgboost', 'lightgbm', 'extra_trees', 'adaboost', 'knn', 'clinical', 'importance', 'voting', 'gpu']
 const leftCategories = computed(() => CATEGORIES.filter(c => leftCatIds.includes(c.id)))
 const rightCategories = computed(() => CATEGORIES.filter(c => rightCatIds.includes(c.id)))
 

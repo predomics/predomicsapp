@@ -221,6 +221,8 @@ def write_param_yaml(
         "mcmc": mcmc_out,
         "aco": aco,
         "sa": _merge("sa", {"initial_temperature": 1.0, "cooling_rate": 0.999, "min_temperature": 0.001, "max_iterations": 10000, "snapshot_interval": 100, "k_min": 1, "k_max": 50}),
+        "lasso": _merge("lasso", {"alpha_min": 0.001, "alpha_max": 1.0, "n_alphas": 100, "l1_ratio": 1.0}),
+        "ils": _merge("ils", {"max_iterations": 100, "perturbation_size": 3, "local_search_steps": 50, "max_no_improve": 20, "k_min": 1, "k_max": 50}),
         "gpu": gpu,
     }
 

@@ -13,6 +13,8 @@ export const CATEGORIES = [
   { id: 'beam', label: 'Beam Search', colorVar: '--cat-beam', algoFilter: 'beam' },
   { id: 'mcmc', label: 'MCMC', colorVar: '--cat-mcmc', algoFilter: 'mcmc' },
   { id: 'sa', label: 'Simulated Annealing', colorVar: '--cat-sa', algoFilter: 'sa' },
+  { id: 'lasso', label: 'LASSO/Elastic Net', colorVar: '--cat-lasso', algoFilter: 'lasso' },
+  { id: 'ils', label: 'Iterated Local Search', colorVar: '--cat-ils', algoFilter: 'ils' },
   { id: 'aco', label: 'Ant Colony Optimization', colorVar: '--cat-aco', algoFilter: 'aco' },
   { id: 'rf', label: 'Random Forest', colorVar: '--cat-rf', algoFilter: 'rf' },
   { id: 'svm', label: 'SVM', colorVar: '--cat-svm', algoFilter: 'svm' },
@@ -35,7 +37,7 @@ export const PARAM_DEFS = [
     key: 'algo', label: 'Algorithm', category: 'general', level: 'basic', inputType: 'select', defaultValue: 'ga',
     description: 'Optimization algorithm: GA (Genetic Algorithm), Beam (Beam Search), or MCMC (Markov Chain Monte Carlo).',
     options: [
-      { value: 'ga', label: 'Genetic Algorithm' }, { value: 'beam', label: 'Beam Search' }, { value: 'mcmc', label: 'MCMC' }, { value: 'aco', label: 'Ant Colony Optimization' }, { value: 'sa', label: 'Simulated Annealing' },
+      { value: 'ga', label: 'Genetic Algorithm' }, { value: 'beam', label: 'Beam Search' }, { value: 'mcmc', label: 'MCMC' }, { value: 'aco', label: 'Ant Colony Optimization' }, { value: 'sa', label: 'Simulated Annealing' }, { value: 'lasso', label: 'LASSO/Elastic Net' }, { value: 'ils', label: 'Iterated Local Search' },
       { value: 'rf', label: 'Random Forest' }, { value: 'svm', label: 'SVM' }, { value: 'logistic', label: 'Logistic Regression' },
       { value: 'xgboost', label: 'XGBoost' }, { value: 'lightgbm', label: 'LightGBM' }, { value: 'extra_trees', label: 'Extra Trees' },
       { value: 'adaboost', label: 'AdaBoost' }, { value: 'knn', label: 'KNN' },
@@ -241,6 +243,38 @@ export const PARAM_DEFS = [
   {
     key: 'nmin', label: 'nmin', category: 'mcmc', level: 'basic', inputType: 'number', defaultValue: 10,
     description: 'Minimum features in a model after feature elimination. 0 = keep all features (disable SBS).', min: 0, step: 1,
+  },
+
+  // ===================== LASSO (3) =====================
+  {
+    key: 'alpha_min', label: 'Alpha min', category: 'lasso', level: 'basic', inputType: 'number', defaultValue: 0.001,
+    description: 'Minimum regularization (least regularization = most features).', min: 0.0001, max: 1, step: 0.001,
+  },
+  {
+    key: 'alpha_max', label: 'Alpha max', category: 'lasso', level: 'basic', inputType: 'number', defaultValue: 1.0,
+    description: 'Maximum regularization (most regularization = fewest features).', min: 0.01, max: 10, step: 0.1,
+  },
+  {
+    key: 'n_alphas', label: 'Number of alphas', category: 'lasso', level: 'basic', inputType: 'number', defaultValue: 100,
+    description: 'Steps along the regularization path.', min: 10, max: 500, step: 10,
+  },
+
+  // ===================== ILS (4) =====================
+  {
+    key: 'max_iterations', label: 'Max iterations', category: 'ils', level: 'basic', inputType: 'number', defaultValue: 100,
+    description: 'Number of perturbate-and-local-search cycles.', min: 10, step: 50,
+  },
+  {
+    key: 'perturbation_size', label: 'Perturbation size', category: 'ils', level: 'basic', inputType: 'number', defaultValue: 3,
+    description: 'Number of random moves per perturbation (larger = more exploration).', min: 1, max: 10, step: 1,
+  },
+  {
+    key: 'k_min', label: 'k min', category: 'ils', level: 'basic', inputType: 'number', defaultValue: 1,
+    description: 'Minimum features per model.', min: 1, step: 1,
+  },
+  {
+    key: 'k_max', label: 'k max', category: 'ils', level: 'basic', inputType: 'number', defaultValue: 50,
+    description: 'Maximum features per model.', min: 1, step: 10,
   },
 
   // ===================== SA (5) =====================
