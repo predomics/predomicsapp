@@ -12,6 +12,7 @@ import pandas as pd
 import yaml
 
 from ..core.config import settings as app_settings
+from ..models.schemas import REGRESSION_FIT_FUNCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,9 @@ def write_param_yaml(
         "save_exp": str(Path(output_dir) / "experiment.bin"),
     })
 
+    # When fit is a regression function, disable class-based feature selection
+    is_regression = general.get("fit") in REGRESSION_FIT_FUNCTIONS
+
     data_cfg = config.get("data", {})
 
     cv = _merge("cv", {
@@ -212,6 +216,7 @@ def write_param_yaml(
             "feature_maximal_adj_pvalue": data_cfg.get("feature_maximal_adj_pvalue", 0.05),
             "feature_minimal_feature_value": data_cfg.get("feature_minimal_feature_value", 0.0),
             **({"classes": data_cfg["classes"]} if data_cfg.get("classes") else {}),
+            **({"feature_maximal_adj_pvalue": 1.0} if is_regression else {}),
         },
         "cv": cv,
         "importance": importance,

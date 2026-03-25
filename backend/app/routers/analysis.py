@@ -467,6 +467,7 @@ def _run_job(job_id: str, project_id: str, param_path: str, user_id: str = "") -
             raise RuntimeError(f"Worker exited with code {proc.returncode}: {error_msg}")
 
         # Extract best_auc/best_k from results for fast list_jobs
+        # For regression runs, use the fit value as the primary metric
         best_auc_val = None
         best_k_val = None
         if results_path.exists():
@@ -474,7 +475,10 @@ def _run_job(job_id: str, project_id: str, param_path: str, user_id: str = "") -
                 with open(results_path) as rf:
                     res = json.load(rf)
                 best = res.get("best_individual", {})
-                best_auc_val = best.get("auc")
+                if res.get("regression"):
+                    best_auc_val = best.get("fit")
+                else:
+                    best_auc_val = best.get("auc")
                 best_k_val = best.get("k")
             except Exception:
                 pass

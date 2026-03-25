@@ -41,6 +41,25 @@
                 <label :class="['ds-upload', { 'ds-optional': !slot.required }]">{{ $t('data.upload') }}<input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, slot.role)" /></label>
               </template>
             </div>
+            <!-- Metadata upload slot -->
+            <div class="ds-slot" :class="{ ok: metadataDs, optional: !metadataDs }">
+              <span class="ds-role">{{ $t('data.metadata') }}</span>
+              <span v-if="metadataDs" class="ds-file">{{ metadataDs.filename }}
+                <button class="ds-clear" @click="clearSlot('metadata')" title="Remove"><SvgIcon name="x" :size="12" /></button>
+              </span>
+              <template v-else>
+                <label class="ds-upload ds-optional">{{ $t('data.metadataUpload') }}<input type="file" accept=".tsv,.csv,.txt" @change="e => uploadMetadata(e)" /></label>
+              </template>
+              <div v-if="metadataDs && metadataColumns.length > 0" class="metadata-y-select">
+                <label>{{ $t('data.selectYVariable') }}
+                  <select v-model="selectedYColumn" @change="onYColumnSelected">
+                    <option value="">--</option>
+                    <option v-for="col in metadataColumns" :key="col" :value="col">{{ col }}</option>
+                  </select>
+                </label>
+                <span v-if="selectedYColumn" class="regression-badge">{{ $t('data.regressionMode') }}</span>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -355,6 +374,7 @@ const yTrainDs = computed(() => findFile('ytrain'))
 const xTestDs = computed(() => findFile('xtest'))
 const yTestDs = computed(() => findFile('ytest'))
 const clinicalDs = computed(() => findFile('clinical'))
+const metadataDs = computed(() => findFile('metadata'))
 const dsSlots = computed(() => [
   { role: 'xtrain', label: 'X train', ds: xTrainDs.value, required: true },
   { role: 'ytrain', label: 'y train', ds: yTrainDs.value, required: true },
@@ -364,7 +384,15 @@ const dsSlots = computed(() => [
 ])
 const hasTrainData = computed(() => xTrainDs.value && yTrainDs.value)
 
-onMounted(() => dsStore.fetchDatasets())
+// Metadata column selection for regression
+const metadataColumns = ref([])
+const selectedYColumn = ref(null)
+
+onMounted(() => {
+  dsStore.fetchDatasets()
+  // Load metadata columns if metadata file already present
+  nextTick(() => { if (metadataDs.value) fetchMetadataColumns() })
+})
 
 async function uploadFile(event, role) {
   const file = event.target.files[0]
@@ -400,8 +428,56 @@ async function clearSlot(role) {
   try {
     await dsStore.unassignDataset(file.datasetId, projectId.value)
     await store.fetchOne(projectId.value)
+    if (role === 'metadata') {
+      metadataColumns.value = []
+      selectedYColumn.value = null
+    }
   } catch (e) {
     alert('Unassign failed: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+async function uploadMetadata(event) {
+  const file = event.target.files[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    await axios.post(`/api/projects/${projectId.value}/datasets`, formData, {
+      params: { role: 'metadata' },
+    })
+    await store.fetchOne(projectId.value)
+    await dsStore.fetchDatasets()
+    await fetchMetadataColumns()
+  } catch (e) {
+    alert('Upload failed: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+async function fetchMetadataColumns() {
+  const md = metadataDs.value
+  if (!md) { metadataColumns.value = []; return }
+  try {
+    const { data } = await axios.get(
+      `/api/projects/${projectId.value}/datasets/${md.datasetId}/files/${md.id}/columns`
+    )
+    metadataColumns.value = data.numeric_columns || []
+  } catch {
+    metadataColumns.value = []
+  }
+}
+
+async function onYColumnSelected() {
+  if (!selectedYColumn.value || !metadataDs.value) return
+  try {
+    await axios.post(
+      `/api/projects/${projectId.value}/datasets/${metadataDs.value.datasetId}/files/${metadataDs.value.id}/extract-y`,
+      { column: selectedYColumn.value }
+    )
+    await store.fetchOne(projectId.value)
+    loadAll()
+  } catch (e) {
+    alert('Failed to set y variable: ' + (e.response?.data?.detail || e.message))
   }
 }
 
@@ -1313,6 +1389,36 @@ onMounted(() => {
   transition: background 0.15s;
 }
 .ds-upload:hover { background: var(--bg-card-hover); }
+
+.metadata-y-select {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.metadata-y-select label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+.metadata-y-select select {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  width: 100%;
+}
+.regression-badge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
 .ds-upload.ds-optional { color: var(--text-faint); border-color: var(--border-light); }
 .ds-upload input[type="file"] { display: none; }
 

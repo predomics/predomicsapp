@@ -6,6 +6,8 @@ export const useDatasetStore = defineStore('dataset', () => {
   const datasets = ref([])
   const loading = ref(false)
   const tagSuggestions = ref([])
+  const metadata_columns = ref([])
+  const selected_y_column = ref(null)
 
   async function fetchDatasets(tag = null, search = null, includeArchived = false) {
     loading.value = true
@@ -120,10 +122,26 @@ export const useDatasetStore = defineStore('dataset', () => {
     await axios.delete(`/api/datasets/${datasetId}/assign/${projectId}`)
   }
 
+  async function fetchMetadataColumns(projectId, datasetId, fileId) {
+    try {
+      const { data } = await axios.get(
+        `/api/projects/${projectId}/datasets/${datasetId}/files/${fileId}/columns`
+      )
+      metadata_columns.value = data.numeric_columns || []
+    } catch {
+      metadata_columns.value = []
+    }
+    return metadata_columns.value
+  }
+
+  function setSelectedYColumn(column) {
+    selected_y_column.value = column
+  }
+
   return {
-    datasets, loading, tagSuggestions,
+    datasets, loading, tagSuggestions, metadata_columns, selected_y_column,
     fetchDatasets, fetchTagSuggestions, createGroup, updateDataset, updateTags,
     uploadFile, deleteFile, deleteDataset, archiveDataset, assignDataset, unassignDataset,
-    refreshDataset, scanDataset, updateClassNames,
+    refreshDataset, scanDataset, updateClassNames, fetchMetadataColumns, setSelectedYColumn,
   }
 })

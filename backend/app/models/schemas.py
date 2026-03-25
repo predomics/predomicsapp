@@ -35,6 +35,14 @@ class FitFunction(str, Enum):
     mcc = "mcc"
     f1_score = "f1_score"
     g_mean = "g_mean"
+    # Regression fit functions
+    spearman = "spearman"
+    pearson = "pearson"
+    rmse = "rmse"
+    mutual_information = "mutual_information"
+
+
+REGRESSION_FIT_FUNCTIONS = {"spearman", "pearson", "rmse", "mutual_information"}
 
 
 class JobStatus(str, Enum):
@@ -373,6 +381,12 @@ class DatasetResponse(BaseModel):
 class DatasetUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+
+
+class YFromMetadataRequest(BaseModel):
+    """Request to generate a y file from a metadata column."""
+    column: str
+    file_role: str = "ytrain"
 
 
 class ProjectUpdate(BaseModel):

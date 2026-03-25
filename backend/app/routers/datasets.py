@@ -15,7 +15,7 @@ from ..core.database import get_db
 from ..core.deps import get_current_user
 from ..core.rate_limit import limiter
 from ..models.db_models import User, Dataset, DatasetFile, ProjectDataset, Project, DatasetVersion
-from ..models.schemas import DatasetResponse, DatasetUpdate, DatasetFileRef
+from ..models.schemas import DatasetResponse, DatasetUpdate, DatasetFileRef, YFromMetadataRequest
 from ..services import storage, audit
 
 _log = logging.getLogger(__name__)
@@ -551,6 +551,236 @@ async def preview_file(
         "stats": stats,
         "delimiter": "tab" if delimiter == "\t" else "comma",
         "file_size_bytes": file_path.stat().st_size,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metadata column inspection & y-from-metadata
+# ---------------------------------------------------------------------------
+
+def _find_metadata_file(files) -> Optional[Path]:
+    """Find the metadata file among dataset files."""
+    for f in files:
+        name = f.filename.lower()
+        if f.role == "metadata" or "metadata" in name or "meta" in name:
+            p = Path(f.disk_path)
+            if p.exists():
+                return p
+    return None
+
+
+def _parse_metadata_columns(meta_path: Path) -> list[dict]:
+    """Parse a metadata TSV and return column descriptors with types and stats."""
+    sample = meta_path.read_text(errors="replace")[:4096]
+    delimiter = "\t" if "\t" in sample else ","
+
+    all_rows = []
+    with open(meta_path, "r", errors="replace") as f:
+        reader = csv.reader(f, delimiter=delimiter)
+        for line in reader:
+            all_rows.append(line)
+
+    if len(all_rows) < 2:
+        return []
+
+    header = all_rows[0]
+    data_rows = all_rows[1:]
+    columns = []
+
+    for col_idx, col_name in enumerate(header):
+        if col_idx == 0:
+            continue  # skip sample ID column
+        values = []
+        for row in data_rows:
+            if col_idx < len(row) and row[col_idx].strip():
+                values.append(row[col_idx].strip())
+
+        if not values:
+            continue
+
+        # Try to detect numeric vs categorical
+        numeric_vals = []
+        for v in values:
+            try:
+                numeric_vals.append(float(v))
+            except (ValueError, TypeError):
+                pass
+
+        if len(numeric_vals) > len(values) * 0.8:
+            # Numeric column
+            columns.append({
+                "name": col_name,
+                "type": "numeric",
+                "min": round(min(numeric_vals), 6),
+                "max": round(max(numeric_vals), 6),
+                "n_values": len(numeric_vals),
+                "n_missing": len(data_rows) - len(numeric_vals),
+            })
+        else:
+            # Categorical column
+            unique_vals = sorted(set(values))
+            columns.append({
+                "name": col_name,
+                "type": "categorical",
+                "values": unique_vals[:50],  # cap at 50 unique values
+                "n_unique": len(unique_vals),
+                "n_values": len(values),
+                "n_missing": len(data_rows) - len(values),
+            })
+
+    return columns
+
+
+@router.get("/{dataset_id}/metadata-columns")
+async def get_metadata_columns(
+    dataset_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get metadata column names, types, and summary stats.
+
+    Numeric columns can be used as regression targets, categorical as classification targets.
+    """
+    result = await db.execute(
+        select(Dataset)
+        .where(Dataset.id == dataset_id, Dataset.user_id == user.id)
+        .options(selectinload(Dataset.files))
+    )
+    dataset = result.scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    meta_path = _find_metadata_file(dataset.files)
+    if not meta_path:
+        raise HTTPException(
+            status_code=404,
+            detail="No metadata file found in this dataset. Upload a file with role 'metadata'.",
+        )
+
+    columns = _parse_metadata_columns(meta_path)
+    return {"columns": columns}
+
+
+@router.post("/{dataset_id}/y-from-metadata")
+async def generate_y_from_metadata(
+    dataset_id: str,
+    body: YFromMetadataRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a y file from a metadata column, matching samples with the X file.
+
+    The extracted column is written as a TSV file and registered in the dataset.
+    """
+    result = await db.execute(
+        select(Dataset)
+        .where(Dataset.id == dataset_id, Dataset.user_id == user.id)
+        .options(selectinload(Dataset.files))
+    )
+    dataset = result.scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Find metadata file
+    meta_path = _find_metadata_file(dataset.files)
+    if not meta_path:
+        raise HTTPException(status_code=404, detail="No metadata file found in this dataset.")
+
+    # Find X file to get sample names
+    x_role = "xtrain" if body.file_role == "ytrain" else "xtest"
+    x_file = None
+    for f in dataset.files:
+        if f.role == x_role:
+            x_file = f
+            break
+    if not x_file or not Path(x_file.disk_path).exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"No {x_role} file found. Upload an X file first.",
+        )
+
+    # Read metadata TSV
+    meta_sample = meta_path.read_text(errors="replace")[:4096]
+    meta_delim = "\t" if "\t" in meta_sample else ","
+    meta_rows = []
+    with open(meta_path, "r", errors="replace") as f:
+        reader = csv.reader(f, delimiter=meta_delim)
+        for line in reader:
+            meta_rows.append(line)
+
+    if len(meta_rows) < 2:
+        raise HTTPException(status_code=400, detail="Metadata file is empty or has no data rows.")
+
+    meta_header = meta_rows[0]
+    if body.column not in meta_header:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column '{body.column}' not found in metadata. Available: {meta_header[1:]}",
+        )
+    col_idx = meta_header.index(body.column)
+
+    # Build sample -> value map from metadata (first column = sample ID)
+    meta_map = {}
+    for row in meta_rows[1:]:
+        if len(row) > col_idx and row[0].strip() and row[col_idx].strip():
+            meta_map[row[0].strip()] = row[col_idx].strip()
+
+    # Read X file to get sample names (column headers if features_in_rows, else first column)
+    x_sample = Path(x_file.disk_path).read_text(errors="replace")[:4096]
+    x_delim = "\t" if "\t" in x_sample else ","
+    with open(x_file.disk_path, "r", errors="replace") as f:
+        x_reader = csv.reader(f, delimiter=x_delim)
+        x_header = next(x_reader)
+
+    # Assume features in rows: sample names are column headers (skip first)
+    x_sample_names = [s.strip() for s in x_header[1:]]
+
+    # Match samples
+    matched = {}
+    missing = []
+    for sample in x_sample_names:
+        if sample in meta_map:
+            matched[sample] = meta_map[sample]
+        else:
+            missing.append(sample)
+
+    if not matched:
+        raise HTTPException(
+            status_code=400,
+            detail="No matching samples between X file and metadata.",
+        )
+
+    # Write y file as TSV: sample_id\tvalue
+    lines = ["sample_id\t" + body.column]
+    for sample in x_sample_names:
+        if sample in matched:
+            lines.append(f"{sample}\t{matched[sample]}")
+    y_content = "\n".join(lines) + "\n"
+
+    # Register the file in the dataset
+    filename = f"{body.file_role}_{body.column}.tsv"
+    ds_file = DatasetFile(
+        dataset_id=dataset.id,
+        filename=filename,
+        role=body.file_role,
+        disk_path="",
+    )
+    db.add(ds_file)
+    await db.flush()
+
+    disk_path = storage.save_user_dataset_file(user.id, ds_file.id, filename, y_content.encode("utf-8"))
+    ds_file.disk_path = disk_path
+
+    await _create_version_snapshot(db, dataset_id, user.id, note=f"Generate {filename} from metadata")
+
+    # Auto-scan if xtrain + ytrain now present
+    await _try_auto_scan(db, dataset)
+
+    return {
+        "file": DatasetFileRef(id=ds_file.id, filename=ds_file.filename, role=ds_file.role).model_dump(),
+        "matched_samples": len(matched),
+        "missing_samples": len(missing),
+        "total_x_samples": len(x_sample_names),
     }
 
 

@@ -642,7 +642,11 @@
     "nNeighbors": "Neighbors",
     "minDist": "Min distance",
     "top": "Top",
-    "loadingData": "Loading data..."
+    "loadingData": "Loading data...",
+    "metadata": "Metadata (optional)",
+    "selectYVariable": "Select y variable",
+    "regressionMode": "Regression mode",
+    "metadataUpload": "Upload metadata"
   },
   "dataExplore": {
     "summary": "Summary",

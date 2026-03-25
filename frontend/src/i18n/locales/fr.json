@@ -642,7 +642,11 @@
     "nNeighbors": "Voisins",
     "minDist": "Distance min.",
     "top": "Top",
-    "loadingData": "Chargement des données..."
+    "loadingData": "Chargement des données...",
+    "metadata": "Métadonnées (optionnel)",
+    "selectYVariable": "Sélectionner la variable y",
+    "regressionMode": "Mode régression",
+    "metadataUpload": "Importer les métadonnées"
   },
   "dataExplore": {
     "summary": "Résumé",

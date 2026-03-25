@@ -430,10 +430,14 @@ def main():
     param_path = sys.argv[1]
     results_path = sys.argv[2]
 
+    REGRESSION_FITS = {"spearman", "pearson", "rmse", "mutual_information"}
+
     # Check if this is a sklearn algorithm
     with open(param_path) as _f:
         _param_yaml = yaml.safe_load(_f)
     algo = _param_yaml.get("general", {}).get("algo", "ga")
+    fit_function = _param_yaml.get("general", {}).get("fit", "auc")
+    is_regression = fit_function in REGRESSION_FITS
 
     from .sklearn_runner import is_sklearn_algo
     if is_sklearn_algo(algo):
@@ -573,6 +577,13 @@ def main():
     }
     if stability_data is not None:
         results["stability"] = stability_data
+
+    # Store regression metadata when using a regression fit function
+    if is_regression:
+        results["regression"] = {
+            "fit_function": fit_function,
+            "best_fit": metrics.get("fit"),
+        }
 
     # Clinical integration (if enabled)
     clinical_cfg = _param_yaml.get("clinical", {})

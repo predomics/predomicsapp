@@ -50,6 +50,8 @@ export const PARAM_DEFS = [
       { value: 'auc', label: 'AUC' }, { value: 'mcc', label: 'MCC' }, { value: 'f1_score', label: 'F1 Score' },
       { value: 'sensitivity', label: 'Sensitivity' }, { value: 'specificity', label: 'Specificity' },
       { value: 'g_mean', label: 'Geometric Mean' }, { value: 'npv', label: 'NPV' }, { value: 'ppv', label: 'PPV' },
+      { value: 'spearman', label: 'Spearman correlation' }, { value: 'pearson', label: 'Pearson correlation' },
+      { value: 'rmse', label: 'RMSE' }, { value: 'mutual_information', label: 'Mutual Information' },
     ],
   },
   {
