@@ -122,6 +122,9 @@ def write_param_yaml(
     is_regression = general.get("fit") in REGRESSION_FIT_FUNCTIONS
 
     data_cfg = config.get("data", {})
+    # Feature selection params may come from a separate "feature_selection" category in the UI
+    fs_cfg = config.get("feature_selection", {})
+    data_cfg = {**data_cfg, **fs_cfg}  # feature_selection overrides data defaults
 
     cv = _merge("cv", {
         "outer_folds": 5, "inner_folds": 5, "overfit_penalty": 0.0,

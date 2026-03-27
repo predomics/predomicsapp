@@ -9,6 +9,7 @@
 
 export const CATEGORIES = [
   { id: 'general', label: 'General', colorVar: '--cat-general' },
+  { id: 'feature_selection', label: 'Feature Selection', colorVar: '--cat-feature-selection' },
   { id: 'ga', label: 'Genetic Algorithm', colorVar: '--cat-ga', algoFilter: 'ga' },
   { id: 'beam', label: 'Beam Search', colorVar: '--cat-beam', algoFilter: 'beam' },
   { id: 'mcmc', label: 'MCMC', colorVar: '--cat-mcmc', algoFilter: 'mcmc' },
@@ -133,6 +134,29 @@ export const PARAM_DEFS = [
   {
     key: 'display_colorful', label: 'Colorful output', category: 'general', level: 'advanced', inputType: 'checkbox', defaultValue: true,
     description: 'Enable ANSI color codes in the console output for easier reading.',
+  },
+
+  // ===================== Feature Selection (4) =====================
+  {
+    key: 'feature_selection_method', label: 'Selection method', category: 'feature_selection', level: 'basic', inputType: 'select', defaultValue: 'wilcoxon',
+    description: 'Statistical test for feature pre-filtering. Wilcoxon (non-parametric, recommended for metagenomics), Student t-test (parametric), or Bayesian Fisher (Bayes factor). Only applies to classification — regression uses prevalence-only filtering.',
+    options: [
+      { value: 'wilcoxon', label: 'Wilcoxon rank-sum' },
+      { value: 'studentt', label: "Student's t-test" },
+      { value: 'bayesian_fisher', label: 'Bayesian Fisher' },
+    ],
+  },
+  {
+    key: 'feature_minimal_prevalence_pct', label: 'Min prevalence %', category: 'feature_selection', level: 'basic', inputType: 'number', defaultValue: 10,
+    description: 'Minimum percentage of samples in any class where the feature must be non-zero. Features below this threshold are discarded before statistical testing. Higher values (30-50%) keep only common features; lower values (5%) retain rare features that may be specific to one class.', min: 0, max: 100, step: 5,
+  },
+  {
+    key: 'feature_maximal_adj_pvalue', label: 'Max adj. p-value (FDR)', category: 'feature_selection', level: 'basic', inputType: 'number', defaultValue: 0.05,
+    description: 'Benjamini-Hochberg FDR alpha threshold. Features with adjusted p-value above this are removed. Adaptive: if fewer than 10 features pass, the threshold relaxes automatically (0.05 → 0.1 → 0.2 → 0.5) with warnings in the log. Set to 1.0 to disable FDR filtering entirely.', min: 0, max: 1, step: 0.01,
+  },
+  {
+    key: 'feature_minimal_feature_value', label: 'Min feature value', category: 'feature_selection', level: 'advanced', inputType: 'number', defaultValue: 0,
+    description: 'Features whose mean absolute value is below this threshold are discarded. Useful for removing near-zero noise features. Default 0 keeps all.', min: 0, step: 0.0001,
   },
 
   // ===================== GA (17) =====================
