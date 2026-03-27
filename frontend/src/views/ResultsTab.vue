@@ -27,7 +27,7 @@
           <div v-for="dj in g.jobs" :key="dj.job_id" class="dup-job" :class="{ 'dup-keep': dj.keep }">
             <span class="dup-name">{{ dj.name || dj.job_id.slice(0, 8) }}</span>
             <span class="status-badge" :class="dj.status">{{ dj.status }}</span>
-            <span v-if="dj.best_auc != null">AUC {{ dj.best_auc.toFixed(4) }}</span>
+            <span v-if="dj.best_auc != null">{{ fitMetricLabel }} {{ dj.best_auc.toFixed(4) }}</span>
             <span class="dup-tag" v-if="dj.keep">{{ $t('results.keep') }}</span>
             <span class="dup-tag dup-remove" v-else>{{ $t('results.remove') }}</span>
           </div>
@@ -39,7 +39,7 @@
             <tr>
               <th class="col-name" @click="toggleJobSort('name')">{{ $t('results.colName') }} <span v-if="jobSortKey === 'name'">{{ jobSortAsc ? '▲' : '▼' }}</span></th>
               <th class="col-status" @click="toggleJobSort('status')">{{ $t('results.colStatus') }} <span v-if="jobSortKey === 'status'">{{ jobSortAsc ? '▲' : '▼' }}</span></th>
-              <th class="col-auc" @click="toggleJobSort('best_auc')">{{ $t('results.colAuc') }} <span v-if="jobSortKey === 'best_auc'">{{ jobSortAsc ? '▲' : '▼' }}</span></th>
+              <th class="col-auc" @click="toggleJobSort('best_auc')">{{ isRegressionJob ? $t('results.fitMetric') : $t('results.colAuc') }} <span v-if="jobSortKey === 'best_auc'">{{ jobSortAsc ? '▲' : '▼' }}</span></th>
               <th class="col-k" @click="toggleJobSort('best_k')">{{ $t('results.colK') }} <span v-if="jobSortKey === 'best_k'">{{ jobSortAsc ? '▲' : '▼' }}</span></th>
               <th class="col-lang">{{ $t('results.colLanguage') }}</th>
               <th class="col-pop">{{ $t('results.colPop') }}</th>
@@ -189,7 +189,7 @@
       <div class="summary-grid">
         <div class="stat-card">
           <div class="stat-value">{{ detail.best_auc?.toFixed(4) || '—' }}</div>
-          <div class="stat-label">{{ $t('results.bestAuc') }}</div>
+          <div class="stat-label">{{ isRegressionJob ? $t('results.fitMetric') : $t('results.bestAuc') }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ detail.best_k || '—' }}</div>
@@ -681,7 +681,7 @@
             <input type="checkbox" :value="j.job_id" v-model="compareJobIds" />
             <span class="job-check-label">
               {{ j.name || j.job_id.slice(0, 8) }}
-              <span v-if="j.best_auc" class="job-check-auc">AUC {{ j.best_auc.toFixed(4) }}</span>
+              <span v-if="j.best_auc" class="job-check-auc">{{ fitMetricLabel }} {{ j.best_auc.toFixed(4) }}</span>
             </span>
           </label>
         </div>
@@ -1451,6 +1451,16 @@ const selectedJobInfo = computed(() => {
   return jobs.value.find(j => j.job_id === selectedJobId.value) || null
 })
 
+// Regression mode detection for the selected job
+const REGRESSION_FITS = new Set(['spearman', 'pearson', 'rmse', 'mutual_information'])
+const isRegressionJob = computed(() => {
+  return fullResults.value?.regression === true
+})
+const fitMetricLabel = computed(() => {
+  if (!isRegressionJob.value) return 'AUC'
+  return t('results.correlation')
+})
+
 const failedJobLog = ref('')
 
 // Console log viewer state
@@ -1914,7 +1924,7 @@ const bestMetrics = computed(() => {
   if (!detail.value?.best_individual) return {}
   const b = detail.value.best_individual
   return {
-    AUC: b.auc,
+    [isRegressionJob.value ? fitMetricLabel.value : 'AUC']: b.auc,
     Fit: b.fit,
     Accuracy: b.accuracy,
     Sensitivity: b.sensitivity,
@@ -2022,13 +2032,14 @@ async function renderConvergenceChart() {
   const hasTest = generationTracking.value.some(g => g.best_auc_test != null)
   const testAuc = hasTest ? generationTracking.value.map(g => g.best_auc_test) : null
 
+  const metricName = isRegressionJob.value ? fitMetricLabel.value : 'AUC'
   const traces = [{
-    x: gens, y: trainAuc, name: 'Train AUC', type: 'scatter', mode: 'lines+markers',
+    x: gens, y: trainAuc, name: `Train ${metricName}`, type: 'scatter', mode: 'lines+markers',
     line: { color: c.class0, width: 2 }, marker: { size: 4 },
   }]
   if (testAuc) {
     traces.push({
-      x: gens, y: testAuc, name: 'Test AUC', type: 'scatter', mode: 'lines+markers',
+      x: gens, y: testAuc, name: `Test ${metricName}`, type: 'scatter', mode: 'lines+markers',
       line: { color: c.danger, width: 2, dash: 'dash' }, marker: { size: 4 },
     })
   }
@@ -2036,7 +2047,7 @@ async function renderConvergenceChart() {
   const allValues = [...trainAuc, ...(testAuc || [])]
   Plotly.newPlot(convergenceChartEl.value, traces, chartLayout({
     xaxis: { title: { text: 'Generation', font: { color: c.text } }, dtick: Math.max(1, Math.floor(gens.length / 10)), gridcolor: c.grid, color: c.text },
-    yaxis: { title: { text: 'AUC', font: { color: c.text } }, range: [Math.max(0, Math.min(...allValues) - 0.05), Math.min(1, Math.max(...allValues) + 0.02)], gridcolor: c.grid, color: c.text },
+    yaxis: { title: { text: metricName, font: { color: c.text } }, range: [Math.max(0, Math.min(...allValues) - 0.05), Math.min(1, Math.max(...allValues) + 0.02)], gridcolor: c.grid, color: c.text },
     legend: { orientation: 'h', y: 1.12, font: { color: c.text } },
     height: 280,
     margin: { t: 20, b: 50, l: 60, r: 20 },
@@ -2073,8 +2084,9 @@ async function renderFitEvolutionChart() {
   const fits = generationTracking.value.map(g => g.best_fit)
   const aucs = generationTracking.value.map(g => g.best_auc)
 
+  const aucLabel = isRegressionJob.value ? fitMetricLabel.value : 'AUC'
   Plotly.newPlot(fitEvolutionChartEl.value, [
-    { x: gens, y: aucs, name: 'AUC', type: 'scatter', mode: 'lines', line: { color: c.class0, width: 2 } },
+    { x: gens, y: aucs, name: aucLabel, type: 'scatter', mode: 'lines', line: { color: c.class0, width: 2 } },
     { x: gens, y: fits, name: 'Fit', type: 'scatter', mode: 'lines', line: { color: c.warn, width: 2, dash: 'dot' } },
   ], chartLayout({
     xaxis: { title: { text: 'Generation', font: { color: c.text } }, dtick: Math.max(1, Math.floor(gens.length / 10)), gridcolor: c.grid, color: c.text },
@@ -2142,7 +2154,7 @@ async function renderRadarChart() {
 
   const c = chartColors()
   const b = detail.value.best_individual
-  const categories = ['AUC', 'Accuracy', 'Sensitivity', 'Specificity']
+  const categories = [isRegressionJob.value ? fitMetricLabel.value : 'AUC', 'Accuracy', 'Sensitivity', 'Specificity']
   const values = [b.auc, b.accuracy, b.sensitivity, b.specificity]
 
   Plotly.newPlot(radarChartEl.value, [{
@@ -2565,7 +2577,7 @@ async function renderMetricsByType() {
   if (!metricsByTypeEl.value || filteredPopulation.value.length === 0) return
 
   const c = chartColors()
-  // Group AUC by language
+  // Group metric by language
   const byLang = {}
   for (const ind of filteredPopulation.value) {
     const lang = ind.metrics?.language || 'unknown'
@@ -2591,7 +2603,7 @@ async function renderMetricsByType() {
   }))
 
   Plotly.newPlot(metricsByTypeEl.value, traces, chartLayout({
-    yaxis: { title: { text: 'AUC', font: { color: c.text } }, range: [0, 1.05], gridcolor: c.grid, color: c.text },
+    yaxis: { title: { text: isRegressionJob.value ? fitMetricLabel.value : 'AUC', font: { color: c.text } }, range: [0, 1.05], gridcolor: c.grid, color: c.text },
     xaxis: { color: c.text },
     height: 300,
     margin: { t: 20, b: 50, l: 50, r: 20 },
@@ -2861,7 +2873,7 @@ async function renderJuryComparison() {
   const b = detail.value.best_individual
   const j = juryData.value
   const metricNames = ['auc', 'accuracy', 'sensitivity', 'specificity']
-  const labels = ['AUC', 'Accuracy', 'Sensitivity', 'Specificity']
+  const labels = [isRegressionJob.value ? fitMetricLabel.value : 'AUC', 'Accuracy', 'Sensitivity', 'Specificity']
 
   const traces = [
     {
@@ -3603,7 +3615,7 @@ async function renderComparisonBar() {
 
   const c = chartColors()
   const metricNames = ['auc', 'accuracy', 'sensitivity', 'specificity']
-  const labels = ['AUC', 'Accuracy', 'Sensitivity', 'Specificity']
+  const labels = [isRegressionJob.value ? fitMetricLabel.value : 'AUC', 'Accuracy', 'Sensitivity', 'Specificity']
 
   const traces = compareData.value.map((job, i) => {
     const col = JOB_COLORS[i % JOB_COLORS.length]
@@ -3647,7 +3659,7 @@ async function renderComparisonConvergence() {
 
   Plotly.newPlot(comparisonConvergenceEl.value, traces, chartLayout({
     xaxis: { title: { text: 'Generation', font: { color: c.text } }, gridcolor: c.grid, color: c.text },
-    yaxis: { title: { text: 'Best AUC', font: { color: c.text } }, gridcolor: c.grid, color: c.text },
+    yaxis: { title: { text: isRegressionJob.value ? `Best ${fitMetricLabel.value}` : 'Best AUC', font: { color: c.text } }, gridcolor: c.grid, color: c.text },
     legend: { orientation: 'h', y: 1.12, font: { color: c.text } },
     height: 300,
     margin: { t: 30, b: 50, l: 60, r: 20 },
@@ -4033,7 +4045,7 @@ async function renderBasketMetricsChart() {
   if (!basketMetricsChartEl.value || basketItems.value.length < 2) return
   const c = chartColors()
   const metricNames = ['auc', 'accuracy', 'sensitivity', 'specificity']
-  const labels = ['AUC', 'Accuracy', 'Sensitivity', 'Specificity']
+  const labels = [isRegressionJob.value ? fitMetricLabel.value : 'AUC', 'Accuracy', 'Sensitivity', 'Specificity']
   const traces = basketItems.value.map((item, i) => {
     const col = JOB_COLORS[i % JOB_COLORS.length]
     return {

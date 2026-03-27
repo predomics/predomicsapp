@@ -189,6 +189,8 @@
     "pythonNotebook": "Notebook Python (.ipynb)",
     "rNotebook": "Notebook R (.Rmd)",
     "bestAuc": "Meilleur AUC",
+    "fitMetric": "Métrique d'ajustement",
+    "correlation": "Corrélation",
     "featuresK": "Variables (k)",
     "time": "Temps",
     "generations": "Générations",
@@ -728,7 +730,9 @@
     "launchJobs": "Lancer {n} tâches",
     "launchAnalysis": "Lancer l'analyse",
     "resetDefaults": "Réinitialiser",
-    "uploadFirst": "Importez d'abord les jeux de données X et y d'entraînement dans l'onglet Données"
+    "uploadFirst": "Importez d'abord les jeux de données X et y d'entraînement dans l'onglet Données",
+    "regressionMode": "Mode régression",
+    "votingDisabledRegression": "Le vote ne s'applique pas en régression"
   },
   "projectDashboard": {
     "datasets": "jeux de données",

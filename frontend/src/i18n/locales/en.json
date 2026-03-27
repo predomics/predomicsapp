@@ -189,6 +189,8 @@
     "pythonNotebook": "Python Notebook (.ipynb)",
     "rNotebook": "R Notebook (.Rmd)",
     "bestAuc": "Best AUC",
+    "fitMetric": "Fit metric",
+    "correlation": "Correlation",
     "featuresK": "Features (k)",
     "time": "Time",
     "generations": "Generations",
@@ -728,7 +730,9 @@
     "launchJobs": "Launch {n} Jobs",
     "launchAnalysis": "Launch Analysis",
     "resetDefaults": "Reset defaults",
-    "uploadFirst": "Upload X and y training datasets in the Data tab first"
+    "uploadFirst": "Upload X and y training datasets in the Data tab first",
+    "regressionMode": "Regression mode",
+    "votingDisabledRegression": "Voting is not applicable for regression"
   },
   "projectDashboard": {
     "datasets": "datasets",

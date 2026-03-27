@@ -11,6 +11,12 @@
         <span v-if="templateMsg" class="template-msg">{{ templateMsg }}</span>
       </div>
 
+      <!-- Regression mode indicator -->
+      <div v-if="isRegression" class="regression-badge">
+        <span class="regression-badge-label">{{ $t('parameters.regressionMode') }}</span>
+        <span class="regression-badge-hint">{{ $t('parameters.votingDisabledRegression') }}</span>
+      </div>
+
       <div class="settings-grid">
         <!-- Left column: General, CV, Data filtering summary -->
         <div class="settings-col">
@@ -217,6 +223,10 @@ const paramsByCategory = computed(() => {
   return map
 })
 
+// Regression mode detection
+const REGRESSION_FITS = new Set(['spearman', 'pearson', 'rmse', 'mutual_information'])
+const isRegression = computed(() => REGRESSION_FITS.has(cfg.general.fit))
+
 // Sklearn algorithms (no gpredomics-specific options)
 const SKLEARN_ALGOS = new Set(['rf', 'svm', 'logistic', 'xgboost', 'lightgbm', 'extra_trees', 'adaboost', 'knn'])
 const isSklearn = computed(() => SKLEARN_ALGOS.has(cfg.general.algo))
@@ -229,6 +239,8 @@ const GPREDOMICS_GENERAL_KEYS = new Set(['language', 'data_type', 'epsilon', 'k_
 // Visibility logic for conditional categories
 function isCategoryVisible(cat) {
   if (cat.gpredomicsOnly && isSklearn.value) return false
+  // Hide voting category in regression mode (voting is not applicable)
+  if (cat.id === 'voting' && isRegression.value) return false
   if (cat.algoFilter) return cfg.general.algo === cat.algoFilter
   if (cat.enabledBy) {
     const [section, key] = cat.enabledBy.split('.')
@@ -240,6 +252,8 @@ function isCategoryVisible(cat) {
 // Visibility logic for individual params (hide gpredomics-specific general params for sklearn)
 function isParamVisible(paramDef) {
   if (isSklearn.value && paramDef.category === 'general' && GPREDOMICS_GENERAL_KEYS.has(paramDef.key)) return false
+  // Hide threshold CI params in regression mode (no classification threshold)
+  if (isRegression.value && paramDef.key.startsWith('threshold_ci')) return false
   return true
 }
 
@@ -584,6 +598,27 @@ async function launchBatch() {
 .batch-result a {
   color: var(--accent);
   font-weight: 600;
+}
+
+/* Regression mode badge */
+.regression-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  background: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 6px;
+}
+.regression-badge-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1565c0;
+}
+.regression-badge-hint {
+  font-size: 0.75rem;
+  color: #42a5f5;
 }
 
 @media (max-width: 900px) {
