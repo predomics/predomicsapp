@@ -57,7 +57,7 @@ async def list_samples():
     """List available sample datasets."""
     result = []
     for key, info in SAMPLE_DATASETS.items():
-        sample_dir = settings.sample_dir if key == "qin2014_cirrhosis" else settings.data_dir / key
+        sample_dir = settings.samples_dir / key
         available = sample_dir.exists()
         result.append({
             "id": key,
@@ -84,7 +84,7 @@ async def load_sample(
         raise HTTPException(status_code=404, detail="Sample dataset not found")
 
     sample = SAMPLE_DATASETS[sample_id]
-    sample_dir = settings.sample_dir if sample_id == "qin2014_cirrhosis" else settings.data_dir / sample_id
+    sample_dir = settings.samples_dir / sample_id
 
     if not sample_dir.exists():
         raise HTTPException(status_code=404, detail="Sample data files not found on disk")

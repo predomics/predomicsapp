@@ -9,10 +9,11 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Storage paths
-    data_dir: Path = Path("data")
+    data_dir: Path = Path("data")                     # user workspace (persistent volume)
     upload_dir: Path = Path("data/uploads")
     project_dir: Path = Path("data/projects")
-    sample_dir: Path = Path("data/qin2014_cirrhosis")
+    samples_dir: Path = Path("samples")               # bundled demo datasets (read-only, baked in image)
+    sample_dir: Path = Path("samples/qin2014_cirrhosis")  # legacy compat
 
     # gpredomics defaults
     default_algo: str = "ga"

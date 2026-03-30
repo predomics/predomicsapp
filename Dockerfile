@@ -64,11 +64,11 @@ COPY ${APP_DIR}/backend/ backend/
 # Copy built frontend into static directory
 COPY --from=frontend-builder /app/frontend/dist backend/app/static/
 
-# Copy demo datasets
-COPY ${APP_DIR}/data/ data/
+# Copy bundled demo datasets (read-only, baked in image)
+COPY ${APP_DIR}/samples/ samples/
 
-# Create directories for runtime data
-RUN mkdir -p data/uploads data/projects
+# Create directories for user workspace (persistent volume mount point)
+RUN mkdir -p data/uploads data/projects data/datasets
 
 EXPOSE 8000
 
