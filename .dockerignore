@@ -1,12 +1,7 @@
-# Docker build context is the parent directory (contains gpredomics/, gpredomicspy/, predomicsapp/)
-# This file is copied to the root by CI
-*
-!gpredomics/
-!gpredomicspy/
-!predomicsapp/
-gpredomics/target/
-gpredomicspy/target/
-predomicsapp/backend/.venv/
-predomicsapp/frontend/node_modules/
-**/__pycache__/
-**/.git/
+# Exclude build artifacts and dev files only
+**/.git
+**/node_modules
+**/__pycache__
+**/target
+**/.venv
+**/*.pyc
