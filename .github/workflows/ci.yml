@@ -68,7 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: predomicsapp-web
+          path: predomicsapp
 
       - name: Checkout gpredomics (Rust ML engine)
         uses: actions/checkout@v4
@@ -83,14 +83,14 @@ jobs:
           path: gpredomicspy
 
       - name: Copy .dockerignore to build context root
-        run: cp predomicsapp-web/.dockerignore .dockerignore 2>/dev/null || true
+        run: cp predomicsapp/.dockerignore .dockerignore 2>/dev/null || true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image
         run: |
-          docker build -t predomicsapp-web:latest -f predomicsapp-web/Dockerfile .
+          docker build -t predomicsapp:latest -f predomicsapp/Dockerfile .
 
       - name: Test Docker image startup
         run: |
@@ -112,7 +112,7 @@ jobs:
           # Start app with postgres connection
           docker run -d --name test-app --network test-net -p 8000:8000 \
             -e PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@test-db:5432/predomics \
-            predomicsapp-web:latest
+            predomicsapp:latest
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8000/health; then
               echo "Health check passed on attempt $i"
@@ -137,11 +137,11 @@ jobs:
           node-version: "20"
 
       - name: Install E2E dependencies
-        working-directory: predomicsapp-web
+        working-directory: predomicsapp
         run: npm ci
 
       - name: Install Playwright browser
-        working-directory: predomicsapp-web
+        working-directory: predomicsapp
         run: npx playwright install chromium
 
       - name: Start app for E2E
@@ -162,7 +162,7 @@ jobs:
           docker run -d --name e2e-app --network e2e-net -p 8001:8000 \
             -e PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@e2e-db:5432/predomics \
             -e PREDOMICS_SECRET_KEY=e2e-test-secret \
-            predomicsapp-web:latest
+            predomicsapp:latest
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8001/health; then
               echo "App ready on attempt $i"
@@ -173,7 +173,7 @@ jobs:
           done
 
       - name: Run E2E tests
-        working-directory: predomicsapp-web
+        working-directory: predomicsapp
         run: npm run test:e2e
         env:
           BASE_URL: http://localhost:8001

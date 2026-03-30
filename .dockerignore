@@ -1,14 +1,12 @@
-# Only include gpredomics, gpredomicspy and predomicsapp-web for Docker build
+# Docker build context is the parent directory (contains gpredomics/, gpredomicspy/, predomicsapp/)
+# This file is copied to the root by CI
 *
 !gpredomics/
 !gpredomicspy/
-!predomicsapp-web/
-
-# Exclude unnecessary subdirectories
+!predomicsapp/
 gpredomics/target/
 gpredomicspy/target/
-predomicsapp-web/backend/.venv/
-predomicsapp-web/frontend/node_modules/
-predomicsapp-web/backend/data/
+predomicsapp/backend/.venv/
+predomicsapp/frontend/node_modules/
 **/__pycache__/
 **/.git/
