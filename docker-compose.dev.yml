@@ -30,6 +30,7 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./data:/app/data
+      - ./samples:/app/samples
     environment:
       - PREDOMICS_DEBUG=true
       - PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@db:5432/predomics
