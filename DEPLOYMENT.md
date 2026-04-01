@@ -19,7 +19,7 @@
 ### Development
 
 ```bash
-git clone <repo-url> && cd predomics_suite/predomicsapp
+git clone https://github.com/predomics/predomicsapp.git && cd predomicsapp
 docker compose up -d --build
 ```
 
@@ -66,11 +66,56 @@ All settings use the `PREDOMICS_` prefix (via pydantic-settings).
 | `PREDOMICS_DATA_DIR` | `data` | Root directory for all persistent data. |
 | `PREDOMICS_UPLOAD_DIR` | `data/uploads` | Directory for uploaded dataset files. |
 | `PREDOMICS_PROJECT_DIR` | `data/projects` | Directory for project/job result files. |
-| `PREDOMICS_SAMPLE_DIR` | `data/qin2014_cirrhosis` | Demo dataset directory. |
+| `PREDOMICS_SAMPLES_DIR` | `samples` | Bundled demo datasets directory (baked in image). |
+| `PREDOMICS_SAMPLE_DIR` | `samples/qin2014_cirrhosis` | Default demo dataset for backward compatibility. |
 | `PREDOMICS_DEBUG` | `false` | Enable debug logging. |
 | `PREDOMICS_CORS_ORIGINS` | `["http://localhost:5173"]` | Allowed CORS origins (JSON array). |
 | `PREDOMICS_ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` | JWT token expiry (24 hours). |
 | `PREDOMICS_DEFAULT_THREAD_NUMBER` | `4` | Default thread count for gpredomics. |
+
+
+### Docker Build Arguments
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `GPREDOMICS_REF` | `main` | Git ref (tag/branch) for gpredomics. Use `v1.0.0` for pinned releases. |
+| `GPREDOMICSPY_REF` | `main` | Git ref for gpredomicspy Python bindings. |
+
+```bash
+# Build with pinned versions
+docker compose build --build-arg GPREDOMICS_REF=v1.0.0 --build-arg GPREDOMICSPY_REF=main
+```
+
+### Dependency Locking
+
+| Layer | Loose deps | Lock file | How to update |
+|-------|-----------|-----------|---------------|
+| **Rust** | `Cargo.toml` | `Cargo.lock` | `cargo update` |
+| **Python** | `pyproject.toml` | `requirements.lock` | `pip freeze > requirements.lock` |
+| **JS** | `package.json` | `package-lock.json` | `npm update` |
+| **Rust toolchain** | — | Pinned to `1.84.0` | Update in Dockerfile + CI |
+| **Python runtime** | — | Pinned to `3.11` | Update Dockerfile base image |
+
+### Architecture
+
+```
+predomicsapp/              ← self-contained, no parent directory needed
+├── Dockerfile             ← multi-stage: frontend + rust-builder + runtime
+├── docker-compose.yml     ← production (context: .)
+├── docker-compose.dev.yml ← development with hot-reload
+├── backend/               ← FastAPI + gpredomicspy
+├── frontend/              ← Vue.js 3
+├── samples/               ← bundled demo datasets (baked in image, read-only)
+│   ├── qin2014_cirrhosis/
+│   ├── derosa2025_ici/
+│   └── wetlab_protocol/
+└── data/                  ← user workspace (persistent volume mount)
+    ├── projects/
+    ├── datasets/
+    └── uploads/
+```
+
+gpredomics and gpredomicspy are **cloned from GitHub during Docker build** — no sibling directories needed.
 
 ---
 
