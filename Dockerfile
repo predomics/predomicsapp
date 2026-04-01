@@ -50,9 +50,9 @@ WORKDIR /app
 COPY --from=rust-builder /build/wheels/*.whl /tmp/wheels/
 RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
-# Install Python backend dependencies
-COPY backend/pyproject.toml backend/
-RUN pip install --no-cache-dir "backend/[ml]"
+# Install Python backend dependencies (locked versions)
+COPY backend/requirements.lock /tmp/requirements.lock
+RUN pip install --no-cache-dir -r /tmp/requirements.lock && rm /tmp/requirements.lock
 
 # Copy backend code
 COPY backend/ backend/
