@@ -16,7 +16,7 @@ FROM python:3.11-slim AS rust-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential curl git pkg-config libssl-dev && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.84.0 && \
     rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.cargo/bin:${PATH}"
 
