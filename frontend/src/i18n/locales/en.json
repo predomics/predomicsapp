@@ -689,6 +689,7 @@
     "pcoa": "PCoA",
     "pcoaTitle": "Principal Coordinates Analysis (PCoA)",
     "pcoaMetric": "Distance metric",
+    "transform": "Transform",
     "pcoaDimensions": "Dimensions",
     "ordinationMethod": "Method",
     "perplexity": "Perplexity",

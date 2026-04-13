@@ -689,6 +689,7 @@
     "pcoa": "ACoP",
     "pcoaTitle": "Analyse en Coordonnées Principales (ACoP)",
     "pcoaMetric": "Métrique de distance",
+    "transform": "Transformation",
     "pcoaDimensions": "Dimensions",
     "ordinationMethod": "Méthode",
     "perplexity": "Perplexité",

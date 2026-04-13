@@ -198,6 +198,14 @@
               <input type="checkbox" v-model="abundanceLogScale" @change="renderAbundanceChart()" />
               Log scale
             </label>
+            <label class="toggle-label">
+              <span>{{ $t('data.transform') }}</span>
+              <select v-model="dataTransform" @change="loadAbundance">
+                <option value="raw">Raw</option>
+                <option value="log">Log</option>
+                <option value="zscore">Z-score</option>
+              </select>
+            </label>
           </div>
           <div ref="abundanceChartEl" class="plotly-chart plotly-chart-tall"></div>
           <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see abundance.</p>
@@ -233,6 +241,14 @@
                 <option value="euclidean">{{ $t('data.euclidean') }}</option>
                 <option value="jaccard">Jaccard</option>
                 <option value="cosine">{{ $t('data.cosine') }}</option>
+              </select>
+            </label>
+            <label class="pcoa-control-item">
+              <span>{{ $t('data.transform') }}</span>
+              <select v-model="dataTransform" @change="loadPcoa">
+                <option value="raw">Raw</option>
+                <option value="log">Log</option>
+                <option value="zscore">Z-score</option>
               </select>
             </label>
             <label v-if="pcoaMethod === 'tsne'" class="pcoa-control-item">
@@ -322,6 +338,7 @@ const pcoaData = ref(null)
 const loadingPcoa = ref(false)
 const pcoaMethod = ref('pcoa')
 const pcoaMetric = ref('braycurtis')
+const dataTransform = ref('raw')
 const pcoaDim = ref('2d')
 const pcoaShowEllipses = ref(true)
 const pcoaFbmJobId = ref('')
@@ -614,9 +631,11 @@ async function loadAbundance() {
   if (feats.length === 0 || !hasTrainData.value) return
   try {
     const { data } = await axios.get(`/api/data-explore/${projectId.value}/feature-abundance`, {
-      params: { features: feats.join(',') },
+      params: { features: feats.join(','), transform: dataTransform.value },
     })
     abundanceData.value = data.features || []
+    await nextTick()
+    renderAbundanceChart()
   } catch (e) {
     console.error('Failed to load abundance:', e)
   }
@@ -697,7 +716,7 @@ async function loadPcoa() {
   if (!hasTrainData.value) return
   loadingPcoa.value = true
   try {
-    const params = { method: pcoaMethod.value, metric: pcoaMetric.value }
+    const params = { method: pcoaMethod.value, metric: pcoaMetric.value, transform: dataTransform.value }
     if (pcoaMethod.value === 'tsne') {
       params.perplexity = tsnePerplexity.value
     } else if (pcoaMethod.value === 'umap') {
