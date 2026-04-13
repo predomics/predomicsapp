@@ -14,6 +14,29 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# Allowed data transformations for exploration and ordination
+VALID_TRANSFORMS = ("raw", "log", "zscore")
+
+
+def apply_transform(values: np.ndarray, transform: str = "raw", epsilon: float = 1e-5) -> np.ndarray:
+    """Apply a data transformation to a feature × sample matrix.
+
+    - raw: no transformation
+    - log: natural log with epsilon flooring (values below epsilon → epsilon)
+    - zscore: per-column (feature) standardization using mean/std
+    """
+    if transform == "raw" or transform is None:
+        return values
+    if transform == "log":
+        return np.log(np.maximum(values, epsilon))
+    if transform == "zscore":
+        mean = np.nanmean(values, axis=0)
+        std = np.nanstd(values, axis=0, ddof=0)
+        std[std == 0] = 1.0  # avoid division by zero for constant features
+        return (values - mean) / std
+    raise ValueError(f"Unknown transform '{transform}', must be one of {VALID_TRANSFORMS}")
+
+
 # Try to import gpredomicspy
 try:
     import gpredomicspy
@@ -144,10 +167,12 @@ def compute_feature_abundance(
     y_path: str,
     feature_names: list[str],
     features_in_rows: bool = True,
+    transform: str = "raw",
 ) -> list[dict[str, Any]]:
     """Compute boxplot summary stats per class for selected features.
 
     Uses pandas to load data and compute quartiles. Max 100 features.
+    Supports transformations: raw, log, zscore.
     """
     feature_names = feature_names[:100]
 
@@ -161,6 +186,14 @@ def compute_feature_abundance(
     common = X.index.intersection(y_series.index)
     X = X.loc[common]
     y_series = y_series.loc[common]
+
+    # Apply transformation feature-wise (z-score uses per-feature stats)
+    if transform != "raw":
+        X_num = X[[c for c in X.columns if X[c].dtype.kind in "iuf"]].astype(float)
+        transformed = apply_transform(X_num.values, transform=transform)
+        X_num = pd.DataFrame(transformed, index=X_num.index, columns=X_num.columns)
+        for c in X_num.columns:
+            X[c] = X_num[c]
 
     results = []
     for fname in feature_names:
@@ -270,6 +303,7 @@ def compute_pcoa(
     max_samples: int = 1000,
     feature_names: list[str] | None = None,
     n_permutations: int = 999,
+    transform: str = "raw",
 ) -> dict[str, Any]:
     """Compute PCoA with confidence ellipses and PERMANOVA.
 
@@ -313,6 +347,9 @@ def compute_pcoa(
     mat = X.values.astype(float)
     # Replace NaN with 0 for distance computation
     mat = np.nan_to_num(mat, nan=0.0)
+
+    # Apply data transformation (raw, log, zscore)
+    mat = apply_transform(mat, transform=transform)
 
     # Compute pairwise distance matrix
     try:
@@ -504,6 +541,7 @@ def _load_and_prepare(
     metric: str = "braycurtis",
     max_samples: int = 1000,
     feature_names: list[str] | None = None,
+    transform: str = "raw",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], list[str], str, int]:
     """Shared data loading for ordination methods (PCoA / t-SNE / UMAP).
 
@@ -541,6 +579,9 @@ def _load_and_prepare(
     mat = X.values.astype(float)
     mat = np.nan_to_num(mat, nan=0.0)
 
+    # Apply data transformation (raw, log, zscore)
+    mat = apply_transform(mat, transform=transform)
+
     try:
         dists = pdist(mat, metric=metric)
     except ValueError:
@@ -566,6 +607,7 @@ def compute_tsne(
     n_permutations: int = 999,
     perplexity: float = 30.0,
     n_components: int = 2,
+    transform: str = "raw",
 ) -> dict[str, Any]:
     """Compute t-SNE embedding with confidence ellipses and PERMANOVA.
 
@@ -574,7 +616,7 @@ def compute_tsne(
     from sklearn.manifold import TSNE
 
     D, y_int, sample_names, class_labels, metric, n_features_used = _load_and_prepare(
-        x_path, y_path, features_in_rows, metric, max_samples, feature_names,
+        x_path, y_path, features_in_rows, metric, max_samples, feature_names, transform=transform,
     )
     n = D.shape[0]
 
@@ -625,6 +667,7 @@ def compute_umap(
     n_neighbors: int = 15,
     min_dist: float = 0.1,
     n_components: int = 2,
+    transform: str = "raw",
 ) -> dict[str, Any]:
     """Compute UMAP embedding with confidence ellipses and PERMANOVA.
 
@@ -633,7 +676,7 @@ def compute_umap(
     import umap
 
     D, y_int, sample_names, class_labels, metric, n_features_used = _load_and_prepare(
-        x_path, y_path, features_in_rows, metric, max_samples, feature_names,
+        x_path, y_path, features_in_rows, metric, max_samples, feature_names, transform=transform,
     )
     n = D.shape[0]
 

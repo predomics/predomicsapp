@@ -633,6 +633,7 @@
     "volcano": "Volcano",
     "pcoa": "PCoA",
     "pcoaMetric": "Distance metric",
+    "transform": "Transform",
     "pcoaFeatures": "Features",
     "allFeatures": "All features",
     "ellipses": "95% ellipses",

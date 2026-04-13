@@ -29,7 +29,6 @@ nvidia-nccl-cu12==2.29.7
 packaging==26.0
 pandas==3.0.1
 pillow==12.1.1
-predomicsapp-backend @ file:///app/backend
 psycopg2-binary==2.9.11
 pyasn1==0.6.3
 pycparser==3.0

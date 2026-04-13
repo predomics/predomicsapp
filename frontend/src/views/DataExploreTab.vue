@@ -133,6 +133,16 @@
           {{ $t('dataExplore.featureAbundance') }}
           <button class="clear-selection-btn" @click="selectedFeatures = []">{{ $t('dataExplore.clear') }}</button>
         </h3>
+        <div class="abundance-controls">
+          <label class="filter-item">
+            <span>{{ $t('dataExplore.transform') }}</span>
+            <select v-model="dataTransform" @change="loadAbundance">
+              <option value="raw">Raw</option>
+              <option value="log">Log</option>
+              <option value="zscore">Z-score</option>
+            </select>
+          </label>
+        </div>
         <div ref="abundanceChartEl" class="plotly-chart plotly-chart-tall"></div>
       </section>
 
@@ -182,6 +192,14 @@
             <option value="euclidean">{{ $t('dataExplore.euclidean') }}</option>
             <option value="jaccard">Jaccard</option>
             <option value="cosine">{{ $t('dataExplore.cosine') }}</option>
+          </select>
+        </label>
+        <label class="filter-item">
+          <span>{{ $t('dataExplore.transform') }}</span>
+          <select v-model="dataTransform" @change="loadPcoa">
+            <option value="raw">Raw</option>
+            <option value="log">Log</option>
+            <option value="zscore">Z-score</option>
           </select>
         </label>
         <label v-if="pcoaMethod === 'tsne'" class="filter-item">
@@ -281,6 +299,7 @@ const pcoaData = ref(null)
 const loadingPcoa = ref(false)
 const pcoaMethod = ref('pcoa')
 const pcoaMetric = ref('braycurtis')
+const dataTransform = ref('raw')
 const pcoaDim = ref('2d')
 const tsnePerplexity = ref(30)
 const umapNeighbors = ref(15)
@@ -434,7 +453,7 @@ async function loadAbundance() {
   if (selectedFeatures.value.length === 0) return
   try {
     const { data } = await axios.get(`/api/data-explore/${projectId.value}/feature-abundance`, {
-      params: { features: selectedFeatures.value.join(',') },
+      params: { features: selectedFeatures.value.join(','), transform: dataTransform.value },
     })
     abundanceData.value = data.features || []
     await nextTick()
@@ -457,7 +476,7 @@ async function loadAll() {
 async function loadPcoa() {
   loadingPcoa.value = true
   try {
-    const params = { method: pcoaMethod.value, metric: pcoaMetric.value }
+    const params = { method: pcoaMethod.value, metric: pcoaMetric.value, transform: dataTransform.value }
     if (pcoaMethod.value === 'tsne') {
       params.perplexity = tsnePerplexity.value
     } else if (pcoaMethod.value === 'umap') {

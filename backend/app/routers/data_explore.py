@@ -118,15 +118,19 @@ async def get_distributions(
 async def get_feature_abundance(
     project_id: str,
     features: str = "",
+    transform: str = "raw",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get boxplot summary stats per class for selected features (viewer access).
 
     Pass feature names as comma-separated string, max 100.
+    Transform: raw (default), log, or zscore.
     """
     if not features:
         raise HTTPException(400, "No features specified")
+    if transform not in data_analysis.VALID_TRANSFORMS:
+        raise HTTPException(400, f"Invalid transform: {transform}. Choose from {data_analysis.VALID_TRANSFORMS}")
 
     feature_list = [f.strip() for f in features.split(",") if f.strip()][:100]
     if not feature_list:
@@ -136,9 +140,9 @@ async def get_feature_abundance(
     x_path, y_path = _resolve_train_files(project)
 
     abundance = data_analysis.compute_feature_abundance(
-        x_path, y_path, feature_list
+        x_path, y_path, feature_list, transform=transform,
     )
-    return {"features": abundance}
+    return {"features": abundance, "transform": transform}
 
 
 @router.get("/{project_id}/barcode-data")
@@ -175,6 +179,7 @@ async def get_pcoa(
     project_id: str,
     metric: str = "braycurtis",
     features: str = "",
+    transform: str = "raw",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -183,11 +188,14 @@ async def get_pcoa(
     Returns 3D coordinates, sample classes, % variance explained per axis,
     95% confidence ellipses per class, and PERMANOVA test results.
     Supported metrics: braycurtis (default), euclidean, jaccard, cosine.
+    Transform: raw (default), log, or zscore (applied before distance computation).
     Pass feature names as comma-separated string to restrict to FBM features.
     """
     allowed_metrics = ("braycurtis", "euclidean", "jaccard", "cosine")
     if metric not in allowed_metrics:
         raise HTTPException(400, f"Invalid metric: {metric}. Choose from {allowed_metrics}")
+    if transform not in data_analysis.VALID_TRANSFORMS:
+        raise HTTPException(400, f"Invalid transform: {transform}. Choose from {data_analysis.VALID_TRANSFORMS}")
 
     project, _ = await get_project_with_access(project_id, user, db, require_role="viewer")
     x_path, y_path = _resolve_train_files(project)
@@ -197,8 +205,9 @@ async def get_pcoa(
         feature_names = [f.strip() for f in features.split(",") if f.strip()]
 
     pcoa_result = data_analysis.compute_pcoa(
-        x_path, y_path, metric=metric, feature_names=feature_names,
+        x_path, y_path, metric=metric, feature_names=feature_names, transform=transform,
     )
+    pcoa_result["transform"] = transform
     return pcoa_result
 
 
@@ -212,6 +221,7 @@ async def get_ordination(
     n_neighbors: int = 15,
     min_dist: float = 0.1,
     n_components: int = 2,
+    transform: str = "raw",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -219,6 +229,7 @@ async def get_ordination(
 
     Returns coordinates, sample classes, confidence ellipses, and PERMANOVA.
     For PCoA, also returns variance_explained per axis.
+    Transform: raw (default), log, or zscore (applied before distance computation).
     """
     allowed_methods = ("pcoa", "tsne", "umap")
     if method not in allowed_methods:
@@ -227,6 +238,8 @@ async def get_ordination(
     allowed_metrics = ("braycurtis", "euclidean", "jaccard", "cosine")
     if metric not in allowed_metrics:
         raise HTTPException(400, f"Invalid metric: {metric}. Choose from {allowed_metrics}")
+    if transform not in data_analysis.VALID_TRANSFORMS:
+        raise HTTPException(400, f"Invalid transform: {transform}. Choose from {data_analysis.VALID_TRANSFORMS}")
 
     project, _ = await get_project_with_access(project_id, user, db, require_role="viewer")
     x_path, y_path = _resolve_train_files(project)
@@ -238,19 +251,20 @@ async def get_ordination(
     if method == "tsne":
         result = data_analysis.compute_tsne(
             x_path, y_path, metric=metric, feature_names=feature_names,
-            perplexity=perplexity, n_components=n_components,
+            perplexity=perplexity, n_components=n_components, transform=transform,
         )
     elif method == "umap":
         result = data_analysis.compute_umap(
             x_path, y_path, metric=metric, feature_names=feature_names,
-            n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components,
+            n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components, transform=transform,
         )
     else:
         result = data_analysis.compute_pcoa(
-            x_path, y_path, metric=metric, feature_names=feature_names,
+            x_path, y_path, metric=metric, feature_names=feature_names, transform=transform,
         )
         result["method"] = "pcoa"
 
+    result["transform"] = transform
     return result
 
 
