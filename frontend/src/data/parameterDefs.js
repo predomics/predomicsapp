@@ -67,7 +67,7 @@ export const PARAM_DEFS = [
   },
   {
     key: 'data_type', label: 'Data type', category: 'general', level: 'basic', inputType: 'checkboxGroup', defaultValue: 'raw,prev',
-    description: 'Data transformations to apply. Multiple selections create separate model populations.',
+    description: 'Data transformations to apply. Multiple selections create separate model populations. Raw uses feature values directly. Prevalence binarizes features at threshold epsilon (presence/absence). Log applies natural log after epsilon flooring. Z-score standardizes each feature to mean=0, std=1 using training statistics (propagated to test to avoid data leakage).',
     options: [
       { value: 'raw', label: 'Raw' },
       { value: 'prev', label: 'Prevalence' },
