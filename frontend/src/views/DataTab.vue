@@ -1066,39 +1066,76 @@ async function renderBarcodeChart() {
   const c = chartColors()
   const d = barcodeData.value
 
-  // Log base-4 transformation (matching R's log_trans(base = 4) in plotBarcode)
+  // The backend already applies the chosen transform (raw/log/zscore). For
+  // raw we re-apply log4 to compress the dynamic range; for log/zscore the
+  // values are already on a linear-display-appropriate scale (and include
+  // negatives), so we pass them through unchanged and use a divergent or
+  // linear colorscale accordingly.
+  const transform = d.transform || 'raw'
   const LOG4 = Math.log(4)
   let lo = Infinity, hi = -Infinity
-  const zLog = d.matrix.map(row => row.map(v => {
-    if (v <= 0) return null
-    const lv = Math.log(v) / LOG4
-    if (lv < lo) lo = lv
-    if (lv > hi) hi = lv
-    return lv
-  }))
+  let z
+  let floor
+  let colorscale
+  let tickVals = []
+  let tickTexts = []
+  let colorbarTitle
 
-  if (!isFinite(lo)) lo = -10
-  if (!isFinite(hi)) hi = 0
-  const floor = lo - 1
-  const z = zLog.map(row => row.map(v => v === null ? floor : v))
+  if (transform === 'raw') {
+    const zLog = d.matrix.map(row => row.map(v => {
+      if (v <= 0) return null
+      const lv = Math.log(v) / LOG4
+      if (lv < lo) lo = lv
+      if (lv > hi) hi = lv
+      return lv
+    }))
+    if (!isFinite(lo)) lo = -10
+    if (!isFinite(hi)) hi = 0
+    floor = lo - 1
+    z = zLog.map(row => row.map(v => v === null ? floor : v))
 
-  // Color scale
-  const span = hi - floor
-  const whiteEnd = Math.max(0.01, (lo - floor) / span)
-  const dataColors = ['#00bfff', '#0000ff', '#00cd00', '#ffff00', '#ffa500', '#ff0000', '#ee4000', '#8b0000']
-  const zeroBg = c.paper  // transparent-like: match plot background so zeros fade away
-  const colorscale = [[0, zeroBg], [whiteEnd, zeroBg]]
-  for (let i = 0; i < dataColors.length; i++) {
-    colorscale.push([whiteEnd + (1 - whiteEnd) * (i + 1) / dataColors.length, dataColors[i]])
-  }
+    const span = hi - floor
+    const whiteEnd = Math.max(0.01, (lo - floor) / span)
+    const dataColors = ['#00bfff', '#0000ff', '#00cd00', '#ffff00', '#ffa500', '#ff0000', '#ee4000', '#8b0000']
+    const zeroBg = c.paper
+    colorscale = [[0, zeroBg], [whiteEnd, zeroBg]]
+    for (let i = 0; i < dataColors.length; i++) {
+      colorscale.push([whiteEnd + (1 - whiteEnd) * (i + 1) / dataColors.length, dataColors[i]])
+    }
+    const nTicks = 5
+    for (let i = 0; i <= nTicks; i++) {
+      const lv = lo + (hi - lo) * i / nTicks
+      tickVals.push(lv)
+      tickTexts.push(Math.pow(4, lv).toExponential(1))
+    }
+    colorbarTitle = 'Value (log\u2084)'
+  } else {
+    // log or zscore: use the values directly
+    for (const row of d.matrix) for (const v of row) {
+      if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v }
+    }
+    if (!isFinite(lo)) lo = 0
+    if (!isFinite(hi)) hi = 1
+    floor = lo
+    z = d.matrix.map(row => row.map(v => Number.isFinite(v) ? v : lo))
 
-  // Colorbar ticks in original scale
-  const nTicks = 5
-  const tickVals = [], tickTexts = []
-  for (let i = 0; i <= nTicks; i++) {
-    const lv = lo + (hi - lo) * i / nTicks
-    tickVals.push(lv)
-    tickTexts.push(Math.pow(4, lv).toExponential(1))
+    if (transform === 'zscore') {
+      // symmetric divergent scale around 0
+      const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1
+      lo = -m; hi = m; floor = lo
+      colorscale = [
+        [0, '#0000b8'], [0.25, '#4472ff'], [0.5, '#f8f8f8'],
+        [0.75, '#ff6060'], [1, '#b80000'],
+      ]
+      colorbarTitle = 'z-score'
+    } else {
+      // log: sequential viridis-like, using the raw log range
+      colorscale = [
+        [0, '#440154'], [0.25, '#3b528b'], [0.5, '#21918c'],
+        [0.75, '#5ec962'], [1, '#fde725'],
+      ]
+      colorbarTitle = 'log(abundance)'
+    }
   }
 
   // Split data by class for faceted panels
@@ -1145,8 +1182,8 @@ async function renderBarcodeChart() {
       yaxis: yRef,
       showscale: ci === nCls - 1,
       colorbar: ci === nCls - 1 ? {
-        title: { text: 'Value (log\u2084)', font: { color: c.text, size: 10 } },
-        tickvals: tickVals, ticktext: tickTexts,
+        title: { text: colorbarTitle, font: { color: c.text, size: 10 } },
+        ...(tickVals.length > 0 ? { tickvals: tickVals, ticktext: tickTexts } : {}),
         tickfont: { color: c.text, size: 9 },
         len: 0.8, thickness: 12,
       } : undefined,
