@@ -11,17 +11,11 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
-# Override settings before importing app
-_tmp = tempfile.mkdtemp()
-os.environ["PREDOMICS_DATA_DIR"] = _tmp
-os.environ["PREDOMICS_PROJECT_DIR"] = os.path.join(_tmp, "projects")
-os.environ["PREDOMICS_UPLOAD_DIR"] = os.path.join(_tmp, "uploads")
-os.environ["PREDOMICS_SAMPLES_DIR"] = os.path.join(_tmp, "samples")
-os.environ["PREDOMICS_SAMPLE_DIR"] = os.path.join(_tmp, "samples")  # legacy compat
+# Env overrides are set in conftest.py so they're in place before ANY test
+# module imports `app` (test_services_unit.py would otherwise import first on
+# some pytest collection orders and bake in default paths).
+_tmp = os.environ["PREDOMICS_TEST_TMPDIR"]
 _db_path = os.path.join(_tmp, "test.db")
-os.environ["PREDOMICS_DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
-os.environ["PREDOMICS_SECRET_KEY"] = "test-secret-key"
-os.environ["PREDOMICS_RATE_LIMIT_ENABLED"] = "false"
 
 from app.main import app  # noqa: E402
 from app.core.database import engine, Base, get_db, async_session_factory, sync_engine  # noqa: E402
