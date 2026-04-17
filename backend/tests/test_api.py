@@ -16,7 +16,8 @@ _tmp = tempfile.mkdtemp()
 os.environ["PREDOMICS_DATA_DIR"] = _tmp
 os.environ["PREDOMICS_PROJECT_DIR"] = os.path.join(_tmp, "projects")
 os.environ["PREDOMICS_UPLOAD_DIR"] = os.path.join(_tmp, "uploads")
-os.environ["PREDOMICS_SAMPLE_DIR"] = os.path.join(_tmp, "samples")
+os.environ["PREDOMICS_SAMPLES_DIR"] = os.path.join(_tmp, "samples")
+os.environ["PREDOMICS_SAMPLE_DIR"] = os.path.join(_tmp, "samples")  # legacy compat
 _db_path = os.path.join(_tmp, "test.db")
 os.environ["PREDOMICS_DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
 os.environ["PREDOMICS_SECRET_KEY"] = "test-secret-key"
@@ -588,9 +589,9 @@ class TestSamples:
 
     @pytest.mark.asyncio
     async def test_load_sample_creates_project(self, auth_client):
-        # Create a fake sample directory with files. After the samples/ vs data/
-        # refactor, each demo lives in its own subdir under PREDOMICS_SAMPLE_DIR.
-        sample_dir = Path(os.environ["PREDOMICS_SAMPLE_DIR"]) / "qin2014_cirrhosis"
+        # Create a fake sample directory with files. Each demo lives in its
+        # own subdir under settings.samples_dir (env: PREDOMICS_SAMPLES_DIR).
+        sample_dir = Path(os.environ["PREDOMICS_SAMPLES_DIR"]) / "qin2014_cirrhosis"
         sample_dir.mkdir(parents=True, exist_ok=True)
         (sample_dir / "Xtrain.tsv").write_text("id\ts1\ts2\nf1\t0.1\t0.2\n")
         (sample_dir / "Ytrain.tsv").write_text("id\tclass\ns1\t0\ns2\t1\n")
@@ -608,7 +609,7 @@ class TestSamples:
     @pytest.mark.asyncio
     async def test_load_sample_twice_returns_same_project(self, auth_client):
         """Loading the same demo twice must NOT create a duplicate project."""
-        sample_dir = Path(os.environ["PREDOMICS_SAMPLE_DIR"]) / "qin2014_cirrhosis"
+        sample_dir = Path(os.environ["PREDOMICS_SAMPLES_DIR"]) / "qin2014_cirrhosis"
         sample_dir.mkdir(parents=True, exist_ok=True)
         (sample_dir / "Xtrain.tsv").write_text("id\ts1\ts2\nf1\t0.1\t0.2\n")
         (sample_dir / "Ytrain.tsv").write_text("id\tclass\ns1\t0\ns2\t1\n")
