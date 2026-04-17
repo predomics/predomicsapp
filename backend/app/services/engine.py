@@ -109,7 +109,7 @@ def write_param_yaml(
 
     general = _merge("general", {
         "seed": 42, "algo": "ga", "cv": False, "thread_number": 4, "gpu": False,
-        "language": "bin,ter,ratio", "data_type": "raw,prev", "epsilon": 1e-5,
+        "language": "bin,ter,ratio", "data_type": "raw,prev,zscore", "epsilon": 1e-5,
         "fit": "auc", "k_penalty": 0.0001, "fr_penalty": 0.0, "bias_penalty": 0.0,
         "threshold_ci_n_bootstrap": 0, "threshold_ci_penalty": 0.5,
         "threshold_ci_alpha": 0.05, "threshold_ci_frac_bootstrap": 1.0,
@@ -329,7 +329,7 @@ def _mock_results() -> dict[str, Any]:
                 "specificity": round(rng.uniform(0.65, 0.88), 4),
                 "k": rng.choice([2, 3, 4, 5]),
                 "language": rng.choice(["binary", "ternary", "ratio"]),
-                "data_type": rng.choice(["raw", "prev"]),
+                "data_type": rng.choice(["raw", "prev", "zscore"]),
             },
             "features": {},
             "named_features": {f"feature_{rng.randint(0, 49)}": rng.choice([-1, 1]) for _ in range(3)},
