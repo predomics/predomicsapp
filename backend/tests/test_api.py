@@ -600,6 +600,27 @@ class TestSamples:
         assert len(data["datasets"]) == 1
         assert len(data["datasets"][0]["files"]) == 4
 
+    def test_bundled_samples_are_complete_and_labels_have_a_header(self):
+        """Every declared demo ships its files, and each label file starts with a header.
+
+        The engine and the app both skip the first line of a label file: without a
+        header the first sample silently loses its label.
+        """
+        from app.routers.samples import SAMPLE_DATASETS
+        repo_samples = Path(__file__).resolve().parents[2] / "samples"
+        for key, info in SAMPLE_DATASETS.items():
+            sample_dir = repo_samples / key
+            for f in info["files"]:
+                assert (sample_dir / f["filename"]).is_file(), f"{key}: missing {f['filename']}"
+            for x_name, y_name in (("Xtrain.tsv", "Ytrain.tsv"), ("Xtest.tsv", "Ytest.tsv")):
+                with open(sample_dir / x_name) as fx:
+                    x_samples = set(fx.readline().rstrip("\n").split("\t")[1:])
+                with open(sample_dir / y_name) as fy:
+                    first = fy.readline().rstrip("\n").split("\t")[0]
+                    second = fy.readline().rstrip("\n").split("\t")[0]
+                assert first not in x_samples, f"{key}/{y_name}: first line is a sample, not a header"
+                assert second in x_samples, f"{key}/{y_name}: samples do not match {x_name}"
+
     @pytest.mark.asyncio
     async def test_load_sample_twice_returns_same_project(self, auth_client):
         """Loading the same demo twice must NOT create a duplicate project."""
