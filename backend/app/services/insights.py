@@ -199,14 +199,25 @@ def analyze_performance(results: dict) -> list[dict]:
 # Overfitting analyzer
 # ---------------------------------------------------------------------------
 
+def _section(config: dict | None, name: str) -> dict:
+    """One section of a job configuration, without the parameters left unset (None)."""
+    section = (config or {}).get(name)
+    if not isinstance(section, dict):
+        return {}
+    return {k: v for k, v in section.items() if v is not None}
+
+
 def analyze_overfitting(results: dict, job_config: dict | None) -> list[dict]:
     """Analyze overfitting protection settings and their effectiveness."""
     insights = []
     config = job_config or {}
+    # A stored job configuration lists every optional parameter, with None for
+    # "not set" (the engine default applies). None must read as absent here too,
+    # otherwise the defaults below are bypassed and comparisons fail.
 
-    general_cfg = config.get("general", {})
-    cv_cfg = config.get("cv", {})
-    ga_cfg = config.get("ga", {})
+    general_cfg = _section(config, "general")
+    cv_cfg = _section(config, "cv")
+    ga_cfg = _section(config, "ga")
 
     cv_enabled = general_cfg.get("cv", False)
     overfit_penalty = cv_cfg.get("overfit_penalty", 0)
@@ -216,7 +227,7 @@ def analyze_overfitting(results: dict, job_config: dict | None) -> list[dict]:
     bootstrap_n = general_cfg.get("threshold_ci_n_bootstrap", 0)
     bootstrap_penalty = general_cfg.get("threshold_ci_penalty", 0.5)
     bootstrap_alpha = general_cfg.get("threshold_ci_alpha", 0.05)
-    holdout = config.get("data", {}).get("holdout_ratio", 0)
+    holdout = _section(config, "data").get("holdout_ratio", 0)
 
     # Count active protections
     protections = []
@@ -964,7 +975,8 @@ def generate_recommendations(
     if severities.get("overfitting") in ("warning", "critical"):
         cv_enabled = False
         if job_config:
-            cv_enabled = job_config.get("cv", job_config.get("general", {}).get("cv", False))
+            cv_value = job_config.get("cv")
+            cv_enabled = cv_value if isinstance(cv_value, bool) else bool(_section(job_config, "general").get("cv", False))
         if not cv_enabled:
             recs.append(_insight(
                 "recommendation", "enable_cv", "warning",

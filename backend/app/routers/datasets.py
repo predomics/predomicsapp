@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Query, Body
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,9 +15,14 @@ from sqlalchemy.orm import selectinload
 from ..core.database import get_db
 from ..core.deps import get_current_user
 from ..core.rate_limit import limiter
-from ..models.db_models import User, Dataset, DatasetFile, ProjectDataset, Project, DatasetVersion
+from ..core.uploads import read_upload, check_role
+from ..models.db_models import User, Dataset, DatasetFile, ProjectDataset, Project, DatasetVersion, Job
 from ..models.schemas import DatasetResponse, DatasetUpdate, DatasetFileRef, YFromMetadataRequest
-from ..services import storage, audit
+from ..services import storage, audit, quota
+from ..models.api_schemas import (
+    StatusOut, TagSuggestions, ClassNamesOut, DatasetScanResult, FilePreview, MetadataColumns,
+    YFromMetadataResult, DatasetVersionOut, RestoreVersionOut,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -28,6 +34,15 @@ SUGGESTED_TAGS = [
 ]
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
+
+
+def _owned_path(disk_path: str, user_id: str) -> bool:
+    """True if ``disk_path`` lies inside this user's dataset directory."""
+    try:
+        base = (storage._datasets_base() / user_id).resolve()
+        return Path(disk_path).resolve().is_relative_to(base)
+    except (OSError, ValueError):
+        return False
 
 
 async def _create_version_snapshot(db: AsyncSession, dataset_id: str, user_id: str, note: str = "") -> None:
@@ -122,7 +137,7 @@ async def create_dataset(
     )
 
 
-@router.get("/tags/suggestions")
+@router.get("/tags/suggestions", response_model=TagSuggestions)
 async def get_tag_suggestions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -189,7 +204,7 @@ async def get_dataset(
     return _build_dataset_response(dataset)
 
 
-@router.delete("/{dataset_id}")
+@router.delete("/{dataset_id}", response_model=StatusOut)
 async def delete_dataset(
     dataset_id: str,
     user: User = Depends(get_current_user),
@@ -205,11 +220,30 @@ async def delete_dataset(
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    # Delete physical files
-    for f in dataset.files:
-        storage.delete_user_dataset_file(f.disk_path)
+    in_use = await db.execute(
+        select(func.count())
+        .select_from(Job)
+        .join(ProjectDataset, ProjectDataset.project_id == Job.project_id)
+        .where(ProjectDataset.dataset_id == dataset_id, Job.status.in_(["running", "pending"]))
+    )
+    if in_use.scalar():
+        raise HTTPException(
+            status_code=409,
+            detail="A running or queued job uses this dataset. Cancel it or wait before deleting.",
+        )
+
+    # Everything this dataset ever stored: current files plus files kept for old versions.
+    paths = {f.disk_path for f in dataset.files}
+    versions = await db.execute(select(DatasetVersion).where(DatasetVersion.dataset_id == dataset_id))
+    for v in versions.scalars().all():
+        paths.update(snap.get("disk_path", "") for snap in (v.files_snapshot or []))
 
     await db.delete(dataset)
+    # Files go only after the database change is durable.
+    await db.commit()
+    for path in paths:
+        if path and _owned_path(path, user.id):
+            storage.delete_user_dataset_file(path)
     return {"status": "deleted"}
 
 
@@ -290,7 +324,7 @@ async def _try_auto_scan(db: AsyncSession, dataset: Dataset) -> None:
         _log.warning("Auto-scan failed for dataset %s: %s", dataset.id, e)
 
 
-@router.post("/{dataset_id}/scan")
+@router.post("/{dataset_id}/scan", response_model=DatasetScanResult, response_model_exclude_unset=True)
 async def scan_dataset(
     dataset_id: str,
     user: User = Depends(get_current_user),
@@ -331,10 +365,15 @@ async def scan_dataset(
     return metadata
 
 
-@router.patch("/{dataset_id}/class-names")
+class ClassNamesUpdate(BaseModel):
+    """Display names for class labels, e.g. {"0": "Healthy", "1": "Disease"}."""
+    class_names: dict[str, str] = Field(default_factory=dict)
+
+
+@router.patch("/{dataset_id}/class-names", response_model=ClassNamesOut)
 async def update_class_names(
     dataset_id: str,
-    body: dict = Body(...),
+    body: ClassNamesUpdate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -346,7 +385,7 @@ async def update_class_names(
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    class_names = body.get("class_names", {})
+    class_names = {str(k)[:50]: str(v)[:100] for k, v in list(body.class_names.items())[:50]}
     if dataset.data_meta is None:
         dataset.data_meta = {"class_names": class_names}
     else:
@@ -407,27 +446,30 @@ async def upload_file(
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    content = await file.read()
+    role = check_role(role)
+    content = await read_upload(file)
+    await quota.check_quota(db, user.id, len(content))
+    filename = storage.safe_filename(file.filename, default="upload.tsv")
 
     # Auto-infer role from filename if not specified
     if role is None:
-        role = _infer_role(file.filename)
+        role = _infer_role(filename)
 
     ds_file = DatasetFile(
         dataset_id=dataset.id,
-        filename=file.filename,
+        filename=filename,
         role=role,
         disk_path="",
     )
     db.add(ds_file)
     await db.flush()
 
-    disk_path = storage.save_user_dataset_file(user.id, ds_file.id, file.filename, content)
+    disk_path = storage.save_user_dataset_file(user.id, ds_file.id, filename, content)
     ds_file.disk_path = disk_path
 
-    await _create_version_snapshot(db, dataset_id, user.id, note=f"Upload {file.filename}")
+    await _create_version_snapshot(db, dataset_id, user.id, note=f"Upload {filename}")
     await audit.log_action(db, user, audit.ACTION_DATASET_UPLOAD, "dataset_file", ds_file.id,
-                           details={"filename": file.filename, "dataset_id": dataset_id})
+                           details={"filename": filename, "dataset_id": dataset_id})
 
     # Auto-scan metadata if xtrain + ytrain are now present
     await _try_auto_scan(db, dataset)
@@ -435,7 +477,7 @@ async def upload_file(
     return DatasetFileRef(id=ds_file.id, filename=ds_file.filename, role=ds_file.role)
 
 
-@router.delete("/{dataset_id}/files/{file_id}")
+@router.delete("/{dataset_id}/files/{file_id}", response_model=StatusOut)
 async def delete_file(
     dataset_id: str,
     file_id: str,
@@ -457,7 +499,8 @@ async def delete_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     filename = ds_file.filename
-    storage.delete_user_dataset_file(ds_file.disk_path)
+    # The file stays on disk: earlier versions of the dataset still reference it and
+    # "restore version" must be able to bring it back. It is removed with the dataset.
     await db.delete(ds_file)
     await db.flush()
 
@@ -477,7 +520,7 @@ async def delete_file(
     return {"status": "deleted"}
 
 
-@router.get("/{dataset_id}/files/{file_id}/preview")
+@router.get("/{dataset_id}/files/{file_id}/preview", response_model=FilePreview)
 async def preview_file(
     dataset_id: str,
     file_id: str,
@@ -633,7 +676,7 @@ def _parse_metadata_columns(meta_path: Path) -> list[dict]:
     return columns
 
 
-@router.get("/{dataset_id}/metadata-columns")
+@router.get("/{dataset_id}/metadata-columns", response_model=MetadataColumns, response_model_exclude_unset=True)
 async def get_metadata_columns(
     dataset_id: str,
     user: User = Depends(get_current_user),
@@ -663,7 +706,7 @@ async def get_metadata_columns(
     return {"columns": columns}
 
 
-@router.post("/{dataset_id}/y-from-metadata")
+@router.post("/{dataset_id}/y-from-metadata", response_model=YFromMetadataResult)
 async def generate_y_from_metadata(
     dataset_id: str,
     body: YFromMetadataRequest,
@@ -760,11 +803,12 @@ async def generate_y_from_metadata(
     y_content = "\n".join(lines) + "\n"
 
     # Register the file in the dataset
-    filename = f"{body.file_role}_{body.column}.tsv"
+    file_role = check_role(body.file_role) or "ytrain"
+    filename = storage.safe_filename(f"{file_role}_{body.column}.tsv")
     ds_file = DatasetFile(
         dataset_id=dataset.id,
         filename=filename,
-        role=body.file_role,
+        role=file_role,
         disk_path="",
     )
     db.add(ds_file)
@@ -790,7 +834,7 @@ async def generate_y_from_metadata(
 # Project assignment
 # ---------------------------------------------------------------------------
 
-@router.post("/{dataset_id}/assign/{project_id}")
+@router.post("/{dataset_id}/assign/{project_id}", response_model=StatusOut)
 async def assign_dataset(
     dataset_id: str,
     project_id: str,
@@ -828,7 +872,7 @@ async def assign_dataset(
     return {"status": "assigned"}
 
 
-@router.delete("/{dataset_id}/assign/{project_id}")
+@router.delete("/{dataset_id}/assign/{project_id}", response_model=StatusOut)
 async def unassign_dataset(
     dataset_id: str,
     project_id: str,
@@ -857,7 +901,7 @@ async def unassign_dataset(
 # Dataset versioning
 # ---------------------------------------------------------------------------
 
-@router.get("/{dataset_id}/versions")
+@router.get("/{dataset_id}/versions", response_model=list[DatasetVersionOut])
 async def list_versions(
     dataset_id: str,
     user: User = Depends(get_current_user),
@@ -880,7 +924,11 @@ async def list_versions(
         {
             "id": v.id,
             "version_number": v.version_number,
-            "files_snapshot": v.files_snapshot,
+            # Server paths are internal: expose only what a client can use.
+            "files_snapshot": [
+                {k: snap.get(k) for k in ("id", "filename", "role")}
+                for snap in (v.files_snapshot or [])
+            ],
             "note": v.note,
             "created_at": v.created_at.isoformat(),
         }
@@ -888,7 +936,7 @@ async def list_versions(
     ]
 
 
-@router.post("/{dataset_id}/versions/{version_id}/restore")
+@router.post("/{dataset_id}/versions/{version_id}/restore", response_model=RestoreVersionOut)
 async def restore_version(
     dataset_id: str,
     version_id: str,
@@ -897,7 +945,8 @@ async def restore_version(
 ):
     """Restore a dataset to a previous version snapshot.
 
-    Only restores file records that still exist on disk. Missing files are skipped.
+    Files removed from the dataset stay on disk while the dataset exists, so every
+    version can be restored in full.
     """
     result = await db.execute(
         select(Dataset)
@@ -926,7 +975,8 @@ async def restore_version(
     # Re-create file records from snapshot
     restored = 0
     for snap in version.files_snapshot or []:
-        if Path(snap.get("disk_path", "")).exists():
+        disk_path = snap.get("disk_path", "")
+        if disk_path and _owned_path(disk_path, user.id) and Path(disk_path).exists():
             ds_file = DatasetFile(
                 dataset_id=dataset_id,
                 filename=snap["filename"],

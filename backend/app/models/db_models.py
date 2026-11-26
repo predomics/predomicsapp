@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, Text, JSON, Integer
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, Text, JSON, Integer, true, BigInteger, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.database import Base
@@ -28,6 +28,11 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Email verification (only enforced when PREDOMICS_REQUIRE_EMAIL_VERIFICATION is on).
+    # Existing accounts count as verified.
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=true())
+    email_verify_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    email_verify_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     projects: Mapped[list["Project"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     datasets: Mapped[list["Dataset"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
@@ -41,7 +46,7 @@ class Project(Base):
     description: Mapped[str] = mapped_column(String(500), default="")
     class_names: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -57,8 +62,8 @@ class Dataset(Base):
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(String(500), default="")
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     tags: Mapped[Optional[list]] = mapped_column(JSON, default=list, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     data_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -74,7 +79,7 @@ class DatasetFile(Base):
     __tablename__ = "dataset_files"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # xtrain/ytrain/xtest/ytest
     disk_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -86,10 +91,13 @@ class DatasetFile(Base):
 class ProjectDataset(Base):
     """Junction table: many-to-many between projects and datasets."""
     __tablename__ = "project_datasets"
+    __table_args__ = (
+        UniqueConstraint("project_id", "dataset_id", name="uq_project_datasets_project_dataset"),
+    )
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="dataset_links")
@@ -100,21 +108,25 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     results_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     config_hash: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
-    disk_size_bytes: Mapped[Optional[int]] = mapped_column(nullable=True)
+    disk_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     batch_id: Mapped[Optional[str]] = mapped_column(String(12), nullable=True, index=True)
     best_auc: Mapped[Optional[float]] = mapped_column(nullable=True)
     best_k: Mapped[Optional[int]] = mapped_column(nullable=True)
     scitq_task_id: Mapped[Optional[int]] = mapped_column(nullable=True)
+    # Set when the worker actually starts (created_at is the submission time).
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # OS process id of the local worker while it runs (for cancellation / diagnostics).
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="jobs")
     owner: Mapped[Optional["User"]] = relationship()
@@ -123,10 +135,13 @@ class Job(Base):
 class ProjectShare(Base):
     """Share a project with another user (viewer or editor role)."""
     __tablename__ = "project_shares"
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_project_shares_project_user"),
+    )
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(10), nullable=False, default="viewer")  # viewer / editor
     shared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     shared_by: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
@@ -149,7 +164,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(12), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(12), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     resource_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     resource_id: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)
@@ -165,7 +180,7 @@ class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -179,7 +194,7 @@ class ApiKey(Base):
     __tablename__ = "api_keys"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     prefix: Mapped[str] = mapped_column(String(8), nullable=False)
@@ -195,7 +210,7 @@ class Webhook(Base):
     __tablename__ = "webhooks"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     events: Mapped[Optional[list]] = mapped_column(JSON, default=lambda: ["job.completed", "job.failed"])
@@ -211,8 +226,8 @@ class ProjectComment(Base):
     __tablename__ = "project_comments"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -226,9 +241,9 @@ class PublicShare(Base):
     __tablename__ = "public_shares"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -242,7 +257,7 @@ class DatasetVersion(Base):
     __tablename__ = "dataset_versions"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     files_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_by: Mapped[Optional[str]] = mapped_column(String(12), nullable=True)

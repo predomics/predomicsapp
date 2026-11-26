@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -13,16 +14,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import get_db
-from ..core.deps import get_current_user, get_project_with_access
+from ..core.deps import get_current_user, get_project_access
 from ..models.db_models import User, Job
-from ..services import storage
+from ..services import results_io
 
 router = APIRouter(prefix="/export", tags=["export"])
 
 
 async def _get_job_results(project_id: str, job_id: str, user: User, db: AsyncSession):
     """Verify access and load results for a job."""
-    await get_project_with_access(project_id, user, db, require_role="viewer")
+    await get_project_access(project_id, user, db, require_role="viewer")
     result = await db.execute(
         select(Job).where(Job.id == job_id, Job.project_id == project_id)
     )
@@ -32,14 +33,14 @@ async def _get_job_results(project_id: str, job_id: str, user: User, db: AsyncSe
     if job.status != "completed":
         raise HTTPException(status_code=400, detail="Job not completed")
 
-    results = storage.get_job_result(project_id, job_id)
+    results = await results_io.aload_results(project_id, job_id)
     if not results:
         raise HTTPException(status_code=404, detail="Results not found")
 
     return job, results
 
 
-@router.get("/{project_id}/jobs/{job_id}/csv")
+@router.get("/{project_id}/jobs/{job_id}/csv", response_class=StreamingResponse, responses={200: {"content": {"text/csv": {}}, "description": "File download"}})
 async def export_csv(
     project_id: str,
     job_id: str,
@@ -139,7 +140,7 @@ async def export_csv(
     )
 
 
-@router.get("/{project_id}/jobs/{job_id}/report")
+@router.get("/{project_id}/jobs/{job_id}/report", response_class=StreamingResponse, responses={200: {"content": {"text/html": {}}, "description": "File download"}})
 async def export_report(
     project_id: str,
     job_id: str,
@@ -202,7 +203,8 @@ async def export_report(
     if importance and len(importance) > 0:
         importance_html = _build_importance_html(importance)
 
-    html = _build_report_html(
+    html = await asyncio.to_thread(
+        _build_report_html,
         job_id=job_id,
         job_name=job_name,
         best=best,
@@ -227,7 +229,7 @@ async def export_report(
     )
 
 
-@router.get("/{project_id}/jobs/{job_id}/json")
+@router.get("/{project_id}/jobs/{job_id}/json", response_class=StreamingResponse, responses={200: {"content": {"application/json": {}}, "description": "File download"}})
 async def export_json(
     project_id: str,
     job_id: str,
@@ -238,7 +240,8 @@ async def export_json(
     job, results = await _get_job_results(project_id, job_id, user, db)
 
     filename = f"results_{job_id[:8]}.json"
-    content = json.dumps(results, indent=2, default=str)
+    # Results are tens of MB: serialise off the event loop
+    content = await asyncio.to_thread(json.dumps, results, indent=2, default=str)
     return StreamingResponse(
         iter([content]),
         media_type="application/json",
@@ -246,7 +249,7 @@ async def export_json(
     )
 
 
-@router.get("/{project_id}/jobs/{job_id}/pdf")
+@router.get("/{project_id}/jobs/{job_id}/pdf", response_class=StreamingResponse, responses={200: {"content": {"application/pdf": {}}, "description": "File download"}})
 async def export_pdf(
     project_id: str,
     job_id: str,
@@ -259,7 +262,9 @@ async def export_pdf(
     from ..services.pdf_report import generate_pdf
 
     job_name = job.name or job_id[:8]
-    pdf_bytes = generate_pdf(
+    # Rendering the PDF is CPU-bound: keep it off the event loop
+    pdf_bytes = await asyncio.to_thread(
+        generate_pdf,
         job_id=job_id,
         job_name=job_name,
         results=results,
@@ -274,7 +279,7 @@ async def export_pdf(
     )
 
 
-@router.get("/{project_id}/jobs/{job_id}/notebook")
+@router.get("/{project_id}/jobs/{job_id}/notebook", response_class=StreamingResponse, responses={200: {"content": {"application/octet-stream": {}}, "description": "File download"}})
 async def export_notebook(
     project_id: str,
     job_id: str,

@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.database import get_db
 from ..core.deps import get_current_user, get_project_with_access
 from ..models.db_models import User, Project, Job, PublicShare
-from ..services import storage
+from ..services import results_io
+from typing import List
+from ..models.schemas import (
+    Detail, JobResults, PublicLink, PublicProject,
+)
 
 router = APIRouter(tags=["public"])
 
@@ -27,7 +31,7 @@ class CreatePublicShareRequest(BaseModel):
 # Authenticated endpoints (manage links)
 # ---------------------------------------------------------------------------
 
-@router.post("/projects/{project_id}/public")
+@router.post("/projects/{project_id}/public", response_model=PublicLink, response_model_exclude_unset=True)
 async def create_public_link(
     project_id: str,
     body: CreatePublicShareRequest,
@@ -63,7 +67,7 @@ async def create_public_link(
     }
 
 
-@router.get("/projects/{project_id}/public")
+@router.get("/projects/{project_id}/public", response_model=List[PublicLink], response_model_exclude_unset=True)
 async def list_public_links(
     project_id: str,
     user: User = Depends(get_current_user),
@@ -93,7 +97,7 @@ async def list_public_links(
     ]
 
 
-@router.delete("/projects/{project_id}/public/{share_id}")
+@router.delete("/projects/{project_id}/public/{share_id}", response_model=Detail, response_model_exclude_unset=True)
 async def revoke_public_link(
     project_id: str,
     share_id: str,
@@ -139,7 +143,7 @@ async def _get_valid_share(token: str, db: AsyncSession) -> PublicShare:
     return share
 
 
-@router.get("/public/{token}")
+@router.get("/public/{token}", response_model=PublicProject, response_model_exclude_unset=True)
 async def get_public_project(
     token: str,
     db: AsyncSession = Depends(get_db),
@@ -181,7 +185,7 @@ async def get_public_project(
     }
 
 
-@router.get("/public/{token}/jobs/{job_id}/results")
+@router.get("/public/{token}/jobs/{job_id}/results", response_model=JobResults, response_model_exclude_unset=True)
 async def get_public_job_results(
     token: str,
     job_id: str,
@@ -201,7 +205,7 @@ async def get_public_job_results(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    results = storage.get_job_result(share.project_id, job_id)
+    results = await results_io.aload_results(share.project_id, job_id)
     if not results:
         raise HTTPException(status_code=404, detail="Results not found")
 

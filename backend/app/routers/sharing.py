@@ -2,14 +2,15 @@
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..core.database import get_db
-from ..core.deps import get_current_user, get_project_with_access
+from ..core.deps import get_current_user, get_project_access
 from ..models.db_models import User, Project, ProjectShare
 from ..services import audit
+from ..models.api_schemas import ShareUpdated, StatusOut, SharedProjectOut
 
 router = APIRouter(prefix="/projects", tags=["sharing"])
 
@@ -36,14 +37,16 @@ async def share_project(
     db: AsyncSession = Depends(get_db),
 ):
     """Share a project with another user (owner only)."""
-    project, _ = await get_project_with_access(project_id, user, db, require_role="owner")
+    project, _ = await get_project_access(project_id, user, db, require_role="owner")
 
     if body.role not in ("viewer", "editor"):
         raise HTTPException(status_code=422, detail="Role must be 'viewer' or 'editor'")
 
     # Find target user
-    result = await db.execute(select(User).where(User.email == body.email))
-    target = result.scalar_one_or_none()
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == (body.email or "").strip().lower())
+    )
+    target = result.scalars().first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     if target.id == user.id:
@@ -86,7 +89,7 @@ async def list_shares(
     db: AsyncSession = Depends(get_db),
 ):
     """List all shares for a project (owner only)."""
-    project, _ = await get_project_with_access(project_id, user, db, require_role="owner")
+    project, _ = await get_project_access(project_id, user, db, require_role="owner")
 
     result = await db.execute(
         select(ProjectShare)
@@ -107,7 +110,7 @@ async def list_shares(
     ]
 
 
-@router.put("/{project_id}/shares/{share_id}")
+@router.put("/{project_id}/shares/{share_id}", response_model=ShareUpdated)
 async def update_share(
     project_id: str,
     share_id: str,
@@ -116,7 +119,7 @@ async def update_share(
     db: AsyncSession = Depends(get_db),
 ):
     """Change the role of a share (owner only)."""
-    await get_project_with_access(project_id, user, db, require_role="owner")
+    await get_project_access(project_id, user, db, require_role="owner")
 
     if body.role not in ("viewer", "editor"):
         raise HTTPException(status_code=422, detail="Role must be 'viewer' or 'editor'")
@@ -132,7 +135,7 @@ async def update_share(
     return {"status": "updated", "role": body.role}
 
 
-@router.delete("/{project_id}/shares/{share_id}")
+@router.delete("/{project_id}/shares/{share_id}", response_model=StatusOut)
 async def revoke_share(
     project_id: str,
     share_id: str,
@@ -140,7 +143,7 @@ async def revoke_share(
     db: AsyncSession = Depends(get_db),
 ):
     """Revoke a share (owner only)."""
-    await get_project_with_access(project_id, user, db, require_role="owner")
+    await get_project_access(project_id, user, db, require_role="owner")
 
     result = await db.execute(
         select(ProjectShare).where(ProjectShare.id == share_id, ProjectShare.project_id == project_id)
@@ -154,7 +157,7 @@ async def revoke_share(
     return {"status": "revoked"}
 
 
-@router.get("/shared-with-me")
+@router.get("/shared-with-me", response_model=list[SharedProjectOut])
 async def shared_with_me(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

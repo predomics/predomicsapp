@@ -1,6 +1,5 @@
 """Standalone worker script — runs gpredomicspy in a subprocess so stdout is capturable."""
 
-import json
 import re
 import sys
 
@@ -8,28 +7,18 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from . import matrix_io
+from .prediction import (
+    DEFAULT_EPSILON,
+    UnsupportedModelError,
+    compute_auc,
+    score_matrix,
+    zscore_stats,
+)
+from .results_io import build_summary, write_json_atomic
 
-def _compute_auc(y_true, scores):
-    """Compute AUC using the trapezoidal rule (no sklearn dependency)."""
-    order = np.argsort(-scores)
-    y_sorted = y_true[order]
-    n_pos = int(np.sum(y_sorted == 1))
-    n_neg = len(y_sorted) - n_pos
-    if n_pos == 0 or n_neg == 0:
-        return 0.5
-    tp = fp = 0
-    auc = 0.0
-    tpr_prev = fpr_prev = 0.0
-    for label in y_sorted:
-        if label == 1:
-            tp += 1
-        else:
-            fp += 1
-        tpr = tp / n_pos
-        fpr = fp / n_neg
-        auc += (fpr - fpr_prev) * (tpr + tpr_prev) / 2
-        tpr_prev, fpr_prev = tpr, fpr
-    return float(auc)
+# Kept under its historical name for callers/tests.
+_compute_auc = compute_auc
 
 
 def _build_sample_predictions(sample_names, real_classes, votes, predicted_classes):
@@ -94,7 +83,36 @@ def _predict_from_votes(votes, weights=None):
     return predicted
 
 
-def _prepare_test_context(experiment, param_path):
+def _model_epsilon(param_cfg: dict) -> float:
+    """Epsilon the engine used for prevalence/log/ratio (``data_type_epsilon``)."""
+    general = param_cfg.get("general", {}) or {}
+    val = general.get("data_type_epsilon")
+    try:
+        return float(val) if val is not None else DEFAULT_EPSILON
+    except (TypeError, ValueError):
+        return DEFAULT_EPSILON
+
+
+def _train_zscore_stats(experiment, param_cfg: dict) -> dict:
+    """Training-set (mean, std) per feature, computed as the engine does.
+
+    The engine standardises with statistics of the samples it trained on
+    (after any holdout split), so the same samples are selected by name here.
+    Returns {} when the training matrix cannot be read.
+    """
+    data_cfg = param_cfg.get("data", {}) or {}
+    try:
+        X = matrix_io.load_matrix(data_cfg["X"], data_cfg.get("features_in_rows", True))
+        train_samples = [str(s) for s in experiment.sample_names()]
+        X = X.reindex(index=train_samples, columns=[str(f) for f in experiment.feature_names()])
+        mean, std = zscore_stats(X.to_numpy(dtype=float, na_value=0.0))
+        return {name: (float(m), float(sd)) for name, m, sd in zip(X.columns, mean, std)}
+    except Exception as e:  # noqa: BLE001 - optional enrichment, reported in the log
+        print(f"[worker] Warning: z-score statistics unavailable: {e}")
+        return {}
+
+
+def _prepare_test_context(experiment, param_path, zstats=None):
     """Load test data once for reuse across generations.
 
     Returns a context dict with pre-loaded arrays, or None if no test data.
@@ -111,65 +129,61 @@ def _prepare_test_context(experiment, param_path):
 
     try:
         features_in_rows = data_cfg.get("features_in_rows", True)
+        x_test, y_labels = matrix_io.load_xy(xtest_path, ytest_path, features_in_rows)
 
-        x_test = pd.read_csv(xtest_path, sep="\t", index_col=0)
-        y_test = pd.read_csv(ytest_path, sep="\t", index_col=0)
-
-        if features_in_rows:
-            x_test = x_test.T
-
-        y_labels = y_test.iloc[:, 0]
-        common = x_test.index.intersection(y_labels.index)
-        if len(common) == 0:
-            print("[worker] Warning: no common samples between X_test and y_test")
+        y_arr = pd.to_numeric(y_labels, errors="coerce").to_numpy(dtype=float)
+        keep = np.isin(y_arr, (0.0, 1.0))  # the engine ignores unlabelled samples (class 2)
+        x_test, y_arr = x_test.loc[keep], y_arr[keep]
+        if data_cfg.get("inverse_classes", False):
+            y_arr = 1.0 - y_arr
+        if len(y_arr) == 0:
+            print("[worker] Warning: no labelled test samples (classes 0/1)")
             return None
 
-        x_test = x_test.loc[common]
-        y_arr = y_labels.loc[common].values.astype(float)
-        x_raw = x_test.values.astype(float)
-
-        row_sums = x_raw.sum(axis=1, keepdims=True)
-        row_sums[row_sums == 0] = 1.0
-        x_prev = x_raw / row_sums
-
-        feature_names = experiment.feature_names()
-        test_col_idx = {name: i for i, name in enumerate(x_test.columns)}
-
-        print(f"[worker] Test data loaded: {len(common)} samples, {len(x_test.columns)} features")
+        feature_names = [str(f) for f in experiment.feature_names()]
+        print(f"[worker] Test data loaded: {len(y_arr)} samples, {x_test.shape[1]} features")
         return {
             "y_arr": y_arr,
-            "x_raw": x_raw,
-            "x_prev": x_prev,
+            # test matrix re-ordered to the training feature order; unseen features are 0
+            "x": x_test.reindex(columns=feature_names).to_numpy(dtype=float, na_value=0.0),
             "feature_names": feature_names,
-            "test_col_idx": test_col_idx,
+            "epsilon": _model_epsilon(param_cfg),
+            "zstats": zstats or {},
         }
     except Exception as e:
         print(f"[worker] Warning: test data loading failed: {e}")
         return None
 
 
+def _score_individual(ind, ctx):
+    """Score one engine Individual on the test context (same maths as the engine)."""
+    metrics = dict(ind.get_metrics())
+    features = ind.get_features()
+    idx = sorted(int(i) for i in features.keys())
+    idx = [i for i in idx if i < len(ctx["feature_names"])]
+    coefs = np.array([float(features[i]) for i in idx])
+    means = stds = None
+    if str(metrics.get("data_type")) == "zscore":
+        try:
+            names = [ctx["feature_names"][i] for i in idx]
+            means = np.array([ctx["zstats"][n][0] for n in names])
+            stds = np.array([ctx["zstats"][n][1] for n in names])
+        except KeyError:
+            means = stds = None
+    return score_matrix(
+        ctx["x"][:, idx], coefs, metrics.get("language"), metrics.get("data_type", "raw"),
+        ctx["epsilon"], means, stds,
+    )
+
+
 def _evaluate_one_generation(gen_best, ctx):
-    """Evaluate a single generation's best model on pre-loaded test data."""
+    """Test AUC of a generation's best model, or None when it cannot be scored."""
     try:
-        gen_metrics = dict(gen_best.get_metrics())
-        features = gen_best.get_features()
-        data_type = gen_metrics.get("data_type", "raw")
-
-        x_eval = ctx["x_prev"] if data_type == "prevalence" else ctx["x_raw"]
-        feature_names = ctx["feature_names"]
-        test_col_idx = ctx["test_col_idx"]
-
-        scores = np.zeros(len(x_eval))
-        for feat_idx, coef in features.items():
-            idx = int(feat_idx)
-            if idx >= len(feature_names):
-                continue
-            feat_name = feature_names[idx]
-            if feat_name in test_col_idx:
-                scores += x_eval[:, test_col_idx[feat_name]] * float(coef)
-
-        return round(_compute_auc(ctx["y_arr"], scores), 6)
-    except Exception:
+        return round(compute_auc(ctx["y_arr"], _score_individual(gen_best, ctx)), 6)
+    except UnsupportedModelError:
+        return None
+    except Exception as e:  # noqa: BLE001
+        print(f"[worker] Warning: test evaluation failed: {e}")
         return None
 
 
@@ -412,6 +426,16 @@ def _run_clinical_integration(experiment, param_yaml: dict, clinical_cfg: dict) 
     return result
 
 
+def _save_results(results_path: str, results: dict) -> None:
+    """Write results.json atomically (compact) plus the small summary.json next to it."""
+    write_json_atomic(results_path, results)
+    try:
+        from pathlib import Path
+        write_json_atomic(Path(results_path).parent / "summary.json", build_summary(results))
+    except OSError as e:
+        print(f"[worker] Warning: could not write summary.json: {e}")
+
+
 def _run_sklearn_worker(param_yaml: dict, results_path: str):
     """Run a sklearn classifier and save results."""
     from .sklearn_runner import run_sklearn
@@ -420,8 +444,8 @@ def _run_sklearn_worker(param_yaml: dict, results_path: str):
     algo_params = param_yaml.get(algo, {})
     results = run_sklearn(param_yaml, algo_params)
 
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2, default=str)
+    results["engine"] = "scikit-learn"
+    _save_results(results_path, results)
     print(f"[worker] Results saved to {results_path}", flush=True)
 
 
@@ -496,8 +520,12 @@ def main():
     generation_tracking = []
     n_gens = experiment.generation_count()
 
-    # Pre-load test data once (if available) for test AUC evaluation
-    test_ctx = _prepare_test_context(experiment, param_path)
+    # Training-set z-score statistics (needed to apply zscore models to other data)
+    zstats = _train_zscore_stats(experiment, _param_yaml)
+
+    # Pre-load test data once (if available) for test AUC evaluation.
+    # AUC is a classification metric: skipped for regression fits.
+    test_ctx = None if is_regression else _prepare_test_context(experiment, param_path, zstats)
 
     for g in range(n_gens):
         gen_pop = experiment.get_population(g, 0)
@@ -574,7 +602,17 @@ def main():
         "population_size": len(best_pop),
         "population": population_data,
         "generation_tracking": generation_tracking,
+        "engine": "gpredomics",
+        "epsilon": _model_epsilon(_param_yaml),
     }
+    # Keep the training statistics of every feature used by a model, so zscore
+    # models can be applied to new data later.
+    used = {n for ind in population_data for n in ind.get("named_features", {})}
+    used.update(
+        feature_names[int(i)] for i in best.get_features().keys() if int(i) < len(feature_names)
+    )
+    if zstats:
+        results["zscore_stats"] = {n: list(zstats[n]) for n in sorted(used) if n in zstats}
     if stability_data is not None:
         results["stability"] = stability_data
 
@@ -681,8 +719,7 @@ def main():
         print(f"[worker] Feature discovery skipped: {e}", flush=True)
 
     # Save results first — display_results() may panic in Rust and kill the process
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2, default=str)
+    _save_results(results_path, results)
 
     print(f"\n[worker] Results saved to {results_path}")
 
@@ -797,18 +834,8 @@ def main():
             enriched = True
             print(f"[worker] Parsed importance data: {len(importance_data)} features")
 
-        if enriched:
-            with open(results_path, "w") as f:
-                json.dump(results, f, indent=2, default=str)
-            print("[worker] Results re-saved with jury/importance data")
-
     except BaseException as e:
         print(f"[worker] Warning: display_results() failed: {e}")
-        # Still try to save if jury was extracted via objects
-        if enriched:
-            with open(results_path, "w") as f:
-                json.dump(results, f, indent=2, default=str)
-            print("[worker] Results saved with jury data (display failed)")
 
     # Store timing breakdown in results for flamegraph
     wall_total = round(_time.monotonic() - t_wall_start, 2)
@@ -816,9 +843,9 @@ def main():
         "phases": timing,
         "wall_total_s": wall_total,
     }
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2, default=str)
-    print(f"[worker] Timing data saved. Total wall time: {wall_total:.1f}s", flush=True)
+    # Single final write (jury, importance and timing included).
+    _save_results(results_path, results)
+    print(f"[worker] Results finalised. Total wall time: {wall_total:.1f}s", flush=True)
 
 
 if __name__ == "__main__":

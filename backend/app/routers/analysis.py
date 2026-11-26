@@ -1,26 +1,27 @@
 """Analysis execution endpoints — run gpredomics and retrieve results."""
 
 from __future__ import annotations
+import asyncio
 import copy
 import hashlib
 import itertools
 import json
 import logging
-import re
-import time
+import shutil
 import uuid
-from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Body, File, UploadFile, Form
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, File, UploadFile, Form
+from pydantic import ValidationError
 from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..core.database import get_db, sync_session_factory
-from ..core.deps import get_current_user, get_project_with_access
-from ..models.db_models import User, Job, Dataset, DatasetFile, ProjectDataset, Webhook
+from ..core.database import get_db
+from ..core.deps import get_current_user, get_project_access
+from ..core.uploads import read_upload
+from ..models.db_models import User, Job, Dataset, DatasetFile, ProjectDataset
 from ..models.schemas import (
     RunConfig,
     BatchSweepConfig,
@@ -29,17 +30,28 @@ from ..models.schemas import (
     IndividualResponse,
     JobStatus,
 )
-from ..services import engine, storage, audit, scitq_client
-from ..services.prediction import predict_from_model, parse_tsv
-from ..services.webhooks import send_webhook_sync
+from ..services import engine, storage, audit, scitq_client, jobs, results_io
+from ..services.prediction import predict_from_model, parse_tsv, UnsupportedModelError
+from typing import List
+from ..models.schemas import (
+    BatchLaunch, BatchSummary, Detail, DuplicateGroup, ExperimentSummary, JobConfigResponse, JobLogs, JobProgress, JobResults, StabilityAnalysis, ValidationResult,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
+MAX_BATCH_JOBS = 50
+
+# Historical names, kept for callers and tests.
+_run_job = jobs.run_local_job
+_poll_scitq_job = jobs.poll_scitq_job
+_fire_webhooks = jobs.fire_webhooks
+_job_disk_size = jobs.job_disk_size
+
 
 async def _verify_job_access(project_id, job_id, user, db):
     """Verify user has viewer access to the project, then return the job."""
-    await get_project_with_access(project_id, user, db, require_role="viewer")
+    await get_project_access(project_id, user, db, require_role="viewer")
     result = await db.execute(
         select(Job).where(Job.id == job_id, Job.project_id == project_id)
     )
@@ -47,6 +59,60 @@ async def _verify_job_access(project_id, job_id, user, db):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+async def _project_file_path(db: AsyncSession, project_id: str, file_id: str, what: str) -> str:
+    """Disk path of a dataset file, only if its dataset is assigned to this project.
+
+    A file id alone is not an authorisation: without the project link check any
+    editor of any project could run jobs on other users' data.
+    """
+    if not file_id:
+        return ""
+    r = await db.execute(
+        select(DatasetFile)
+        .join(Dataset, DatasetFile.dataset_id == Dataset.id)
+        .join(ProjectDataset, ProjectDataset.dataset_id == Dataset.id)
+        .where(DatasetFile.id == file_id, ProjectDataset.project_id == project_id)
+    )
+    f = r.scalars().first()
+    if f is None or not f.disk_path:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dataset file not found in this project ({what})",
+        )
+    return f.disk_path
+
+
+def _prepare_config(config: RunConfig | dict, label: str = "") -> dict:
+    """Plain config dict, thread count capped to the server limit, GA selection checked."""
+    cfg = config.model_dump() if isinstance(config, RunConfig) else copy.deepcopy(config)
+    general = cfg.setdefault("general", {})
+    general["thread_number"] = jobs.effective_threads(general.get("thread_number", 4))
+    # A GA run that cannot select two parents makes the engine panic at the first
+    # generation: refuse it now, with the values to change.
+    try:
+        engine.check_ga_selection(cfg)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{label}: {exc}" if label else str(exc))
+    return cfg
+
+
+async def _launch(job: Job, project_id: str, param_path: str, job_dir: Path, user: User,
+                  db: AsyncSession, background_tasks: BackgroundTasks | None) -> None:
+    """Hand a committed job to scitq (if enabled) or to the local job runner."""
+    if scitq_client.is_enabled():
+        try:
+            scitq_task_id = await asyncio.to_thread(
+                scitq_client.dispatch_job, job.id, project_id, param_path, str(job_dir),
+            )
+            job.scitq_task_id = scitq_task_id
+            await db.commit()
+            jobs.submit_scitq_poller(job.id, project_id, scitq_task_id, user.id, background_tasks)
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.error("scitq dispatch failed, falling back to local: %s", e)
+    jobs.submit_local(job.id, project_id, param_path, user.id, background_tasks)
 
 
 @router.post("/{project_id}/run", response_model=ExperimentSummary)
@@ -64,40 +130,30 @@ async def run_analysis(
     background_tasks: BackgroundTasks = None,
 ):
     """Launch a gpredomics analysis run (editor access required)."""
-    await get_project_with_access(project_id, user, db, require_role="editor")
+    await get_project_access(project_id, user, db, require_role="editor")
 
-    # Resolve file paths via DatasetFile table
-    async def _resolve_file(file_id: str) -> Optional[str]:
-        r = await db.execute(select(DatasetFile).where(DatasetFile.id == file_id))
-        f = r.scalar_one_or_none()
-        return f.disk_path if f else None
-
-    x_path = await _resolve_file(x_file_id)
-    y_path = await _resolve_file(y_file_id)
+    # Resolve file paths — every file must belong to a dataset of this project
+    x_path = await _project_file_path(db, project_id, x_file_id, "X train")
+    y_path = await _project_file_path(db, project_id, y_file_id, "y train")
     if not x_path or not y_path:
         raise HTTPException(status_code=404, detail="Dataset file not found")
+    xtest_path = await _project_file_path(db, project_id, xtest_file_id, "X test")
+    ytest_path = await _project_file_path(db, project_id, ytest_file_id, "y test")
+    clinical_path = await _project_file_path(db, project_id, clinical_file_id, "clinical data")
 
-    xtest_path = ""
-    ytest_path = ""
-    clinical_path = ""
-    if xtest_file_id:
-        xtest_path = await _resolve_file(xtest_file_id) or ""
-    if ytest_file_id:
-        ytest_path = await _resolve_file(ytest_file_id) or ""
-    if clinical_file_id:
-        clinical_path = await _resolve_file(clinical_file_id) or ""
+    config_dict = _prepare_config(config)
 
     # Compute config hash for duplicate detection (nulls stripped for stability)
-    config_hash = _compute_config_hash(config.model_dump(), {
+    config_hash = _compute_config_hash(config_dict, {
         "x": x_file_id, "y": y_file_id,
         "xtest": xtest_file_id, "ytest": ytest_file_id,
     })
 
-    # Create job record in database — commit immediately so the background
-    # task (which uses a separate sync DB connection) can see the job.
+    # Create job record in database — commit immediately so the job runner
+    # (which uses a separate sync DB connection) can see the job.
     job = Job(
         project_id=project_id, user_id=user.id, name=job_name or None,
-        status="pending", config=config.model_dump(), config_hash=config_hash,
+        status="pending", config=config_dict, config_hash=config_hash,
     )
     db.add(job)
     await db.commit()
@@ -105,8 +161,6 @@ async def run_analysis(
     job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job.id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write param.yaml
-    config_dict = config.model_dump()
     param_path = engine.write_param_yaml(
         config=config_dict,
         x_path=str(x_path),
@@ -119,24 +173,9 @@ async def run_analysis(
 
     await audit.log_action(db, user, audit.ACTION_JOB_LAUNCH, "job", job.id,
                            details={"project_id": project_id})
-    await db.commit()  # Ensure all writes are flushed before background task starts
+    await db.commit()  # Ensure all writes are flushed before the job starts
 
-    # Dispatch to scitq or run locally
-    if scitq_client.is_enabled():
-        try:
-            scitq_task_id = scitq_client.dispatch_job(
-                job.id, project_id, param_path, str(job_dir),
-            )
-            job.scitq_task_id = scitq_task_id
-            await db.commit()
-            background_tasks.add_task(
-                _poll_scitq_job, job.id, project_id, scitq_task_id, user.id,
-            )
-        except Exception as e:
-            logger.error("scitq dispatch failed, falling back to local: %s", e)
-            background_tasks.add_task(_run_job, job.id, project_id, param_path, user.id)
-    else:
-        background_tasks.add_task(_run_job, job.id, project_id, param_path, user.id)
+    await _launch(job, project_id, param_path, job_dir, user, db, background_tasks)
 
     return ExperimentSummary(job_id=job.id, name=job.name, status=JobStatus.pending)
 
@@ -145,18 +184,47 @@ async def run_analysis(
 # Batch runs — parameter sweeps
 # ---------------------------------------------------------------------------
 
+def _sweep_target(key: str) -> tuple[str, str]:
+    """Validate a sweep key ('section.param') against RunConfig; return (section, field)."""
+    parts = key.split(".")
+    if len(parts) != 2 or not all(parts):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid sweep parameter '{key}': expected 'section.parameter' (e.g. 'ga.population_size')",
+        )
+    section, param = parts
+    section_field = RunConfig.model_fields.get(section)
+    if section_field is None:
+        raise HTTPException(status_code=422, detail=f"Unknown sweep section '{section}' in '{key}'")
+    fields = section_field.annotation.model_fields
+    for name, info in fields.items():
+        if param == name or (info.alias and param == info.alias):
+            return section, name
+    raise HTTPException(status_code=422, detail=f"Unknown sweep parameter '{key}'")
+
+
 def _apply_sweep(config_dict: dict, key: str, value) -> dict:
     """Apply a single sweep value to a config dict (e.g. 'ga.population_size' = 5000)."""
+    section, param = _sweep_target(key)
     out = copy.deepcopy(config_dict)
-    parts = key.split(".")
-    if len(parts) == 2:
-        section, param = parts
-        if section in out:
-            out[section][param] = value
+    out.setdefault(section, {})[param] = value
     return out
 
 
-@router.post("/{project_id}/batch")
+def _validate_swept_config(cfg: dict, label: str) -> None:
+    """Swept values go through the same bounds as a normal run."""
+    try:
+        RunConfig.model_validate(cfg)
+    except ValidationError as e:
+        first = e.errors()[0]
+        loc = ".".join(str(p) for p in first.get("loc", ()))
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid sweep value ({label}): {loc}: {first.get('msg')}",
+        )
+
+
+@router.post("/{project_id}/batch", response_model=BatchLaunch, response_model_exclude_unset=True)
 async def run_batch(
     project_id: str,
     config: RunConfig,
@@ -174,55 +242,58 @@ async def run_batch(
 
     The sweep config defines which parameters to vary. A cartesian product
     of all sweep values is computed, and one job is created per combination.
-    Max 50 jobs per batch.
+    Max 50 jobs per batch. Unknown parameters or out-of-range values are
+    rejected (422) before any job is created.
     """
-    await get_project_with_access(project_id, user, db, require_role="editor")
+    await get_project_access(project_id, user, db, require_role="editor")
 
     if not sweep.sweeps:
         raise HTTPException(status_code=400, detail="No sweep parameters defined")
 
-    # Build cartesian product of sweep values
     keys = list(sweep.sweeps.keys())
-    values = [sweep.sweeps[k] for k in keys]
-    combinations = list(itertools.product(*values))
+    for k in keys:
+        _sweep_target(k)
+        if not sweep.sweeps[k]:
+            raise HTTPException(status_code=422, detail=f"Sweep parameter '{k}' has no values")
 
-    if len(combinations) > 50:
+    # Build cartesian product of sweep values
+    values = [sweep.sweeps[k] for k in keys]
+    n_combinations = 1
+    for v in values:
+        n_combinations *= len(v)
+    if n_combinations > MAX_BATCH_JOBS:
         raise HTTPException(
             status_code=400,
-            detail=f"Too many combinations ({len(combinations)}). Maximum is 50.",
+            detail=f"Too many combinations ({n_combinations}). Maximum is {MAX_BATCH_JOBS}.",
         )
+    combinations = list(itertools.product(*values))
 
-    # Resolve file paths
-    async def _resolve(fid):
-        if not fid:
-            return ""
-        r = await db.execute(select(DatasetFile).where(DatasetFile.id == fid))
-        f = r.scalar_one_or_none()
-        return f.disk_path if f else ""
-
-    x_path = await _resolve(x_file_id)
-    y_path = await _resolve(y_file_id)
+    # Resolve file paths — every file must belong to a dataset of this project
+    x_path = await _project_file_path(db, project_id, x_file_id, "X train")
+    y_path = await _project_file_path(db, project_id, y_file_id, "y train")
     if not x_path or not y_path:
         raise HTTPException(status_code=404, detail="Dataset file not found")
-    xtest_path = await _resolve(xtest_file_id)
-    ytest_path = await _resolve(ytest_file_id)
-    clinical_path = await _resolve(clinical_file_id)
+    xtest_path = await _project_file_path(db, project_id, xtest_file_id, "X test")
+    ytest_path = await _project_file_path(db, project_id, ytest_file_id, "y test")
+    clinical_path = await _project_file_path(db, project_id, clinical_file_id, "clinical data")
 
     batch_id = uuid.uuid4().hex[:12]
-    base_config = config.model_dump()
-    job_summaries = []
+    base_config = _prepare_config(config)
 
+    # Build and validate every configuration before creating anything.
+    planned = []
     for combo in combinations:
-        # Apply sweep overrides
         cfg = base_config
         name_parts = []
         for key, val in zip(keys, combo):
             cfg = _apply_sweep(cfg, key, val)
-            short_key = key.split(".")[-1]
-            name_parts.append(f"{short_key}={val}")
+            name_parts.append(f"{key.split('.')[-1]}={val}")
+        label = " ".join(name_parts)
+        _validate_swept_config(cfg, label)
+        planned.append((_prepare_config(cfg, label), f"[Batch] {label}"))
 
-        job_name = f"[Batch] {' '.join(name_parts)}"
-
+    launches = []
+    for cfg, job_name in planned:
         config_hash = _compute_config_hash(cfg, {
             "x": x_file_id, "y": y_file_id,
             "xtest": xtest_file_id, "ytest": ytest_file_id,
@@ -243,62 +314,42 @@ async def run_batch(
             config=cfg,
             x_path=str(x_path), y_path=str(y_path),
             xtest_path=xtest_path, ytest_path=ytest_path,
+            clinical_path=clinical_path,
             output_dir=str(job_dir),
         )
-
-        scitq_tid = None
-        if scitq_client.is_enabled():
-            try:
-                scitq_tid = scitq_client.dispatch_job(
-                    job.id, project_id, param_path, str(job_dir),
-                )
-                job.scitq_task_id = scitq_tid
-            except Exception as e:
-                logger.error("scitq dispatch failed for batch job %s: %s", job.id, e)
-        job_summaries.append({
-            "job_id": job.id, "name": job_name,
-            "_param_path": param_path, "_scitq_tid": scitq_tid,
-        })
+        launches.append((job, param_path, job_dir))
 
     await db.commit()
 
-    # Start pollers/local tasks after commit
-    for js in job_summaries:
-        jid = js["job_id"]
-        if js.get("_scitq_tid"):
-            background_tasks.add_task(
-                _poll_scitq_job, jid, project_id, js["_scitq_tid"], user.id,
-            )
-        else:
-            background_tasks.add_task(
-                _run_job, jid, project_id, js["_param_path"], user.id,
-            )
+    # One independent task per job: a failure of one cannot strand the others.
+    for job, param_path, job_dir in launches:
+        await _launch(job, project_id, param_path, job_dir, user, db, background_tasks)
 
     return {
         "batch_id": batch_id,
-        "job_count": len(job_summaries),
-        "jobs": [{"job_id": j["job_id"], "name": j["name"]} for j in job_summaries],
+        "job_count": len(launches),
+        "jobs": [{"job_id": j.id, "name": j.name} for j, _, _ in launches],
     }
 
 
-@router.get("/{project_id}/batches")
+@router.get("/{project_id}/batches", response_model=List[BatchSummary], response_model_exclude_unset=True)
 async def list_batches(
     project_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all batch runs for a project with summary stats."""
-    await get_project_with_access(project_id, user, db, require_role="viewer")
+    await get_project_access(project_id, user, db, require_role="viewer")
 
     result = await db.execute(
         select(Job)
         .where(Job.project_id == project_id, Job.batch_id.isnot(None))
         .order_by(Job.created_at.desc())
     )
-    jobs = result.scalars().all()
+    batch_rows = result.scalars().all()
 
     batches: dict[str, list[Job]] = {}
-    for j in jobs:
+    for j in batch_rows:
         batches.setdefault(j.batch_id, []).append(j)
 
     summaries = []
@@ -326,305 +377,7 @@ async def list_batches(
     return summaries
 
 
-def _fire_webhooks(user_id: str, event: str, payload: dict) -> None:
-    """Fire matching webhooks for a user (sync, called from background thread)."""
-    try:
-        with sync_session_factory() as db:
-            result = db.execute(
-                select(Webhook).where(
-                    Webhook.user_id == user_id,
-                    Webhook.is_active.is_(True),
-                )
-            )
-            webhooks = result.scalars().all()
-            for wh in webhooks:
-                if event in (wh.events or []):
-                    send_webhook_sync(wh.url, payload, wh.secret, retries=2)
-    except Exception as exc:
-        logger.warning("Webhook delivery error: %s", exc)
-
-
-def _run_job(job_id: str, project_id: str, param_path: str, user_id: str = "") -> None:
-    """Execute gpredomics in a subprocess so we can capture Rust log output.
-
-    Runs in a Starlette thread pool — uses synchronous DB sessions to avoid
-    event-loop conflicts with the async engine.
-    """
-    import os
-    import subprocess
-    import sys
-
-    job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job_id
-    log_path = job_dir / "console.log"
-    results_path = job_dir / "results.json"
-
-    # Mark job as running
-    with sync_session_factory() as db:
-        job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-        job.status = "running"
-        db.commit()
-
-    try:
-        if not engine.HAS_ENGINE:
-            # Mock mode — no subprocess needed
-            mock_results = engine._mock_results()
-            storage.save_job_result(project_id, job_id, mock_results)
-            with open(log_path, "w") as lf:
-                lf.write("[mock] Engine not available, using mock results\n")
-
-            best = mock_results.get("best_individual", {})
-            with sync_session_factory() as db:
-                job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-                job.status = "completed"
-                job.results_path = str(results_path)
-                job.completed_at = datetime.now(timezone.utc)
-                job.disk_size_bytes = _job_disk_size(project_id, job_id)
-                job.best_auc = best.get("auc")
-                job.best_k = best.get("k")
-                db.commit()
-
-            if user_id:
-                _fire_webhooks(user_id, "job.completed", {
-                    "event": "job.completed", "job_id": job_id, "project_id": project_id,
-                })
-            return
-
-        # Run worker subprocess — stream output line-by-line for live console
-        worker_module = "backend.app.services.worker"
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-
-        proc = subprocess.Popen(
-            [sys.executable, "-u", "-m", worker_module, param_path, str(results_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=str(Path(__file__).resolve().parents[3]),  # /app/ (parent of backend/)
-            env=env,
-        )
-
-        # Read output line-by-line, flush to log, and track progress
-        progress_path = job_dir / "progress.json"
-        gen_re = re.compile(r"#(\d+)\s+\|\s+best:\s+(\S+)")
-        k_re = re.compile(r"\[k=(\d+)")
-        epoch_re = re.compile(r"max_epochs[:\s]+(\d+)", re.IGNORECASE)
-        progress_points = []
-        max_gen = 0
-        t0 = time.monotonic()
-
-        with open(log_path, "w") as lf:
-            for line in proc.stdout:
-                text = line.decode("utf-8", errors="replace")
-                lf.write(text)
-                lf.flush()
-
-                clean = re.sub(r"\x1b\[[0-9;]*m", "", text)
-
-                # Extract max_epochs from early config echo
-                if not max_gen:
-                    em = epoch_re.search(clean)
-                    if em:
-                        max_gen = int(em.group(1))
-
-                # Extract generation progress
-                gm = gen_re.search(clean)
-                if gm:
-                    gen = int(gm.group(1))
-                    lang = gm.group(2)
-                    k = 0
-                    km = k_re.search(clean)
-                    if km:
-                        k = int(km.group(1))
-                    progress_points.append({
-                        "generation": gen,
-                        "k": k,
-                        "language": lang,
-                        "elapsed": round(time.monotonic() - t0, 1),
-                    })
-                    # Write progress every 5 generations to avoid excessive I/O
-                    if gen % 5 == 0 or gen == max_gen:
-                        try:
-                            progress_path.write_text(json.dumps({
-                                "max_gen": max_gen,
-                                "points": progress_points,
-                            }))
-                        except Exception:
-                            pass
-
-        # Final progress write
-        if progress_points:
-            try:
-                progress_path.write_text(json.dumps({
-                    "max_gen": max_gen,
-                    "points": progress_points,
-                }))
-            except Exception:
-                pass
-
-        proc.wait()
-
-        if proc.returncode != 0:
-            error_msg = log_path.read_text()[-500:] if log_path.exists() else "Unknown error"
-            raise RuntimeError(f"Worker exited with code {proc.returncode}: {error_msg}")
-
-        # Extract best_auc/best_k from results for fast list_jobs
-        # For regression runs, use the fit value as the primary metric
-        best_auc_val = None
-        best_k_val = None
-        if results_path.exists():
-            try:
-                with open(results_path) as rf:
-                    res = json.load(rf)
-                best = res.get("best_individual", {})
-                if res.get("regression"):
-                    best_auc_val = best.get("fit")
-                else:
-                    best_auc_val = best.get("auc")
-                best_k_val = best.get("k")
-            except Exception:
-                pass
-
-        with sync_session_factory() as db:
-            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-            job.status = "completed"
-            job.results_path = str(results_path)
-            job.completed_at = datetime.now(timezone.utc)
-            job.disk_size_bytes = _job_disk_size(project_id, job_id)
-            job.best_auc = best_auc_val
-            job.best_k = best_k_val
-            db.commit()
-
-        logger.info("Job %s completed", job_id)
-
-        if user_id:
-            _fire_webhooks(user_id, "job.completed", {
-                "event": "job.completed", "job_id": job_id, "project_id": project_id,
-            })
-
-    except Exception as e:
-        # Append error to log
-        with open(log_path, "a") as lf:
-            lf.write(f"\n[error] {e}\n")
-
-        with sync_session_factory() as db:
-            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-            job.status = "failed"
-            job.error_message = str(e)
-            job.completed_at = datetime.now(timezone.utc)
-            db.commit()
-
-        logger.error("Job %s failed: %s", job_id, e)
-
-        if user_id:
-            _fire_webhooks(user_id, "job.failed", {
-                "event": "job.failed", "job_id": job_id, "project_id": project_id,
-                "error": str(e),
-            })
-
-
-def _poll_scitq_job(
-    job_id: str, project_id: str, scitq_task_id: int, user_id: str = "",
-) -> None:
-    """Poll scitq for task status and stream output to console.log.
-
-    Runs in a Starlette thread pool. Checks every 5 seconds until the task
-    reaches a terminal state (completed/failed), then extracts results.
-    """
-    import time
-
-    job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job_id
-    log_path = job_dir / "console.log"
-    results_path = job_dir / "results.json"
-    last_output_len = 0
-
-    try:
-        while True:
-            status = scitq_client.get_task_status(scitq_task_id)
-
-            # Update job status in DB
-            with sync_session_factory() as db:
-                job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-                if job.status != status and status in ("running", "completed", "failed"):
-                    job.status = status
-                    db.commit()
-
-            # Stream output to console.log
-            output = scitq_client.get_task_output(scitq_task_id)
-            if output and len(output) > last_output_len:
-                with open(log_path, "w") as lf:
-                    lf.write(output)
-                last_output_len = len(output)
-
-            if status == "completed":
-                # Extract best_auc/best_k from results
-                best_auc_val = None
-                best_k_val = None
-                if results_path.exists():
-                    try:
-                        with open(results_path) as rf:
-                            res = json.load(rf)
-                        best = res.get("best_individual", {})
-                        best_auc_val = best.get("auc")
-                        best_k_val = best.get("k")
-                    except Exception:
-                        pass
-
-                with sync_session_factory() as db:
-                    job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-                    job.status = "completed"
-                    job.results_path = str(results_path)
-                    job.completed_at = datetime.now(timezone.utc)
-                    job.disk_size_bytes = _job_disk_size(project_id, job_id)
-                    job.best_auc = best_auc_val
-                    job.best_k = best_k_val
-                    db.commit()
-
-                logger.info("Job %s completed via scitq (task %s)", job_id, scitq_task_id)
-                if user_id:
-                    _fire_webhooks(user_id, "job.completed", {
-                        "event": "job.completed", "job_id": job_id, "project_id": project_id,
-                    })
-                return
-
-            if status == "failed":
-                error_msg = f"scitq task {scitq_task_id} failed"
-                if output:
-                    error_msg += f": {output[-500:]}"
-
-                with sync_session_factory() as db:
-                    job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-                    job.status = "failed"
-                    job.error_message = error_msg
-                    job.completed_at = datetime.now(timezone.utc)
-                    db.commit()
-
-                logger.error("Job %s failed via scitq (task %s)", job_id, scitq_task_id)
-                if user_id:
-                    _fire_webhooks(user_id, "job.failed", {
-                        "event": "job.failed", "job_id": job_id, "project_id": project_id,
-                        "error": error_msg,
-                    })
-                return
-
-            time.sleep(5)
-
-    except Exception as e:
-        logger.error("scitq poller error for job %s: %s", job_id, e)
-        with open(log_path, "a") as lf:
-            lf.write(f"\n[error] scitq poller: {e}\n")
-        with sync_session_factory() as db:
-            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one()
-            job.status = "failed"
-            job.error_message = f"scitq poller error: {e}"
-            job.completed_at = datetime.now(timezone.utc)
-            db.commit()
-        if user_id:
-            _fire_webhooks(user_id, "job.failed", {
-                "event": "job.failed", "job_id": job_id, "project_id": project_id,
-                "error": str(e),
-            })
-
-
-@router.get("/{project_id}/jobs/duplicates")
+@router.get("/{project_id}/jobs/duplicates", response_model=List[DuplicateGroup], response_model_exclude_unset=True)
 async def find_duplicate_jobs(
     project_id: str,
     user: User = Depends(get_current_user),
@@ -637,7 +390,7 @@ async def find_duplicate_jobs(
     (highest AUC, or most recent if no AUC) is marked as ``keep``.
     Backfills missing config_hash values on-the-fly.
     """
-    await get_project_with_access(project_id, user, db, require_role="viewer")
+    await get_project_access(project_id, user, db, require_role="viewer")
 
     result = await db.execute(
         select(Job)
@@ -684,7 +437,7 @@ async def find_duplicate_jobs(
     return duplicates
 
 
-@router.get("/{project_id}/jobs/{job_id}/config")
+@router.get("/{project_id}/jobs/{job_id}/config", response_model=JobConfigResponse, response_model_exclude_unset=True)
 async def get_job_config(
     project_id: str,
     job_id: str,
@@ -718,7 +471,7 @@ async def rerun_job(
     Creates a new job using the original job's config and the project's
     current dataset files.  Useful for reproducibility testing.
     """
-    await get_project_with_access(project_id, user, db, require_role="editor")
+    await get_project_access(project_id, user, db, require_role="editor")
 
     # Load original job
     result = await db.execute(
@@ -736,6 +489,7 @@ async def rerun_job(
         .join(DatasetFile.dataset)
         .join(Dataset.project_links)
         .where(ProjectDataset.project_id == project_id)
+        .order_by(DatasetFile.uploaded_at, DatasetFile.id)  # latest upload wins per role
     )
     files = result.scalars().all()
 
@@ -753,9 +507,10 @@ async def rerun_job(
     y_path = ytrain.disk_path
     xtest_path = file_map["xtest"].disk_path if "xtest" in file_map else ""
     ytest_path = file_map["ytest"].disk_path if "ytest" in file_map else ""
-    clinical_path = file_map["clinical"].disk_path if "clinical" in file_map else ""
+    clinical_file = file_map.get("clinical") or file_map.get("metadata")
+    clinical_path = clinical_file.disk_path if clinical_file else ""
 
-    config_dict = original.config
+    config_dict = _prepare_config(original.config)
     xtest_file = file_map.get("xtest")
     ytest_file = file_map.get("ytest")
     config_hash = _compute_config_hash(config_dict, {
@@ -791,48 +546,51 @@ async def rerun_job(
                            details={"project_id": project_id, "rerun_of": job_id})
     await db.commit()
 
-    if scitq_client.is_enabled():
-        try:
-            scitq_task_id = scitq_client.dispatch_job(
-                job.id, project_id, param_path, str(job_dir),
-            )
-            job.scitq_task_id = scitq_task_id
-            await db.commit()
-            background_tasks.add_task(
-                _poll_scitq_job, job.id, project_id, scitq_task_id, user.id,
-            )
-        except Exception as e:
-            logger.error("scitq dispatch failed, falling back to local: %s", e)
-            background_tasks.add_task(_run_job, job.id, project_id, param_path, user.id)
-    else:
-        background_tasks.add_task(_run_job, job.id, project_id, param_path, user.id)
+    await _launch(job, project_id, param_path, job_dir, user, db, background_tasks)
 
     return ExperimentSummary(job_id=job.id, name=job.name, status=JobStatus.pending)
 
 
-@router.get("/{project_id}/jobs/{job_id}/logs")
+@router.get("/{project_id}/jobs/{job_id}/logs", response_model=JobLogs, response_model_exclude_unset=True)
 async def get_job_logs(
     project_id: str,
     job_id: str,
+    offset: int = 0,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the console log output for a job (viewer access)."""
+    """Get the console log output for a job (viewer access).
+
+    Without ``offset`` the log is returned whole, or only its last megabyte if
+    it is larger (``truncated`` is then true). To follow a running job cheaply,
+    pass the ``next_offset`` of the previous response as ``offset``: only the
+    new output is returned.
+    """
     job = await _verify_job_access(project_id, job_id, user, db)
 
-    log_path = Path(storage.settings.project_dir) / project_id / "jobs" / job_id / "console.log"
-    log_content = ""
-    if log_path.exists():
-        log_content = log_path.read_text()
+    log_path = results_io.job_dir(project_id, job_id) / "console.log"
+    chunk = await asyncio.to_thread(results_io.read_log_chunk, log_path, max(0, offset))
 
     return {
         "job_id": job_id,
         "status": job.status,
-        "log": log_content,
+        "log": chunk["log"],
+        "size": chunk["size"],
+        "offset": chunk["offset"],
+        "next_offset": chunk["next_offset"],
+        "truncated": chunk["truncated"],
     }
 
 
-@router.get("/{project_id}/jobs/{job_id}/progress")
+def _read_progress(project_id: str, job_id: str) -> dict:
+    progress_path = results_io.job_dir(project_id, job_id) / "progress.json"
+    try:
+        return json.loads(progress_path.read_text())
+    except (OSError, ValueError):
+        return {"max_gen": 0, "points": []}
+
+
+@router.get("/{project_id}/jobs/{job_id}/progress", response_model=JobProgress, response_model_exclude_unset=True)
 async def get_job_progress(
     project_id: str,
     job_id: str,
@@ -841,15 +599,47 @@ async def get_job_progress(
 ):
     """Get structured progress data for a running job."""
     await _verify_job_access(project_id, job_id, user, db)
-    progress_path = (
-        Path(storage.settings.project_dir) / project_id / "jobs" / job_id / "progress.json"
+    return await asyncio.to_thread(_read_progress, project_id, job_id)
+
+
+@router.post("/{project_id}/jobs/{job_id}/cancel", response_model=ExperimentSummary)
+async def cancel_job(
+    project_id: str,
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stop a pending or running job (editor access required).
+
+    The worker process is terminated and the job ends with status ``failed`` and
+    the error message "Cancelled by user.". Cancelling a finished job is a 409.
+    """
+    await get_project_access(project_id, user, db, require_role="editor")
+    result = await db.execute(
+        select(Job).options(selectinload(Job.owner)).where(Job.id == job_id, Job.project_id == project_id)
     )
-    if progress_path.exists():
-        try:
-            return json.loads(progress_path.read_text())
-        except Exception:
-            pass
-    return {"max_gen": 0, "points": []}
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in ("pending", "running"):
+        raise HTTPException(status_code=409, detail=f"Job is already {job.status}")
+
+    was_running = job.status == "running"
+    tracked = jobs.cancel(job_id)
+    if not (tracked and was_running):
+        # Queued (the runner will skip it) or orphaned (no live worker): close it here.
+        job.status = "failed"
+        job.error_message = jobs.CANCELLED_MESSAGE
+        job.completed_at = datetime.now(timezone.utc)
+        job.pid = None
+    else:
+        # The runner thread records the final state once the worker has exited;
+        # report it as cancelled right away.
+        job.error_message = jobs.CANCELLED_MESSAGE
+    await audit.log_action(db, user, "job.cancel", "job", job_id,
+                           details={"project_id": project_id})
+    await db.commit()
+    return _job_to_summary(job)
 
 
 @router.get("/{project_id}/jobs/{job_id}", response_model=ExperimentSummary)
@@ -860,7 +650,7 @@ async def get_job_status(
     db: AsyncSession = Depends(get_db),
 ):
     """Get the status of a running or completed job (viewer access)."""
-    await get_project_with_access(project_id, user, db, require_role="viewer")
+    await get_project_access(project_id, user, db, require_role="viewer")
     result = await db.execute(
         select(Job).options(selectinload(Job.owner)).where(Job.id == job_id, Job.project_id == project_id)
     )
@@ -869,9 +659,10 @@ async def get_job_status(
         raise HTTPException(status_code=404, detail="Job not found")
 
     if job.status == "completed" and job.results_path:
-        results = storage.get_job_result(project_id, job_id)
-        if results:
-            return _results_to_summary(job, results)
+        # summary.json is a few hundred bytes; the full results are not re-parsed on each poll
+        summary = await asyncio.to_thread(results_io.load_summary, project_id, job_id)
+        if summary:
+            return _job_to_summary(job, summary)
 
     return _job_to_summary(job)
 
@@ -886,7 +677,7 @@ async def get_job_detail(
     """Get detailed results of a completed job (viewer access)."""
     job = await _verify_job_access(project_id, job_id, user, db)
 
-    results = storage.get_job_result(project_id, job_id)
+    results = await results_io.aload_results(project_id, job_id)
     if not results:
         raise HTTPException(status_code=404, detail="Results not found")
 
@@ -905,10 +696,11 @@ async def get_job_detail(
         feature_names=results.get("feature_names", []),
         sample_names=results.get("sample_names", []),
         best_individual=IndividualResponse(**best) if best else None,
+        mock=bool(results.get("mock")) or None,
     )
 
 
-@router.get("/{project_id}/jobs/{job_id}/results")
+@router.get("/{project_id}/jobs/{job_id}/results", response_model=JobResults, response_model_exclude_unset=True)
 async def get_job_results_raw(
     project_id: str,
     job_id: str,
@@ -918,14 +710,14 @@ async def get_job_results_raw(
     """Get full results JSON including population and generation tracking (viewer access)."""
     await _verify_job_access(project_id, job_id, user, db)
 
-    results = storage.get_job_result(project_id, job_id)
+    results = await results_io.aload_results(project_id, job_id)
     if not results:
         raise HTTPException(status_code=404, detail="Results not found")
 
     return results
 
 
-@router.get("/{project_id}/jobs/{job_id}/stability")
+@router.get("/{project_id}/jobs/{job_id}/stability", response_model=StabilityAnalysis, response_model_exclude_unset=True)
 async def get_stability_analysis(
     project_id: str,
     job_id: str,
@@ -938,7 +730,7 @@ async def get_stability_analysis(
     Falls back to on-demand computation for legacy results.
     """
     await _verify_job_access(project_id, job_id, user, db)
-    results = storage.get_job_result(project_id, job_id)
+    results = await results_io.aload_results(project_id, job_id)
     if not results:
         raise HTTPException(status_code=404, detail="Results not found")
 
@@ -954,10 +746,10 @@ async def get_stability_analysis(
     if not population:
         raise HTTPException(status_code=400, detail="No population data in results")
 
-    return stability.compute_stability_analysis(population, feature_names)
+    return await asyncio.to_thread(stability.compute_stability_analysis, population, feature_names)
 
 
-@router.post("/{project_id}/jobs/{job_id}/validate")
+@router.post("/{project_id}/jobs/{job_id}/validate", response_model=ValidationResult, response_model_exclude_unset=True)
 async def validate_on_new_data(
     project_id: str,
     job_id: str,
@@ -976,44 +768,45 @@ async def validate_on_new_data(
     if job.status != "completed":
         raise HTTPException(status_code=400, detail="Job not completed")
 
-    results = storage.get_job_result(project_id, job_id)
+    results = await results_io.aload_results(project_id, job_id)
     if not results:
         raise HTTPException(status_code=404, detail="Results not found")
 
-    try:
-        x_content = await x_file.read()
-        x_data = parse_tsv(x_content)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse X file: {e}")
+    x_content = await read_upload(x_file)
+    y_content = await read_upload(y_file) if y_file is not None else None
 
-    y_labels = None
-    if y_file is not None:
+    def _score() -> dict:
         try:
-            y_content = await y_file.read()
-            y_df = parse_tsv(y_content)
-            y_labels = y_df.iloc[:, 0]
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to parse Y file: {e}")
+            x_data = parse_tsv(x_content)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"Failed to parse X file: {e}")
+        y_labels = None
+        if y_content is not None:
+            try:
+                y_labels = parse_tsv(y_content).iloc[:, 0]
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(status_code=400, detail=f"Failed to parse Y file: {e}")
+        try:
+            return predict_from_model(
+                results, x_data, y_labels=y_labels, features_in_rows=features_in_rows,
+            )
+        except UnsupportedModelError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Prediction failed for job %s", job_id)
+            raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
 
-    try:
-        prediction = predict_from_model(
-            results, x_data, y_labels=y_labels,
-            features_in_rows=features_in_rows,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
-
-    return prediction
+    return await asyncio.to_thread(_score)
 
 
-@router.get("/{project_id}/jobs")
+@router.get("/{project_id}/jobs", response_model=List[ExperimentSummary])
 async def list_jobs(
     project_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all jobs for a project (viewer access)."""
-    await get_project_with_access(project_id, user, db, require_role="viewer")
+    await get_project_access(project_id, user, db, require_role="viewer")
 
     result = await db.execute(
         select(Job)
@@ -1021,33 +814,32 @@ async def list_jobs(
         .where(Job.project_id == project_id)
         .order_by(Job.created_at.desc())
     )
-    jobs = result.scalars().all()
+    job_rows = result.scalars().all()
 
-    # Backfill missing cached columns for older jobs
+    # Backfill missing cached columns for older jobs (file work in a thread)
     dirty = False
-    for j in jobs:
+    for j in job_rows:
         if j.config_hash is None and j.config:
             j.config_hash = _compute_config_hash(j.config)
             dirty = True
         if j.disk_size_bytes is None and j.status == "completed":
-            j.disk_size_bytes = _job_disk_size(j.project_id, j.id)
+            j.disk_size_bytes = await asyncio.to_thread(jobs.job_disk_size, j.project_id, j.id)
             dirty = True
-        # Lazy backfill best_auc/best_k from results file if not cached yet
+        # Lazy backfill best_auc/best_k from the job summary if not cached yet
         if j.status == "completed" and j.best_auc is None:
-            results = storage.get_job_result(project_id, j.id)
-            if results:
-                best = results.get("best_individual", {})
-                j.best_auc = best.get("auc")
-                j.best_k = best.get("k")
+            summary = await asyncio.to_thread(results_io.load_summary, project_id, j.id)
+            if summary and summary.get("best_auc") is not None:
+                j.best_auc = summary.get("best_auc")
+                j.best_k = summary.get("best_k")
                 dirty = True
     if dirty:
         await db.commit()
 
     # All data now comes from DB — no per-job file reads needed
-    return [_job_to_summary(j) for j in jobs]
+    return [_job_to_summary(j) for j in job_rows]
 
 
-@router.delete("/{project_id}/jobs/{job_id}")
+@router.delete("/{project_id}/jobs/{job_id}", response_model=Detail, response_model_exclude_unset=True)
 async def delete_job(
     project_id: str,
     job_id: str,
@@ -1055,23 +847,29 @@ async def delete_job(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a job and its results (editor access required)."""
-    await get_project_with_access(project_id, user, db, require_role="editor")
+    await get_project_access(project_id, user, db, require_role="editor")
     job = await _verify_job_access(project_id, job_id, user, db)
 
-    if job.status == "running":
-        raise HTTPException(status_code=409, detail="Cannot delete a running job")
+    if job.status == "running" and jobs.is_tracked(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a running job — cancel it first",
+        )
+    # Queued jobs are skipped by the runner; a "running" job that no worker
+    # owns any more (left over from a restart) can simply be removed.
+    if job.status in ("pending", "running"):
+        jobs.cancel(job_id)
 
     await audit.log_action(db, user, audit.ACTION_JOB_DELETE, "job", job_id,
                            details={"project_id": project_id})
 
-    # Remove results files from disk
-    job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job_id
-    if job_dir.exists():
-        import shutil
-        shutil.rmtree(job_dir, ignore_errors=True)
-
     await db.execute(sa_delete(Job).where(Job.id == job_id))
     await db.commit()
+
+    # Remove files only once the database row is gone
+    job_dir = results_io.job_dir(project_id, job_id)
+    if job_dir.exists():
+        await asyncio.to_thread(shutil.rmtree, job_dir, True)
     return {"detail": "Job deleted"}
 
 
@@ -1127,35 +925,38 @@ def _config_summary(config: dict | None) -> str:
     return " | ".join(parts)
 
 
-def _job_disk_size(project_id: str, job_id: str) -> int | None:
-    """Compute total size of a job directory on disk (bytes)."""
-    job_dir = Path(storage.settings.project_dir) / project_id / "jobs" / job_id
-    if not job_dir.is_dir():
-        return None
-    total = 0
-    for f in job_dir.rglob("*"):
-        if f.is_file():
-            total += f.stat().st_size
-    return total
+def _aware(dt: datetime) -> datetime:
+    """Datetimes read back from SQLite are naive UTC; make them comparable."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-def _job_to_summary(job: Job) -> ExperimentSummary:
+def _job_to_summary(job: Job, summary: dict | None = None) -> ExperimentSummary:
     """Convert a Job ORM object to an ExperimentSummary.
 
-    Uses cached best_auc/best_k from DB columns — no file I/O needed.
+    Uses cached best_auc/best_k from DB columns — no file I/O needed. ``summary``
+    (the job's summary.json) adds the result dimensions for completed jobs.
     """
     config = job.config or {}
     gen = config.get("general", {})
     ga = config.get("ga", {})
+    summary = summary or {}
+    started = getattr(job, "started_at", None)
     duration = None
-    if job.completed_at and job.created_at:
-        duration = (job.completed_at - job.created_at).total_seconds()
+    # Run time, not queue time: measured from the moment the worker started.
+    begin = started or job.created_at
+    if job.completed_at and begin:
+        duration = max(0.0, (_aware(job.completed_at) - _aware(begin)).total_seconds())
     return ExperimentSummary(
         job_id=job.id,
         name=job.name,
         status=JobStatus(job.status),
-        best_auc=getattr(job, 'best_auc', None),
-        best_k=getattr(job, 'best_k', None),
+        fold_count=summary.get("fold_count") or 0,
+        generation_count=summary.get("generation_count") or 0,
+        execution_time=summary.get("execution_time") or 0.0,
+        feature_count=summary.get("feature_count") or 0,
+        sample_count=summary.get("sample_count") or 0,
+        best_auc=summary.get("best_auc") if summary.get("best_auc") is not None else job.best_auc,
+        best_k=summary.get("best_k") if summary.get("best_k") is not None else job.best_k,
         created_at=job.created_at.isoformat() if job.created_at else None,
         completed_at=job.completed_at.isoformat() if job.completed_at else None,
         duration_seconds=duration,
@@ -1164,42 +965,10 @@ def _job_to_summary(job: Job) -> ExperimentSummary:
         language=gen.get("language"),
         data_type=gen.get("data_type"),
         population_size=ga.get("population_size"),
-        config_hash=getattr(job, 'config_hash', None),
-        disk_size_bytes=getattr(job, 'disk_size_bytes', None),
-        batch_id=getattr(job, 'batch_id', None),
-        error_message=getattr(job, 'error_message', None),
-    )
-
-
-def _results_to_summary(job: Job, results: dict) -> ExperimentSummary:
-    """Convert a completed Job + results dict into a rich ExperimentSummary."""
-    best = results.get("best_individual", {})
-    config = job.config or {}
-    gen = config.get("general", {})
-    ga = config.get("ga", {})
-    duration = None
-    if job.completed_at and job.created_at:
-        duration = (job.completed_at - job.created_at).total_seconds()
-    return ExperimentSummary(
-        job_id=job.id,
-        name=job.name,
-        status=JobStatus.completed,
-        fold_count=results.get("fold_count", 0),
-        generation_count=results.get("generation_count", 0),
-        execution_time=results.get("execution_time", 0),
-        feature_count=len(results.get("feature_names", [])),
-        sample_count=len(results.get("sample_names", [])),
-        best_auc=best.get("auc"),
-        best_k=best.get("k"),
-        created_at=job.created_at.isoformat() if job.created_at else None,
-        completed_at=job.completed_at.isoformat() if job.completed_at else None,
-        duration_seconds=duration,
-        config_summary=_config_summary(config),
-        user_name=job.owner.full_name if job.owner and job.owner.full_name else (job.owner.email if job.owner else None),
-        language=gen.get("language"),
-        data_type=gen.get("data_type"),
-        population_size=ga.get("population_size"),
-        config_hash=getattr(job, 'config_hash', None),
-        disk_size_bytes=getattr(job, 'disk_size_bytes', None),
-        batch_id=getattr(job, 'batch_id', None),
+        config_hash=job.config_hash,
+        disk_size_bytes=job.disk_size_bytes,
+        batch_id=job.batch_id,
+        error_message=job.error_message,
+        started_at=started.isoformat() if started else None,
+        mock=True if summary.get("mock") else None,
     )

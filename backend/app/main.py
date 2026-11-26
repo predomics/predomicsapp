@@ -1,8 +1,7 @@
 """PredomicsApp FastAPI application."""
 
+import asyncio
 import logging
-import secrets
-import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,1105 +11,131 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .core.config import settings
-from .core.database import engine, Base
+from .core.version import __version__
+from .core import metrics, observability
+from .core.database import engine
 from .models import db_models  # noqa: F401 — ensure models are registered
 from .routers import health, projects, analysis, auth, samples, datasets, sharing, admin, data_explore, export, websocket, templates, webhook_router, predict, dashboard, comments, public, meta_analysis, signature_zoo
-from .routers.datasets import _infer_role
 from .services.storage import ensure_dirs
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+# Logging (text or JSON, level from settings) is configured by observability.install().
+observability.configure_logging()
 
 _log = logging.getLogger(__name__)
 
 
-async def _migrate_datasets_to_user_library(conn):
-    """Migrate datasets from project-level to user-level storage.
+_DEMO_EMAIL = "demo@predomics.com"
+_DEMO_PASSWORD = "demo"
 
-    Adds user_id/description columns to datasets, populates them from
-    project ownership, creates project_datasets junction entries, and
-    copies files to user-level storage. Idempotent.
+
+async def _run_migrations() -> None:
+    """Bring the database schema up to date (Alembic; see ``migrate.py``).
+
+    With PREDOMICS_AUTO_MIGRATE=false the application does not change the schema
+    itself: it refuses to start unless the database is already at the current
+    revision (run ``python -m backend.app.migrate`` as a separate step).
     """
-    # Check if migration already applied
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v2_dataset_library'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
+    from . import migrate
 
-    # Add user_id column if missing
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'datasets' AND column_name = 'user_id'"
-    ))
-    if not r.scalar():
-        _log.info("Migration: adding user_id and description columns to datasets")
-        await conn.execute(text("ALTER TABLE datasets ADD COLUMN user_id VARCHAR(12)"))
-        await conn.execute(text("ALTER TABLE datasets ADD COLUMN description TEXT DEFAULT ''"))
-
-    # Check if old project_id column exists (needs migration)
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'datasets' AND column_name = 'project_id'"
-    ))
-    if not r.scalar():
-        # No project_id column — fresh install, nothing to migrate
-        try:
-            await conn.execute(text(
-                "INSERT INTO schema_versions (version, applied_at) "
-                "VALUES ('v2_dataset_library', NOW()) ON CONFLICT DO NOTHING"
-            ))
-        except Exception:
-            pass
-        return
-
-    # Migrate datasets: set user_id, create junction entries, copy files
-    rows = await conn.execute(text(
-        "SELECT d.id, d.filename, d.disk_path, d.project_id, p.user_id "
-        "FROM datasets d JOIN projects p ON d.project_id = p.id "
-        "WHERE d.user_id IS NULL"
-    ))
-    to_migrate = rows.fetchall()
-
-    if to_migrate:
-        _log.info("Migration: migrating %d datasets to user library", len(to_migrate))
-
-    for ds_id, filename, disk_path, project_id, user_id in to_migrate:
-        # Set user_id
-        await conn.execute(text(
-            "UPDATE datasets SET user_id = :uid WHERE id = :did"
-        ), {"uid": user_id, "did": ds_id})
-
-        # Create junction entry if not exists
-        r = await conn.execute(text(
-            "SELECT 1 FROM project_datasets "
-            "WHERE project_id = :pid AND dataset_id = :did"
-        ), {"pid": project_id, "did": ds_id})
-        if not r.scalar():
-            role = _infer_role(filename)
-            link_id = secrets.token_hex(6)
-            await conn.execute(text(
-                "INSERT INTO project_datasets (id, project_id, dataset_id, role, assigned_at) "
-                "VALUES (:id, :pid, :did, :role, NOW())"
-            ), {"id": link_id, "pid": project_id, "did": ds_id, "role": role})
-
-        # Copy file to user-level storage
-        old_path = Path(disk_path)
-        if old_path.exists():
-            new_dir = settings.data_dir / "datasets" / user_id
-            new_dir.mkdir(parents=True, exist_ok=True)
-            new_path = new_dir / f"{ds_id}_{filename}"
-            if not new_path.exists():
-                shutil.copy2(old_path, new_path)
-            await conn.execute(text(
-                "UPDATE datasets SET disk_path = :path WHERE id = :did"
-            ), {"path": str(new_path), "did": ds_id})
-
-        _log.info("  Migrated dataset %s (%s) → user %s", ds_id, filename, user_id)
-
-    # Record migration
-    try:
-        await conn.execute(text(
-            "INSERT INTO schema_versions (version, applied_at) "
-            "VALUES ('v2_dataset_library', NOW()) ON CONFLICT DO NOTHING"
-        ))
-    except Exception:
-        pass
-    _log.info("Migration v2_dataset_library complete")
+    if migrate.auto_migrate_enabled():
+        await migrate.upgrade_database()
+    else:
+        await migrate.require_up_to_date()
 
 
-async def _migrate_to_composite_datasets(conn):
-    """Migrate single-file datasets to composite dataset groups (v3).
+async def _bootstrap_accounts() -> None:
+    """Apply the account settings: admin bootstrap and the optional demo user.
 
-    Creates dataset_files records from old datasets, groups per-project
-    datasets into single composite datasets, and adds missing columns
-    to projects/datasets tables.  Idempotent.
+    - PREDOMICS_ADMIN_EMAIL: that account (once it exists) is an administrator.
+    - PREDOMICS_SEED_DEMO=true: make sure demo@predomics.com / demo exists.
+    - Otherwise a leftover demo account that still has the published password is
+      deactivated, because anyone could log in with it.
     """
-    # Check if already applied
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v3_composite_datasets'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
+    from .core.security import hash_password, verify_password
 
-    _log.info("Migration v3: composite datasets — starting")
+    async with engine.begin() as conn:
+        admin_email = (settings.admin_email or "").strip().lower()
+        if admin_email:
+            r = await conn.execute(
+                text("UPDATE users SET is_admin = TRUE WHERE lower(email) = :e AND is_admin IS NOT TRUE"),
+                {"e": admin_email},
+            )
+            if r.rowcount:
+                _log.info("Granted admin rights to the PREDOMICS_ADMIN_EMAIL account")
 
-    # ── 0. Widen id columns from VARCHAR(8) to VARCHAR(12) ────────────
-    # The old schema used 8-char IDs; the new model uses 12-char IDs.
-    widen_cols = [
-        ("users", "id"), ("projects", "id"), ("projects", "user_id"),
-        ("datasets", "id"), ("datasets", "user_id"),
-        ("project_datasets", "id"), ("project_datasets", "project_id"),
-        ("project_datasets", "dataset_id"),
-        ("jobs", "id"), ("jobs", "project_id"),
-        ("project_shares", "id"), ("project_shares", "project_id"),
-        ("project_shares", "user_id"), ("project_shares", "shared_by"),
-        ("schema_versions", "version"),
-    ]
-    for tbl, col in widen_cols:
-        try:
-            r = await conn.execute(text(
-                "SELECT character_maximum_length FROM information_schema.columns "
-                "WHERE table_name = :tbl AND column_name = :col"
-            ), {"tbl": tbl, "col": col})
-            max_len = r.scalar()
-            if max_len is not None and max_len < 12 and col != "version":
+        row = (await conn.execute(
+            text("SELECT id, hashed_password, is_active FROM users WHERE email = :e"),
+            {"e": _DEMO_EMAIL},
+        )).first()
+        if settings.seed_demo:
+            if row is None:
+                import uuid
                 await conn.execute(text(
-                    f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE VARCHAR(12)"
-                ))
-                _log.info("  Widened %s.%s from VARCHAR(%s) to VARCHAR(12)", tbl, col, max_len)
-        except Exception as e:
-            _log.debug("  Skip widening %s.%s: %s", tbl, col, e)
-
-    # ── 0b. Make old datasets columns nullable (they'll be dropped later) ─
-    for old_col in ("project_id", "filename", "disk_path", "uploaded_at"):
-        try:
-            r = await conn.execute(text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'datasets' AND column_name = :col"
-            ), {"col": old_col})
-            if r.scalar():
-                await conn.execute(text(
-                    f"ALTER TABLE datasets ALTER COLUMN {old_col} DROP NOT NULL"
-                ))
-        except Exception as e:
-            _log.debug("  Skip nullable %s: %s", old_col, e)
-
-    # Also make project_datasets.role nullable (column being removed)
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'project_datasets' AND column_name = 'role'"
-        ))
-        if r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE project_datasets ALTER COLUMN role DROP NOT NULL"
-            ))
-    except Exception:
-        pass
-
-    # ── 1. Add missing columns ──────────────────────────────────────────
-
-    # datasets.name
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'datasets' AND column_name = 'name'"
-    ))
-    if not r.scalar():
-        await conn.execute(text("ALTER TABLE datasets ADD COLUMN name VARCHAR(255)"))
-
-    # datasets.created_at (old schema had uploaded_at)
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'datasets' AND column_name = 'created_at'"
-    ))
-    if not r.scalar():
-        await conn.execute(text(
-            "ALTER TABLE datasets ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
-        ))
-        r2 = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'datasets' AND column_name = 'uploaded_at'"
-        ))
-        if r2.scalar():
-            await conn.execute(text(
-                "UPDATE datasets SET created_at = uploaded_at WHERE created_at IS NULL"
-            ))
-
-    # projects.description
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'projects' AND column_name = 'description'"
-    ))
-    if not r.scalar():
-        await conn.execute(text(
-            "ALTER TABLE projects ADD COLUMN description VARCHAR(500) DEFAULT ''"
-        ))
-
-    # projects.updated_at
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'projects' AND column_name = 'updated_at'"
-    ))
-    if not r.scalar():
-        await conn.execute(text(
-            "ALTER TABLE projects ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE"
-        ))
-
-    # ── 2. Check if old-style datasets exist (have filename column) ─────
-
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'datasets' AND column_name = 'filename'"
-    ))
-    has_filename_col = r.scalar() is not None
-
-    if not has_filename_col:
-        # Fresh install — nothing to migrate
-        await conn.execute(text(
-            "INSERT INTO schema_versions (version, applied_at) "
-            "VALUES ('v3_composite_datasets', NOW()) ON CONFLICT DO NOTHING"
-        ))
-        _log.info("Migration v3: fresh install, nothing to migrate")
-        return
-
-    # Check if any old-style datasets need migration
-    rows = await conn.execute(text(
-        "SELECT d.id, d.filename, d.disk_path, d.user_id "
-        "FROM datasets d "
-        "WHERE d.filename IS NOT NULL AND d.filename != '' "
-        "AND NOT EXISTS (SELECT 1 FROM dataset_files df WHERE df.dataset_id = d.id)"
-    ))
-    old_datasets = rows.fetchall()
-
-    if not old_datasets:
-        await conn.execute(text(
-            "INSERT INTO schema_versions (version, applied_at) "
-            "VALUES ('v3_composite_datasets', NOW()) ON CONFLICT DO NOTHING"
-        ))
-        _log.info("Migration v3: no old-style datasets to migrate")
-        return
-
-    _log.info("Migration v3: migrating %d old-style datasets", len(old_datasets))
-    old_ds_map = {r[0]: (r[1], r[2], r[3]) for r in old_datasets}
-
-    # ── 3. Group datasets by project ────────────────────────────────────
-
-    from collections import defaultdict
-
-    pd_rows = await conn.execute(text(
-        "SELECT pd.project_id, pd.dataset_id, pd.role, p.name AS project_name, p.user_id "
-        "FROM project_datasets pd "
-        "JOIN projects p ON pd.project_id = p.id"
-    ))
-    assignments = pd_rows.fetchall()
-
-    project_groups = defaultdict(list)    # project_id -> [(ds_id, role, proj_name, user_id)]
-    assigned_dataset_ids = set()
-    for proj_id, ds_id, role, proj_name, user_id in assignments:
-        project_groups[proj_id].append((ds_id, role, proj_name, user_id))
-        assigned_dataset_ids.add(ds_id)
-
-    # ── 4. For each project, create ONE composite dataset ───────────────
-
-    for proj_id, group in project_groups.items():
-        if not group:
-            continue
-        proj_name = group[0][2]
-        user_id = group[0][3]
-
-        new_ds_id = secrets.token_hex(6)
-        await conn.execute(text(
-            "INSERT INTO datasets (id, name, description, user_id, created_at) "
-            "VALUES (:id, :name, '', :uid, NOW())"
-        ), {"id": new_ds_id, "name": proj_name, "uid": user_id})
-
-        for ds_id, role, _, _ in group:
-            if ds_id not in old_ds_map:
-                continue
-            filename, disk_path, _ = old_ds_map[ds_id]
-            if not filename:
-                continue
-            file_id = secrets.token_hex(6)
-            await conn.execute(text(
-                "INSERT INTO dataset_files (id, dataset_id, filename, role, disk_path, uploaded_at) "
-                "VALUES (:id, :dsid, :fn, :role, :dp, NOW())"
-            ), {"id": file_id, "dsid": new_ds_id, "fn": filename, "role": role, "dp": disk_path or ""})
-
-        # Replace old links with one link to the composite
-        await conn.execute(text(
-            "DELETE FROM project_datasets WHERE project_id = :pid"
-        ), {"pid": proj_id})
-        link_id = secrets.token_hex(6)
-        await conn.execute(text(
-            "INSERT INTO project_datasets (id, project_id, dataset_id, assigned_at) "
-            "VALUES (:id, :pid, :did, NOW())"
-        ), {"id": link_id, "pid": proj_id, "did": new_ds_id})
-
-        _log.info("  Project '%s': grouped %d files → composite %s", proj_name, len(group), new_ds_id)
-
-    # ── 5. Handle orphan datasets (not assigned to any project) ─────────
-
-    for ds_id, (filename, disk_path, user_id) in old_ds_map.items():
-        if ds_id in assigned_dataset_ids:
-            continue
-        # Convert in-place: set name, create a DatasetFile
-        await conn.execute(text(
-            "UPDATE datasets SET name = :name WHERE id = :id AND (name IS NULL OR name = '')"
-        ), {"name": filename, "id": ds_id})
-        file_id = secrets.token_hex(6)
-        role = _infer_role(filename) if filename else None
-        await conn.execute(text(
-            "INSERT INTO dataset_files (id, dataset_id, filename, role, disk_path, uploaded_at) "
-            "VALUES (:id, :dsid, :fn, :role, :dp, NOW())"
-        ), {"id": file_id, "dsid": ds_id, "fn": filename, "role": role, "dp": disk_path or ""})
-        _log.info("  Orphan dataset %s (%s): converted to single-file group", ds_id, filename)
-
-    # ── 6. Clean up old assigned datasets ───────────────────────────────
-
-    for ds_id in assigned_dataset_ids:
-        r = await conn.execute(text(
-            "SELECT 1 FROM project_datasets WHERE dataset_id = :did"
-        ), {"did": ds_id})
-        if not r.scalar():
-            await conn.execute(text("DELETE FROM datasets WHERE id = :id"), {"id": ds_id})
-
-    # ── 7. Drop old columns that are no longer part of the model ────────
-    for old_col in ("project_id", "filename", "disk_path", "uploaded_at"):
-        try:
-            r = await conn.execute(text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'datasets' AND column_name = :col"
-            ), {"col": old_col})
-            if r.scalar():
-                # Drop FK constraint on project_id first if present
-                if old_col == "project_id":
-                    try:
-                        await conn.execute(text(
-                            "ALTER TABLE datasets DROP CONSTRAINT IF EXISTS datasets_project_id_fkey"
-                        ))
-                    except Exception:
-                        pass
-                await conn.execute(text(f"ALTER TABLE datasets DROP COLUMN {old_col}"))
-                _log.info("  Dropped datasets.%s", old_col)
-        except Exception as e:
-            _log.debug("  Skip drop datasets.%s: %s", old_col, e)
-
-    # Drop old role column from project_datasets
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'project_datasets' AND column_name = 'role'"
-        ))
-        if r.scalar():
-            await conn.execute(text("ALTER TABLE project_datasets DROP COLUMN role"))
-            _log.info("  Dropped project_datasets.role")
-    except Exception:
-        pass
-
-    # Record migration
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v3_composite_datasets', NOW()) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v3_composite_datasets complete")
-
-
-async def _migrate_add_admin_flag(conn):
-    """v4: Add is_admin column to users, seed admin + demo user. Idempotent."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v4_admin_flag'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v4: admin flag — starting")
-
-    # Add is_admin column if missing
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'users' AND column_name = 'is_admin'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE"
-            ))
-            _log.info("  Added users.is_admin column")
-    except Exception:
-        # SQLite: column created by Base.metadata.create_all
-        pass
-
-    # Promote prifti to admin
-    await conn.execute(text(
-        "UPDATE users SET is_admin = TRUE WHERE email LIKE '%prifti%'"
-    ))
-
-    # Seed demo user if not exists
-    from .core.security import hash_password
-    r = await conn.execute(text(
-        "SELECT 1 FROM users WHERE email = 'demo@predomics.com'"
-    ))
-    if not r.scalar():
-        import uuid
-        demo_id = uuid.uuid4().hex[:12]
-        demo_pw = hash_password("demo")
-        await conn.execute(text(
-            "INSERT INTO users (id, email, hashed_password, full_name, is_active, is_admin, created_at) "
-            "VALUES (:id, :email, :pw, :name, TRUE, FALSE, CURRENT_TIMESTAMP)"
-        ), {
-            "id": demo_id,
-            "email": "demo@predomics.com",
-            "pw": demo_pw,
-            "name": "Demo User",
-        })
-        _log.info("  Created demo user: demo@predomics.com / demo")
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v4_admin_flag', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v4_admin_flag complete")
-
-
-async def _migrate_add_job_name(conn):
-    """v5: Add name column to jobs table. Idempotent."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v5_job_name'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v5: job name — starting")
-
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'jobs' AND column_name = 'name'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE jobs ADD COLUMN name VARCHAR(255)"
-            ))
-            _log.info("  Added jobs.name column")
-    except Exception:
-        pass
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v5_job_name', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v5_job_name complete")
-
-
-async def _migrate_add_job_user_id(conn):
-    """v6: Add user_id FK to jobs table for tracking who launched each job."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v6_job_user_id'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v6: job user_id — starting")
-
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'jobs' AND column_name = 'user_id'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE jobs ADD COLUMN user_id VARCHAR(12) REFERENCES users(id) ON DELETE SET NULL"
-            ))
-            _log.info("  Added jobs.user_id column")
-    except Exception:
-        pass
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v6_job_user_id', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v6_job_user_id complete")
-
-
-async def _migrate_add_job_config_hash(conn):
-    """v7: Add config_hash column to jobs for duplicate detection."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v7_job_config_hash'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v7: job config_hash — starting")
-
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'jobs' AND column_name = 'config_hash'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE jobs ADD COLUMN config_hash VARCHAR(32)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_jobs_config_hash ON jobs (config_hash)"
-            ))
-            _log.info("  Added jobs.config_hash column with index")
-    except Exception:
-        pass
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v7_job_config_hash', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v7_job_config_hash complete")
-
-
-async def _migrate_add_job_disk_size(conn):
-    """v8: Add disk_size_bytes column to jobs for cached disk usage."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v8_job_disk_size'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v8: job disk_size_bytes — starting")
-
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'jobs' AND column_name = 'disk_size_bytes'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE jobs ADD COLUMN disk_size_bytes BIGINT"
-            ))
-            _log.info("  Added jobs.disk_size_bytes column")
-    except Exception:
-        pass
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v8_job_disk_size', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v8_job_disk_size complete")
-
-
-async def _migrate_add_dataset_tags(conn):
-    """v9: Add tags JSON column to datasets."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v9_dataset_tags'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v9: dataset tags — starting")
-
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'datasets' AND column_name = 'tags'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE datasets ADD COLUMN tags JSON DEFAULT '[]'"
-            ))
-            _log.info("  Added datasets.tags column")
-    except Exception:
-        pass
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v9_dataset_tags', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v9_dataset_tags complete")
-
-
-async def _migrate_add_job_batch_id(conn):
-    """v10: Add batch_id column to jobs for batch run grouping."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v10_job_batch_id'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v10: job batch_id — starting")
-
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'jobs' AND column_name = 'batch_id'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE jobs ADD COLUMN batch_id VARCHAR(12)"
-            ))
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_jobs_batch_id ON jobs (batch_id)"
-            ))
-            _log.info("  Added jobs.batch_id column with index")
-    except Exception:
-        pass
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v10_job_batch_id', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v10_job_batch_id complete")
-
-
-async def _migrate_add_audit_log(conn):
-    """v11: Create audit_logs table."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v11_audit_log'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-    _log.info("Migration v11: audit log — starting")
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v11_audit_log', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v11_audit_log complete")
-
-
-async def _migrate_add_password_reset(conn):
-    """v12: Add password_reset_tokens table and email_verified column."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v12_password_reset'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-    _log.info("Migration v12: password reset — starting")
-    # Add email_verified column to users if missing
-    r = await conn.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'users' AND column_name = 'email_verified'"
-    ))
-    if not r.scalar():
-        await conn.execute(text(
-            "ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE"
-        ))
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v12_password_reset', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v12_password_reset complete")
-
-
-async def _migrate_add_api_keys(conn):
-    """v13: Create api_keys table."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v13_api_keys'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-    _log.info("Migration v13: api keys — starting")
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v13_api_keys', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v13_api_keys complete")
-
-
-async def _migrate_add_webhooks(conn):
-    """v14: Create webhooks table."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v14_webhooks'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-    _log.info("Migration v14: webhooks — starting")
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v14_webhooks', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v14_webhooks complete")
-
-
-async def _migrate_add_dataset_versions(conn):
-    """v15: Create dataset_versions table."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v15_dataset_versions'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-    _log.info("Migration v15: dataset versions — starting")
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v15_dataset_versions', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v15_dataset_versions complete")
-
-
-async def _migrate_add_job_best_auc(conn):
-    """v16: Add best_auc and best_k columns to jobs for fast list_jobs."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v16_job_best_auc'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v16: job best_auc/best_k — starting")
-
-    for col, col_type in [("best_auc", "FLOAT"), ("best_k", "INTEGER")]:
-        try:
-            r = await conn.execute(text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'jobs' AND column_name = :col"
-            ), {"col": col})
-            if not r.scalar():
-                await conn.execute(text(
-                    f"ALTER TABLE jobs ADD COLUMN {col} {col_type}"
-                ))
-                _log.info("  Added jobs.%s column", col)
-        except Exception:
-            pass
-
-    # Backfill from results.json files for existing completed jobs
-    try:
-        rows = await conn.execute(text(
-            "SELECT id, project_id FROM jobs "
-            "WHERE status = 'completed' AND best_auc IS NULL"
-        ))
-        to_backfill = rows.fetchall()
-        if to_backfill:
-            _log.info("  Backfilling best_auc/best_k for %d completed jobs", len(to_backfill))
-            import json as _json
-            for job_id, project_id in to_backfill:
-                results_path = Path(settings.project_dir) / project_id / "jobs" / job_id / "results.json"
-                if results_path.exists():
-                    try:
-                        with open(results_path) as rf:
-                            res = _json.load(rf)
-                        best = res.get("best_individual", {})
-                        auc = best.get("auc")
-                        k = best.get("k")
-                        if auc is not None or k is not None:
-                            await conn.execute(text(
-                                "UPDATE jobs SET best_auc = :auc, best_k = :k WHERE id = :id"
-                            ), {"auc": auc, "k": k, "id": job_id})
-                    except Exception:
-                        pass
-    except Exception as e:
-        _log.warning("  Backfill skipped: %s", e)
-
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v16_job_best_auc', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v16_job_best_auc complete")
-
-
-async def _migrate_add_project_comments(conn):
-    """v17: Create project_comments table."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v17_project_comments'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v17: project_comments — starting")
-    await conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS project_comments (
-            id VARCHAR(12) PRIMARY KEY,
-            project_id VARCHAR(12) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            user_id VARCHAR(12) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            content TEXT NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-    """))
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v17_project_comments', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v17_project_comments complete")
-
-
-async def _migrate_add_public_shares(conn):
-    """v18: Create public_shares table."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v18_public_shares'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v18: public_shares — starting")
-    await conn.execute(text("""
-        CREATE TABLE IF NOT EXISTS public_shares (
-            id VARCHAR(12) PRIMARY KEY,
-            project_id VARCHAR(12) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            token VARCHAR(64) NOT NULL UNIQUE,
-            created_by VARCHAR(12) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            expires_at TIMESTAMP WITH TIME ZONE,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    await conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS ix_public_shares_token ON public_shares(token)"
-    ))
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v18_public_shares', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v18_public_shares complete")
-
-
-async def _migrate_add_project_class_names(conn):
-    """v19: Add class_names JSON column to projects."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v19_project_class_names'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v19: project class_names — starting")
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'projects' AND column_name = 'class_names'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE projects ADD COLUMN class_names JSON"
-            ))
-            _log.info("  Added projects.class_names column")
-    except Exception:
-        pass
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v19_project_class_names', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v19_project_class_names complete")
-
-
-async def _migrate_add_dataset_archived(conn):
-    """v20: Add archived boolean column to datasets."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v20_dataset_archived'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v20: dataset archived — starting")
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'datasets' AND column_name = 'archived'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE datasets ADD COLUMN archived BOOLEAN DEFAULT FALSE"
-            ))
-            _log.info("  Added datasets.archived column")
-    except Exception:
-        pass
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v20_dataset_archived', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v20_dataset_archived complete")
-
-
-async def _migrate_add_dataset_metadata(conn):
-    """v21: Add metadata JSON column to datasets."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v21_dataset_data_meta'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v21: dataset metadata — starting")
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'datasets' AND column_name = 'data_meta'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE datasets ADD COLUMN data_meta JSON"
-            ))
-            _log.info("  Added datasets.data_meta column")
-    except Exception:
-        pass
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v21_dataset_data_meta', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v21_dataset_data_meta complete")
-
-
-async def _migrate_add_scitq_task_id(conn):
-    """v22: Add scitq_task_id column to jobs for distributed task queue integration."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v22_scitq_task_id'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v22: scitq_task_id — starting")
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'jobs' AND column_name = 'scitq_task_id'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE jobs ADD COLUMN scitq_task_id INTEGER"
-            ))
-            _log.info("  Added jobs.scitq_task_id column")
-    except Exception:
-        pass
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v22_scitq_task_id', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v22_scitq_task_id complete")
-
-
-async def _migrate_add_project_archived(conn):
-    """v23: Add archived boolean column to projects."""
-    try:
-        r = await conn.execute(
-            text("SELECT 1 FROM schema_versions WHERE version = 'v23_project_archived'")
-        )
-        if r.scalar():
-            return
-    except Exception:
-        pass
-
-    _log.info("Migration v23: project archived — starting")
-    try:
-        r = await conn.execute(text(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = 'projects' AND column_name = 'archived'"
-        ))
-        if not r.scalar():
-            await conn.execute(text(
-                "ALTER TABLE projects ADD COLUMN archived BOOLEAN DEFAULT FALSE"
-            ))
-            _log.info("  Added projects.archived column")
-    except Exception:
-        pass
-    await conn.execute(text(
-        "INSERT INTO schema_versions (version, applied_at) "
-        "VALUES ('v23_project_archived', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-    ))
-    _log.info("Migration v23_project_archived complete")
+                    "INSERT INTO users (id, email, hashed_password, full_name, is_active, is_admin, created_at) "
+                    "VALUES (:id, :email, :pw, :name, TRUE, FALSE, CURRENT_TIMESTAMP)"
+                ), {"id": uuid.uuid4().hex[:12], "email": _DEMO_EMAIL,
+                    "pw": hash_password(_DEMO_PASSWORD), "name": "Demo User"})
+                _log.warning("PREDOMICS_SEED_DEMO is on: created %s with a public password", _DEMO_EMAIL)
+            elif not row.is_active:
+                await conn.execute(text("UPDATE users SET is_active = TRUE WHERE id = :id"), {"id": row.id})
+        elif row is not None and row.is_active and verify_password(_DEMO_PASSWORD, row.hashed_password):
+            await conn.execute(
+                text("UPDATE users SET is_active = FALSE, is_admin = FALSE WHERE id = :id"), {"id": row.id}
+            )
+            _log.warning(
+                "Deactivated %s: it still had the published default password. "
+                "Set PREDOMICS_SEED_DEMO=true to keep a public demo account.", _DEMO_EMAIL,
+            )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown events."""
     ensure_dirs()
-    # Create database tables (for dev; use Alembic migrations in production)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    # Run migrations for existing databases
-    async with engine.begin() as conn:
-        await _migrate_datasets_to_user_library(conn)
-    async with engine.begin() as conn:
-        await _migrate_to_composite_datasets(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_admin_flag(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_job_name(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_job_user_id(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_job_config_hash(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_job_disk_size(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_dataset_tags(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_job_batch_id(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_audit_log(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_password_reset(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_api_keys(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_webhooks(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_dataset_versions(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_job_best_auc(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_project_comments(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_public_shares(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_project_class_names(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_dataset_archived(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_dataset_metadata(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_scitq_task_id(conn)
-    async with engine.begin() as conn:
-        await _migrate_add_project_archived(conn)
-    _log.info("PredomicsApp started — data_dir=%s", settings.data_dir)
+    # Create or upgrade the schema (Alembic), unless PREDOMICS_AUTO_MIGRATE is off.
+    await _run_migrations()
+    await _bootstrap_accounts()
+    # Recover the jobs of the previous process: queued ones are queued again,
+    # interrupted ones are marked failed (see services/jobs.py).
+    from .services import jobs as job_runner
+    await asyncio.to_thread(job_runner.reconcile_orphaned_jobs)
+    # Find out what the installed engine supports and whether the defaults fit it.
+    # A few seconds of real (tiny) fits the first time, cached afterwards: do not
+    # hold up startup for it.
+    from .services import engine as ml_engine
+
+    async def _check_engine() -> None:
+        try:
+            await asyncio.to_thread(ml_engine.check_startup_compatibility)
+        except Exception:  # noqa: BLE001 - diagnostics must never stop the application
+            _log.exception("Engine capability check failed")
+
+    engine_check = asyncio.create_task(_check_engine())
+    # Periodic clean-up of old job files and backups (a no-op unless retention is configured).
+    from .services import retention
+    retention.start_scheduler()
+    _log.info("PredomicsApp %s started — data_dir=%s", __version__, settings.data_dir)
     yield
+    retention.stop_scheduler()
+    engine_check.cancel()
+    await asyncio.to_thread(job_runner.shutdown)
 
 
 app = FastAPI(
     title="PredomicsApp API",
     description="Web API for gpredomics — sparse interpretable ML model discovery",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    # PREDOMICS_API_DOCS=false hides the interactive documentation and the schema.
+    docs_url="/api/docs" if settings.api_docs else None,
+    redoc_url="/api/redoc" if settings.api_docs else None,
+    openapi_url="/api/openapi.json" if settings.api_docs else None,
 )
+
+# Commit the request's database session before its response is sent (see
+# database.get_db). Added first so that it is the innermost middleware.
+from .core.database import CommitBeforeResponseMiddleware  # noqa: E402
+app.add_middleware(CommitBeforeResponseMiddleware)
 
 # CORS for Vue.js dev server
 app.add_middleware(
@@ -1125,9 +150,28 @@ app.add_middleware(
 from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Baseline security headers for every response (also when no reverse proxy adds them)."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
+
+
+# Request ids, access log, request metrics and error tracking. Added last so that
+# it is the outermost middleware and sees every request and response.
+observability.install(app)
+
 # Structured error responses
-from .core.errors import http_error_handler, generic_error_handler  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from .core.errors import http_error_handler, generic_error_handler, validation_error_handler  # noqa: E402
 app.add_exception_handler(HTTPException, http_error_handler)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.add_exception_handler(Exception, generic_error_handler)
 
 # Rate limiting
@@ -1160,6 +204,9 @@ app.include_router(meta_analysis.router, prefix="/api")
 app.include_router(signature_zoo.router, prefix="/api")
 app.include_router(websocket.router)  # WebSocket (no /api prefix, uses /ws/)
 
+# Prometheus metrics at /metrics (must be registered before the SPA catch-all below).
+metrics.install(app)
+
 # Serve Vue.js frontend (production: built into backend/static/)
 _static_dir = Path(__file__).parent / "static"
 if _static_dir.is_dir():
@@ -1168,15 +215,22 @@ if _static_dir.is_dir():
     app.mount("/assets", StaticFiles(directory=_static_dir / "assets"), name="assets")
 
     # Paths that should NOT be handled by the SPA (let FastAPI handle them)
-    _reserved_paths = {"health", "api", "ws"}
+    _reserved_paths = {"health", "api", "ws", "metrics"}
+    _static_root = _static_dir.resolve()
 
-    @app.get("/{full_path:path}")
+    # HEAD as well as GET: uptime monitors commonly probe with HEAD.
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     async def serve_spa(full_path: str):
         """Serve Vue.js SPA — all non-API/docs routes return index.html."""
         first_segment = full_path.split("/")[0] if full_path else ""
         if first_segment in _reserved_paths:
             raise HTTPException(status_code=404, detail="Not found")
-        file_path = _static_dir / full_path
-        if file_path.is_file():
+        # Only ever serve files that really live inside the static directory:
+        # "../" (plain or percent-encoded) must not reach the rest of the filesystem.
+        try:
+            file_path = (_static_dir / full_path).resolve()
+        except (OSError, ValueError):
+            raise HTTPException(status_code=404, detail="Not found")
+        if file_path.is_relative_to(_static_root) and file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(_static_dir / "index.html")

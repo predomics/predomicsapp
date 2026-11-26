@@ -8,6 +8,8 @@ coloring inspired by the Interpred approach and SCAPIS ecosystem code.
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import time
 from typing import Any
 
@@ -15,6 +17,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from . import matrix_io
 from . import msp_annotations
 from .taxonomy_colors import assign_taxonomy_colors, MODULE_COLORS
 
@@ -22,20 +25,38 @@ logger = logging.getLogger(__name__)
 
 # TTL cache for network computation results
 _cache: dict[tuple, tuple[float, dict]] = {}
+_cache_lock = threading.Lock()
 _CACHE_TTL = 600  # 10 minutes
+_CACHE_MAX = 10
+
+
+def _file_state(path: str) -> tuple:
+    try:
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (0, 0)
 
 
 def _cache_key(
     x_path: str, y_path: str, min_prevalence_pct: float,
     correlation_threshold: float, class_filter: str,
     features_csv: str, community_method: str = "louvain",
+    features_in_rows: bool = True, job_key: str = "",
 ) -> tuple:
-    return (x_path, y_path, min_prevalence_pct, correlation_threshold, class_filter, features_csv, community_method)
+    return (
+        x_path, y_path, min_prevalence_pct, correlation_threshold, class_filter,
+        features_csv, community_method, bool(features_in_rows), job_key,
+        _file_state(x_path), _file_state(y_path),
+    )
 
 
 def _get_cached(key: tuple) -> dict | None:
-    if key in _cache:
-        ts, result = _cache[key]
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is None:
+            return None
+        ts, result = hit
         if time.time() - ts < _CACHE_TTL:
             return result
         del _cache[key]
@@ -43,12 +64,36 @@ def _get_cached(key: tuple) -> dict | None:
 
 
 def _set_cached(key: tuple, result: dict) -> None:
-    _cache[key] = (time.time(), result)
-    if len(_cache) > 10:
-        now = time.time()
-        expired = [k for k, (ts, _) in _cache.items() if now - ts > _CACHE_TTL]
-        for k in expired:
+    now = time.time()
+    with _cache_lock:
+        _cache[key] = (now, result)
+        for k in [k for k, (ts, _) in _cache.items() if now - ts > _CACHE_TTL]:
             del _cache[k]
+        while len(_cache) > _CACHE_MAX:
+            del _cache[min(_cache, key=lambda k: _cache[k][0])]
+
+
+def spearman_matrix(mat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Spearman correlation and two-sided p-value matrices for the columns of ``mat``.
+
+    Vectorised (average ranks, then Pearson on the ranks; p-values from the
+    t distribution with n-2 degrees of freedom) — the same statistic as
+    ``scipy.stats.spearmanr`` without a Python loop over feature pairs.
+    Constant columns give NaN correlations.
+    """
+    n = mat.shape[0]
+    ranks = stats.rankdata(mat, axis=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rho = np.corrcoef(ranks, rowvar=False)
+        rho = np.atleast_2d(rho)
+        dof = n - 2
+        if dof > 0:
+            r = np.clip(rho, -1.0, 1.0)
+            t = r * np.sqrt(dof / ((1.0 - r) * (1.0 + r)))
+            pval = 2.0 * stats.t.sf(np.abs(t), dof)
+        else:
+            pval = np.full_like(rho, np.nan)
+    return rho, pval
 
 
 def _detect_communities(G, method: str = "louvain", seed: int = 42) -> list:
@@ -108,25 +153,30 @@ def compute_coabundance_network(
         Dict with nodes, edges, modules, taxonomy_legend, stats.
     """
     features_csv = ",".join(sorted(feature_names)) if feature_names else ""
-    key = _cache_key(x_path, y_path, min_prevalence_pct, correlation_threshold, class_filter, features_csv, community_method)
+    # The result embeds FBM annotations from `job_results`, so they are part of the key.
+    job_key = ""
+    if job_results:
+        pop = job_results.get("population", [])
+        first = sorted((pop[0].get("named_features") or {}).items()) if pop else []
+        job_key = f"{job_results.get('execution_time')}:{len(pop)}:{hash(str(first))}"
+    key = _cache_key(
+        x_path, y_path, min_prevalence_pct, correlation_threshold, class_filter,
+        features_csv, community_method, features_in_rows, job_key,
+    )
     cached = _get_cached(key)
     if cached is not None:
         return cached
 
     t0 = time.time()
 
-    # --- Load data ---
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
+    # --- Load data once (cached, aligned by sample name) ---
+    X_full, y_full = matrix_io.load_xy(x_path, y_path, features_in_rows)
+    y_full = pd.to_numeric(y_full, errors="coerce")
+    keep = y_full.notna().to_numpy()
+    X_full, y_full = X_full.loc[keep], y_full.loc[keep]
+    matrix_io.class_codes(y_full)  # clear error for non-class labels
 
-    if features_in_rows:
-        X = X.T  # rows=samples, cols=features
-
-    y_series = y.iloc[:, 0]
-    common = X.index.intersection(y_series.index)
-    X = X.loc[common]
-    y_series = y_series.loc[common]
-
+    X, y_series = X_full, y_full
     n_features_total = X.shape[1]
 
     # --- Filter to specific features if provided ---
@@ -138,12 +188,14 @@ def compute_coabundance_network(
     # --- Filter by class ---
     if class_filter in ("0", "1"):
         cls_val = int(class_filter)
-        mask = y_series == cls_val
+        mask = (y_series == cls_val).to_numpy()
         X = X.loc[mask]
         y_series = y_series.loc[mask]
 
     # --- Filter features by prevalence ---
     n_samples = X.shape[0]
+    if n_samples == 0:
+        return _empty_result(n_features_total)
     prevalence = (X > 0).sum(axis=0) / n_samples * 100
     kept_features = prevalence[prevalence >= min_prevalence_pct].index.tolist()
 
@@ -153,67 +205,38 @@ def compute_coabundance_network(
     X_filtered = X[kept_features]
     n_features_filtered = len(kept_features)
 
-    # --- Compute per-class prevalence for all samples ---
-    X_full = pd.read_csv(x_path, sep="\t", index_col=0)
-    if features_in_rows:
-        X_full = X_full.T
-    y_full = pd.read_csv(y_path, sep="\t", index_col=0).iloc[:, 0]
-    common_full = X_full.index.intersection(y_full.index)
-    X_full = X_full.loc[common_full]
-    y_full = y_full.loc[common_full]
-
+    # --- Per-class prevalence over all samples ---
     class_labels = sorted([str(int(c)) for c in y_full.unique()])
     prevalence_by_class: dict[str, dict[str, float]] = {}
     for cls_label in class_labels:
-        cls_mask = y_full == int(cls_label)
-        n_cls = cls_mask.sum()
-        if n_cls > 0 and all(f in X_full.columns for f in kept_features):
+        cls_mask = (y_full == int(cls_label)).to_numpy()
+        n_cls = int(cls_mask.sum())
+        if n_cls > 0:
             prev = (X_full.loc[cls_mask, kept_features] > 0).sum(axis=0) / n_cls
             prevalence_by_class[cls_label] = prev.to_dict()
         else:
             prevalence_by_class[cls_label] = {f: 0.0 for f in kept_features}
 
-    # --- Compute pairwise Spearman correlations ---
-    mat = X_filtered.values.astype(float)
-    mat = np.nan_to_num(mat, nan=0.0)
-
+    # --- Compute pairwise Spearman correlations (vectorised) ---
+    mat = np.nan_to_num(X_filtered.to_numpy(dtype=float), nan=0.0)
     n_feat = mat.shape[1]
-    corr_matrix = np.zeros((n_feat, n_feat))
-    pval_matrix = np.ones((n_feat, n_feat))
-
-    # Use scipy spearmanr for the full matrix at once if feasible
-    if n_feat <= 1000:
-        rho, pval = stats.spearmanr(mat, axis=0)
-        if n_feat == 2:
-            # spearmanr returns scalars for 2 variables
-            corr_matrix = np.array([[1.0, rho], [rho, 1.0]])
-            pval_matrix = np.array([[0.0, pval], [pval, 0.0]])
-        else:
-            corr_matrix = rho
-            pval_matrix = pval
-    else:
-        # For very large feature sets, compute pairwise
-        for i in range(n_feat):
-            for j in range(i + 1, n_feat):
-                r, p = stats.spearmanr(mat[:, i], mat[:, j])
-                corr_matrix[i, j] = corr_matrix[j, i] = r
-                pval_matrix[i, j] = pval_matrix[j, i] = p
-            corr_matrix[i, i] = 1.0
+    if mat.shape[0] < 3:
+        return _empty_result(n_features_total, n_features_filtered)
+    corr_matrix, pval_matrix = spearman_matrix(mat)
 
     # --- Build edge list ---
-    edges = []
-    for i in range(n_feat):
-        for j in range(i + 1, n_feat):
-            rho = corr_matrix[i, j]
-            if np.isnan(rho):
-                continue
-            if abs(rho) >= correlation_threshold:
-                edges.append({
-                    "source": kept_features[i],
-                    "target": kept_features[j],
-                    "correlation": round(float(rho), 4),
-                    "pvalue": round(float(pval_matrix[i, j]), 6),
-                })
+    iu, ju = np.triu_indices(n_feat, k=1)
+    rho_u = corr_matrix[iu, ju]
+    sel = ~np.isnan(rho_u) & (np.abs(rho_u) >= correlation_threshold)
+    edges = [
+        {
+            "source": kept_features[i],
+            "target": kept_features[j],
+            "correlation": round(float(r), 4),
+            "pvalue": round(float(p), 6) if not np.isnan(p) else 1.0,
+        }
+        for i, j, r, p in zip(iu[sel], ju[sel], rho_u[sel], pval_matrix[iu, ju][sel])
+    ]
 
     if not edges:
         return _empty_result(n_features_total, n_features_filtered)

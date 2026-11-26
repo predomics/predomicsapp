@@ -7,7 +7,11 @@ from .config import settings
 
 
 def _get_user_or_ip(request):
-    """Rate limit key: user ID from JWT if available, else IP address."""
+    """Rate limit key: user ID from a *valid* JWT, else the client IP address.
+
+    Unverified header values (such as an arbitrary X-API-Key) must never choose
+    the bucket: a caller could rotate them to get a fresh allowance per request.
+    """
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer "):
         from .security import decode_access_token
@@ -15,9 +19,11 @@ def _get_user_or_ip(request):
         user_id = decode_access_token(auth[7:])
         if user_id:
             return user_id
-    api_key = request.headers.get("x-api-key", "")
-    if api_key:
-        return f"apikey:{api_key[:8]}"
+    return get_remote_address(request)
+
+
+def get_ip(request):
+    """Rate limit key for unauthenticated endpoints (login, register, reset): IP only."""
     return get_remote_address(request)
 
 

@@ -3,12 +3,15 @@
 from __future__ import annotations
 import json
 import logging
+import math
+import os
+import subprocess
+import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import pandas as pd
 import yaml
 
 from ..core.config import settings as app_settings
@@ -29,31 +32,6 @@ def _load_admin_defaults() -> dict:
     return {}
 
 
-def _apply_admin_defaults(config: dict) -> dict:
-    """Apply admin default overrides to a config dict.
-
-    Admin defaults are stored as flat keys like "general.language" -> "bin,ter".
-    They override hardcoded defaults but are themselves overridden by user values.
-    """
-    admin = _load_admin_defaults()
-    if not admin:
-        return config
-    result = {}
-    for key, value in config.items():
-        if isinstance(value, dict):
-            section = dict(value)
-            for akey, aval in admin.items():
-                parts = akey.split(".", 1)
-                if len(parts) == 2 and parts[0] == key:
-                    field = parts[1]
-                    # Only apply if user hasn't explicitly set a non-default value
-                    if field not in section or section[field] is None:
-                        section[field] = aval
-            result[key] = section
-        else:
-            result[key] = value
-    return result
-
 # Try to import gpredomicspy — it may not be installed yet
 try:
     import gpredomicspy
@@ -68,6 +46,302 @@ def check_engine() -> bool:
     return HAS_ENGINE
 
 
+# ---------------------------------------------------------------------------
+# Effective settings (hardcoded defaults <- admin defaults <- user config)
+# ---------------------------------------------------------------------------
+
+_GENERAL_DEFAULTS = {"algo": "ga", "language": "bin,ter,ratio", "data_type": "raw,prev,zscore"}
+_GA_SELECTION_DEFAULTS = {
+    "population_size": 5000, "select_elite_pct": 2.0, "select_niche_pct": 0.0,
+    "select_random_pct": 2.0, "forced_diversity_pct": 0.0,
+}
+
+
+def _effective(config: dict, section: str, defaults: dict) -> dict:
+    """Values the engine will really get for ``section`` (same merge as write_param_yaml)."""
+    merged = dict(defaults)
+    for key, value in _load_admin_defaults().items():
+        parts = key.split(".", 1)
+        if len(parts) == 2 and parts[0] == section and parts[1] in defaults:
+            merged[parts[1]] = value
+    for key, value in ((config or {}).get(section) or {}).items():
+        if key in defaults and value is not None:
+            merged[key] = value.value if hasattr(value, "value") else value
+    return merged
+
+
+def _csv(value) -> list[str]:
+    return [v.strip().lower() for v in str(value or "").split(",") if v.strip()]
+
+
+# ---------------------------------------------------------------------------
+# Genetic algorithm: enough parents to breed
+# ---------------------------------------------------------------------------
+
+# gpredomics removes duplicate models every generation, so the population it
+# selects parents from is usually a little smaller than population_size. The
+# check below assumes up to this share can be lost.
+GA_DUPLICATE_MARGIN = 0.20
+
+
+def ga_guaranteed_parents(population: int, elite_pct: float, niche_pct: float,
+                          random_pct: float, n_types: int) -> int:
+    """Parents gpredomics is certain to select from ``population`` models.
+
+    Mirrors ``select_parents`` in gpredomics ``src/ga.rs`` — every count is
+    truncated to an integer, and the niche and random shares are split evenly
+    between the (language, data type) combinations before truncation::
+
+        elite  = floor(population * elite_pct / 100)
+        niche  = n_types * floor(population * niche_pct  / 100 / n_types)
+        random = n_types * floor(population * random_pct / 100 / n_types)
+
+    ``cross_over`` then draws two distinct parents and panics ("Vec must have
+    exactly 2 elements") when fewer than two were selected.
+    """
+    n_types = max(1, int(n_types))
+    elite = int(population * elite_pct / 100.0)
+    niche = n_types * int(population * niche_pct / 100.0 / n_types) if niche_pct > 0 else 0
+    rand = n_types * int(population * random_pct / 100.0 / n_types)
+    return elite + niche + rand
+
+
+def check_ga_selection(config: dict) -> None:
+    """Raise ValueError if a GA run would select fewer than two parents.
+
+    Does nothing for other algorithms. The message says which values to raise.
+    Can be switched off with PREDOMICS_GA_PARENT_GUARD=false once the installed
+    engine tops up the parent pool itself.
+    """
+    guard = getattr(app_settings, "ga_parent_guard", None)
+    if guard is None:
+        guard = os.environ.get("PREDOMICS_GA_PARENT_GUARD", "true")
+    if str(guard).strip().lower() in ("0", "false", "no", "off"):
+        return
+    general = _effective(config, "general", _GENERAL_DEFAULTS)
+    if str(general["algo"]).lower() != "ga":
+        return
+    ga = _effective(config, "ga", _GA_SELECTION_DEFAULTS)
+    try:
+        population = int(ga["population_size"])
+        elite, niche, rand = (float(ga[k]) for k in ("select_elite_pct", "select_niche_pct", "select_random_pct"))
+    except (TypeError, ValueError):
+        return  # not numbers: schema validation reports that
+    n_types = max(1, len(_csv(general["language"])) * len(_csv(general["data_type"])))
+
+    def parents(pop: int, elite_pct: float = elite) -> int:
+        usable = int(pop * (1.0 - GA_DUPLICATE_MARGIN))
+        return ga_guaranteed_parents(usable, elite_pct, niche, rand, n_types)
+
+    have = parents(population)
+    if have >= 2:
+        return
+
+    needed_population = population
+    if elite > 0 or rand > 0 or niche > 0:
+        while parents(needed_population) < 2 and needed_population < 10_000_000:
+            needed_population += max(1, needed_population // 50)
+        while needed_population > population + 1 and parents(needed_population - 1) >= 2:
+            needed_population -= 1
+    usable = max(1, int(population * (1.0 - GA_DUPLICATE_MARGIN)))
+    needed_elite = math.ceil(2 * 100.0 / usable * 100) / 100
+    options = []
+    if parents(needed_population) >= 2:
+        options.append(f"population_size to at least {needed_population}")
+    if needed_elite <= 100:
+        options.append(f"select_elite_pct to at least {needed_elite:g}")
+    raise ValueError(
+        f"The genetic algorithm needs at least 2 parents per generation, but population_size={population} "
+        f"with select_elite_pct={elite:g}, select_random_pct={rand:g} and select_niche_pct={niche:g} "
+        f"over {n_types} language/data-type combination(s) guarantees only {have}. "
+        f"Raise {' or '.join(options) if options else 'the selection percentages'}."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Engine capabilities (what the installed gpredomicspy can actually do)
+# ---------------------------------------------------------------------------
+
+KNOWN_DATA_TYPES = ("raw", "prev", "log", "zscore")
+KNOWN_LANGUAGES = ("bin", "ter", "ratio", "pow2")
+_PROBE_TIMEOUT_S = 120
+_caps_lock = threading.Lock()
+_capabilities: dict | None = None
+
+_PROBE_SCRIPT = """
+import sys
+import gpredomicspy
+param = gpredomicspy.Param()
+param.load(sys.argv[1])
+experiment = gpredomicspy.fit(param)
+assert len(experiment.best_population()) >= 0
+"""
+
+
+def _engine_identity() -> dict:
+    version = getattr(gpredomicspy, "__version__", None) if HAS_ENGINE else None
+    return {
+        "version": version,
+        "ref": os.environ.get("PREDOMICS_ENGINE_REF") or None,
+        "bindings_ref": os.environ.get("PREDOMICS_ENGINEPY_REF") or None,
+    }
+
+
+def _caps_cache_path() -> Path:
+    return Path(app_settings.data_dir) / "cache" / "engine_capabilities.json"
+
+
+def _write_probe_data(folder: Path) -> tuple[str, str]:
+    """A tiny, well-separated two-class dataset (features in rows)."""
+    import random
+
+    rng = random.Random(7)
+    samples = [f"s{i}" for i in range(40)]
+    labels = [0] * 20 + [1] * 20
+    lines = ["feature\t" + "\t".join(samples)]
+    for f in range(30):
+        shift = (0.6 if f % 2 == 0 else -0.6)
+        row = []
+        for label in labels:
+            base = rng.random() + (shift if label == 1 and f < 12 else 0.0)
+            row.append("0" if (rng.random() < 0.15 or base <= 0) else f"{base:.4f}")
+        lines.append(f"f{f}\t" + "\t".join(row))
+    x_path, y_path = folder / "X.tsv", folder / "y.tsv"
+    x_path.write_text("\n".join(lines) + "\n")
+    y_path.write_text("sample\tclass\n" + "".join(f"{s}\t{c}\n" for s, c in zip(samples, labels)))
+    return str(x_path), str(y_path)
+
+
+def _probe(languages: list[str], data_types: list[str]) -> tuple[bool, str]:
+    """Run a very small real fit in a subprocess. Returns (worked, last output line)."""
+    with tempfile.TemporaryDirectory(prefix="predomics-probe-") as tmp:
+        folder = Path(tmp)
+        x_path, y_path = _write_probe_data(folder)
+        config = {
+            "general": {"algo": "ga", "language": ",".join(languages), "data_type": ",".join(data_types),
+                        "fit": "auc", "seed": 1, "thread_number": 1, "cv": False, "gpu": False,
+                        "keep_trace": False, "display_colorful": False, "log_level": "error"},
+            "ga": {"population_size": 200, "max_epochs": 2, "min_epochs": 1, "k_min": 1, "k_max": 5,
+                   "select_elite_pct": 10.0, "select_random_pct": 10.0},
+            "data": {"feature_minimal_prevalence_pct": 0, "feature_maximal_adj_pvalue": 1.0,
+                     "features_in_rows": True},
+        }
+        # admin_defaults={}: the probe must not depend on what an admin configured.
+        param_path = write_param_yaml(config, x_path, y_path, output_dir=str(folder), admin_defaults={})
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", _PROBE_SCRIPT, param_path],
+                capture_output=True, text=True, timeout=_PROBE_TIMEOUT_S, cwd=str(folder),
+            )
+        except subprocess.TimeoutExpired:
+            return False, "timed out"
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        return proc.returncode == 0, (tail[-1] if tail else "")
+
+
+def probe_capabilities(force: bool = False) -> dict:
+    """Find out which data types and languages the installed engine supports.
+
+    Blocking (a few seconds): each data type and each language is tried with a
+    tiny real fit in a subprocess, so an engine panic cannot hurt this process.
+    The answer is cached in ``<data_dir>/cache/engine_capabilities.json`` and
+    reused while the engine version and source revision stay the same.
+    """
+    global _capabilities
+    identity = _engine_identity()
+    result: dict = {"available": HAS_ENGINE, **identity, "probed": False,
+                    "data_types": [], "languages": [], "errors": {}}
+    if HAS_ENGINE:
+        cache_path = _caps_cache_path()
+        cached = None
+        if not force and cache_path.is_file():
+            try:
+                cached = json.loads(cache_path.read_text())
+            except (OSError, ValueError):
+                cached = None
+        if cached and all(cached.get(k) == identity[k] for k in identity) and cached.get("probed"):
+            result = cached
+        else:
+            for data_type in KNOWN_DATA_TYPES:
+                ok, message = _probe(["bin"], [data_type])
+                if ok:
+                    result["data_types"].append(data_type)
+                else:
+                    result["errors"][f"data_type:{data_type}"] = message[-300:]
+            base_type = "raw" if "raw" in result["data_types"] else (result["data_types"] or ["raw"])[0]
+            for language in KNOWN_LANGUAGES:
+                ok, message = _probe([language], [base_type])
+                if ok:
+                    result["languages"].append(language)
+                else:
+                    result["errors"][f"language:{language}"] = message[-300:]
+            result["probed"] = True
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cache_path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(result, indent=1))
+                os.replace(tmp, cache_path)
+            except OSError as exc:
+                logger.warning("Could not cache engine capabilities: %s", exc)
+    with _caps_lock:
+        _capabilities = result
+    return capabilities()
+
+
+def capabilities() -> dict:
+    """Engine capabilities and whether the server's default settings fit them.
+
+    Cheap and safe to call from request handlers: it never probes. Until
+    :func:`probe_capabilities` has run, ``probed`` is False and nothing is
+    reported missing.
+
+    Keys: ``available``, ``version``, ``ref``, ``bindings_ref``, ``probed``,
+    ``data_types``, ``languages``, ``missing`` (default settings the engine cannot
+    honour, e.g. ``["data_type:zscore"]``) and ``ok``.
+    """
+    with _caps_lock:
+        caps = dict(_capabilities) if _capabilities is not None else {
+            "available": HAS_ENGINE, **_engine_identity(), "probed": False,
+            "data_types": [], "languages": [], "errors": {},
+        }
+    missing: list[str] = []
+    if caps["available"] and caps["probed"]:
+        general = _effective({}, "general", _GENERAL_DEFAULTS)   # hardcoded + admin defaults
+        missing += [f"data_type:{d}" for d in _csv(general["data_type"]) if d not in caps["data_types"]]
+        missing += [f"language:{l}" for l in _csv(general["language"]) if l not in caps["languages"]]
+    caps["missing"] = missing
+    caps["ok"] = bool(caps["available"]) and not missing
+    caps.pop("errors", None)
+    return caps
+
+
+def check_startup_compatibility() -> dict:
+    """Probe the engine and log what it can do (call once at startup, off the event loop).
+
+    A default setting the engine cannot honour is logged as an error naming it,
+    so the problem is visible at startup and in the health payload instead of as
+    failed jobs later.
+    """
+    if not HAS_ENGINE:
+        logger.error("gpredomicspy is not installed: analysis jobs cannot run on this server")
+        return probe_capabilities()
+    caps = probe_capabilities()
+    logger.info(
+        "Engine gpredomicspy %s (engine %s, bindings %s): data types %s; languages %s",
+        caps.get("version") or "?", (caps.get("ref") or "unknown")[:12],
+        (caps.get("bindings_ref") or "unknown")[:12],
+        ",".join(caps["data_types"]) or "none", ",".join(caps["languages"]) or "none",
+    )
+    for item in caps["missing"]:
+        kind, _, name = item.partition(":")
+        logger.error(
+            "The default %s '%s' is not supported by the installed engine. Jobs using the defaults "
+            "will fail: install an engine that supports it or change the default (Admin > Defaults).",
+            kind.replace("_", " "), name,
+        )
+    return caps
+
+
 def write_param_yaml(
     config: dict[str, Any],
     x_path: str,
@@ -76,6 +350,7 @@ def write_param_yaml(
     ytest_path: str = "",
     clinical_path: str = "",
     output_dir: str = "/tmp",
+    admin_defaults: dict | None = None,
 ) -> str:
     """Write a gpredomics param.yaml from API config dict.
 
@@ -83,7 +358,8 @@ def write_param_yaml(
     Returns the path to the generated YAML file.
     """
     # Load admin defaults (flat keys like "general.language" -> "bin")
-    admin_defaults = _load_admin_defaults()
+    if admin_defaults is None:
+        admin_defaults = _load_admin_defaults()
 
     # model_dump() may leave Pydantic Enums — convert to plain values
     def _plain(d):
@@ -117,6 +393,10 @@ def write_param_yaml(
         "log_level": "info", "keep_trace": True, "display_colorful": True,
         "save_exp": str(Path(output_dir) / "experiment.bin"),
     })
+
+    # gpredomics reads the prevalence/log/ratio epsilon from `data_type_epsilon`;
+    # the `epsilon` key alone is accepted but ignored by the engine.
+    general["data_type_epsilon"] = general.get("epsilon", 1e-5)
 
     # When fit is a regression function, disable class-based feature selection
     is_regression = general.get("fit") in REGRESSION_FIT_FUNCTIONS
@@ -252,48 +532,12 @@ def write_param_yaml(
     return str(yaml_path)
 
 
-def run_experiment(param_yaml_path: str) -> dict[str, Any]:
-    """Run gpredomics via gpredomicspy and return structured results.
-
-    Returns a dict with experiment summary and best model info.
-    """
-    if not HAS_ENGINE:
-        return _mock_results()
-
-    param = gpredomicspy.Param()
-    param.load(param_yaml_path)
-    experiment = gpredomicspy.fit(param)
-
-    # Extract results
-    best_pop = experiment.best_population()
-    best = best_pop.best()
-    metrics = dict(best.get_metrics())
-
-    return {
-        "fold_count": experiment.fold_count(),
-        "generation_count": experiment.generation_count(),
-        "execution_time": experiment.execution_time(),
-        "feature_names": experiment.feature_names(),
-        "sample_names": experiment.sample_names(),
-        "best_individual": {
-            "k": metrics["k"],
-            "auc": metrics["auc"],
-            "fit": metrics["fit"],
-            "accuracy": metrics["accuracy"],
-            "sensitivity": metrics["sensitivity"],
-            "specificity": metrics["specificity"],
-            "threshold": metrics["threshold"],
-            "language": metrics["language"],
-            "data_type": metrics["data_type"],
-            "epoch": metrics["epoch"],
-            "features": best.get_features(),
-        },
-        "population_size": len(best_pop),
-    }
-
-
 def _mock_results() -> dict[str, Any]:
-    """Return mock results when gpredomicspy is not available (development mode)."""
+    """Return fabricated results for tests/development when gpredomicspy is missing.
+
+    Only used when ``settings.allow_mock_engine`` or ``settings.debug`` is set;
+    the payload is labelled ``"mock": True`` so it can never pass for a real run.
+    """
     import random
 
     rng = random.Random(42)
@@ -336,6 +580,8 @@ def _mock_results() -> dict[str, Any]:
         })
 
     return {
+        "mock": True,
+        "engine": "mock",
         "fold_count": 1,
         "generation_count": n_gens,
         "execution_time": 5.42,

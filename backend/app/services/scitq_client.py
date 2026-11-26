@@ -123,9 +123,12 @@ def dispatch_job(
     results_path = str(Path(job_dir) / "results.json")
 
     # Build the same command that _run_job() uses via subprocess
+    # Same module path as the local runner (the image's working directory is the
+    # parent of `backend/`); paths are quoted because the command runs in a shell.
+    import shlex
     command = (
-        f"{sys.executable} -u -m app.services.worker "
-        f"{param_path} {results_path}"
+        f"{shlex.quote(sys.executable)} -u -m backend.app.services.worker "
+        f"{shlex.quote(str(param_path))} {shlex.quote(results_path)}"
     )
 
     server = _get_server()

@@ -5,9 +5,10 @@ as benchmark alternatives to gpredomics. Results are formatted to match the
 gpredomics worker output structure for seamless frontend integration.
 """
 
+from __future__ import annotations
+
 import time
 import numpy as np
-from pathlib import Path
 from typing import Any
 
 # Lazy imports — only load what's needed
@@ -29,39 +30,46 @@ def is_sklearn_algo(algo: str) -> bool:
     return algo in SKLEARN_ALGOS
 
 
-def _load_tsv(path: str, features_in_rows: bool = True):
-    """Load a TSV data matrix, return (X numpy array, feature_names, sample_names)."""
-    import csv
-    with open(path) as f:
-        reader = csv.reader(f, delimiter="\t")
-        rows = list(reader)
+def _load_aligned(
+    x_path: str,
+    y_path: str,
+    features_in_rows: bool = True,
+    feature_names: list[str] | None = None,
+):
+    """Load X and y matched by **sample name** (never by row position).
 
-    if features_in_rows:
-        # First column = feature names, first row = sample names
-        sample_names = rows[0][1:]
-        feature_names = [r[0] for r in rows[1:]]
-        data = np.array([[float(v) if v else 0.0 for v in r[1:]] for r in rows[1:]])
-        # Transpose: features × samples → samples × features
-        X = data.T
-    else:
-        # First column = sample names, first row = feature names
-        feature_names = rows[0][1:]
-        sample_names = [r[0] for r in rows[1:]]
-        X = np.array([[float(v) if v else 0.0 for v in r[1:]] for r in rows[1:]])
+    Returns (X array samples x features, y int array, feature_names, sample_names).
+    Samples present in only one of the two files are dropped, as are samples
+    without a label or with the "unknown" class 2. When ``feature_names`` is
+    given (the training features), columns are re-ordered to match it and
+    features absent from this file are filled with 0.
+    """
+    import pandas as pd
+    from . import matrix_io
 
-    return X, feature_names, sample_names
-
-
-def _load_y(path: str):
-    """Load y labels. Returns (y numpy array, sample_names)."""
-    import csv
-    with open(path) as f:
-        reader = csv.reader(f, delimiter="\t")
-        rows = list(reader)
-    # Skip header, columns: sample_name, class
-    sample_names = [r[0] for r in rows[1:]]
-    y = np.array([int(r[1]) for r in rows[1:]])
-    return y, sample_names
+    X, y = matrix_io.load_xy(x_path, y_path, features_in_rows)
+    n_x, n_y = len(matrix_io.load_matrix(x_path, features_in_rows)), len(matrix_io.load_labels(y_path))
+    y = pd.to_numeric(y, errors="coerce")
+    keep = y.notna().to_numpy()
+    labels = set(y[keep].unique().tolist())
+    if labels <= {0, 1, 2}:
+        keep = keep & y.isin([0, 1]).to_numpy()
+    X, y = X.loc[keep], y.loc[keep]
+    if len(X) < n_x or len(X) < n_y:
+        print(
+            f"[worker] Matched {len(X)} samples by name "
+            f"({n_x} in the matrix, {n_y} in the labels).",
+            flush=True,
+        )
+    if len(X) == 0:
+        raise ValueError("No labelled samples in common between the matrix and the labels")
+    if feature_names is not None:
+        missing = [f for f in feature_names if f not in X.columns]
+        if missing:
+            print(f"[worker] {len(missing)} training features are absent from the test matrix (set to 0).", flush=True)
+        X = X.reindex(columns=feature_names)
+    values = np.nan_to_num(X.to_numpy(dtype=float), nan=0.0)
+    return values, y.to_numpy().astype(int), [str(c) for c in X.columns], [str(i) for i in X.index]
 
 
 def _build_classifier(algo: str, params: dict):
@@ -241,18 +249,17 @@ def run_sklearn(param_yaml: dict, algo_params: dict) -> dict[str, Any]:
 
     # Load data
     t_load = time.monotonic()
-    X_train, feature_names, sample_names_train = _load_tsv(
-        param_yaml["data"]["X"], features_in_rows
+    X_train, y_train, feature_names, sample_names_train = _load_aligned(
+        param_yaml["data"]["X"], param_yaml["data"]["y"], features_in_rows,
     )
-    y_train, _ = _load_y(param_yaml["data"]["y"])
 
     X_test, y_test, sample_names_test = None, None, None
     has_test = bool(param_yaml["data"].get("Xtest")) and bool(param_yaml["data"].get("ytest"))
     if has_test:
-        X_test, _, sample_names_test = _load_tsv(
-            param_yaml["data"]["Xtest"], features_in_rows
+        X_test, y_test, _, sample_names_test = _load_aligned(
+            param_yaml["data"]["Xtest"], param_yaml["data"]["ytest"], features_in_rows,
+            feature_names=feature_names,
         )
-        y_test, _ = _load_y(param_yaml["data"]["ytest"])
 
     load_dur = time.monotonic() - t_load
     print(f"[worker] Data loaded: {X_train.shape[0]} train samples, {X_train.shape[1]} features. ({load_dur:.1f}s)", flush=True)
@@ -272,11 +279,10 @@ def run_sklearn(param_yaml: dict, algo_params: dict) -> dict[str, Any]:
         holdout_ratio = param_yaml["data"].get("holdout_ratio", 0.2)
         if holdout_ratio > 0:
             from sklearn.model_selection import train_test_split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X_train, y_train, test_size=holdout_ratio,
+            X_train, X_test, y_train, y_test, sample_names_train, sample_names_test = train_test_split(
+                X_train, y_train, sample_names_train, test_size=holdout_ratio,
                 random_state=seed, stratify=y_train
             )
-            sample_names_test = [f"holdout_{i}" for i in range(len(y_test))]
             print(f"[worker] Holdout split: {len(y_train)} train, {len(y_test)} test", flush=True)
 
     # Train

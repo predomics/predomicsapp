@@ -403,27 +403,27 @@ class TestPredictFromModel:
         assert "feat_C" in out["matched_features"]
 
     def test_predict_prevalence_data_type(self):
-        """data_type='prevalence' should normalize rows so each sample sums to ~1."""
-        results = _make_results(data_type="prevalence", features={"0": 1.0})
+        """data_type='prevalence' means presence/absence (x > epsilon), as in gpredomics.
 
-        # Create data with known values
+        (This test used to assert a row-sum normalisation, which is not what the
+        engine does — see individual.rs::evaluate_prevalence.)
+        """
         x_data = pd.DataFrame(
-            [[10.0, 20.0, 30.0], [5.0, 5.0, 10.0]],
+            [[10.0, 0.0, 30.0], [5.0, 5.0, 0.0]],
             index=["feat_A", "feat_B"],
             columns=["s0", "s1", "s2"],
         )
-        # After transpose: samples in rows, features in cols
-        # s0: feat_A=10, feat_B=5 -> sum=15 -> normalized feat_A=10/15
-        # Score for s0 = (10/15) * 1.0 = 0.6667
 
         out = predict_from_model(
             {"feature_names": ["feat_A", "feat_B"],
-             "best_individual": {"features": {"0": 1.0}, "data_type": "prevalence", "threshold": 0.0}},
+             "best_individual": {"features": {"0": 1, "1": -1}, "language": "ternary",
+                                 "data_type": "prevalence", "threshold": 0.0}},
             x_data, features_in_rows=True,
         )
 
-        # s0: feat_A=10, feat_B=5, sum=15, normalized_feat_A = 10/15 ~ 0.6667
-        assert out["scores"][0] == pytest.approx(10.0 / 15.0, abs=1e-4)
+        # s0: A present, B present -> 1 - 1 = 0 ; s1: A absent, B present -> -1 ; s2: A only -> 1
+        assert out["scores"] == [0.0, -1.0, 1.0]
+        assert out["predicted_classes"] == [1, 0, 1]
 
 
 class TestComputeAuc:

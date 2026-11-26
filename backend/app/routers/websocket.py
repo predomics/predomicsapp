@@ -10,42 +10,77 @@ from sqlalchemy import select
 
 from ..core.config import settings
 from ..core.database import async_session_factory
-from ..core.security import decode_access_token
 from ..models.db_models import User, Job, Project, ProjectShare
+from ..services import ws_tickets
 
 _log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _verify_ws_access(token: str, project_id: str) -> bool:
-    """Verify the WebSocket token grants access to the project."""
-    user_id = decode_access_token(token)
+async def _verify_ws_access(ticket: str | None, project_id: str) -> bool:
+    """Redeem a single-use ticket and check that its user may see the project."""
+    user_id = ws_tickets.redeem(ticket or "")
     if not user_id:
         return False
     async with async_session_factory() as db:
         result = await db.execute(
             select(User).where(User.id == user_id, User.is_active.is_(True))
         )
-        user = result.scalar_one_or_none()
-        if not user:
+        if result.scalar_one_or_none() is None:
             return False
         # Check project ownership
         result = await db.execute(
-            select(Project).where(Project.id == project_id)
+            select(Project.user_id).where(Project.id == project_id)
         )
-        project = result.scalar_one_or_none()
-        if not project:
+        owner_id = result.scalar_one_or_none()
+        if owner_id is None:
             return False
-        if project.user_id == user_id:
+        if owner_id == user_id:
             return True
         # Check shared access
         result = await db.execute(
-            select(ProjectShare).where(
+            select(ProjectShare.id).where(
                 ProjectShare.project_id == project_id,
                 ProjectShare.user_id == user_id,
             )
         )
-        return result.scalar_one_or_none() is not None
+        return result.first() is not None
+
+
+def _read_new_log(log_path: Path, last_size: int) -> tuple[str, int]:
+    """Return (text appended since ``last_size``, new offset). Blocking."""
+    try:
+        size = log_path.stat().st_size
+    except OSError:
+        return "", last_size
+    if size < last_size:      # log was rewritten
+        last_size = 0
+    if size == last_size:
+        return "", last_size
+    with open(log_path, "rb") as f:
+        f.seek(last_size)
+        raw = f.read(size - last_size)
+    # Do not split a multi-byte character across two messages: an incomplete
+    # sequence at the very end is left for the next read.
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        if e.start >= len(raw) - 3 and e.end == len(raw) and e.start > 0:
+            raw = raw[:e.start]
+        text = raw.decode("utf-8", errors="replace")
+    return text, last_size + len(raw)
+
+
+def _read_progress_if_changed(progress_path: Path, last_sig):
+    """Return (progress dict or None, signature). Blocking."""
+    try:
+        st = progress_path.stat()
+        sig = (st.st_mtime_ns, st.st_size)
+        if sig == last_sig:
+            return None, last_sig
+        return json.loads(progress_path.read_text()), sig
+    except (OSError, ValueError):
+        return None, last_sig
 
 
 @router.websocket("/ws/jobs/{project_id}/{job_id}")
@@ -53,12 +88,14 @@ async def job_log_ws(
     websocket: WebSocket,
     project_id: str,
     job_id: str,
-    token: str = Query(...),
+    ticket: str | None = Query(None),
 ):
     """Stream job console.log in real-time (tail -f style).
 
-    The client passes the JWT token as a query parameter since
-    WebSocket does not support Authorization headers in browsers.
+    Browsers cannot send an Authorization header on a WebSocket, so the client
+    first calls ``POST /api/auth/ws-ticket`` and passes the returned single-use
+    ticket as ``?ticket=``. The access token is not accepted here: URLs end up
+    in proxy and access logs.
 
     Messages sent to client:
     - {"type": "status", "status": "running"}
@@ -66,7 +103,7 @@ async def job_log_ws(
     - {"type": "done", "status": "completed"|"failed"}
     - {"type": "error", "message": "..."}
     """
-    if not await _verify_ws_access(token, project_id):
+    if not await _verify_ws_access(ticket, project_id):
         await websocket.close(code=4001, reason="Unauthorized")
         return
 
@@ -77,7 +114,7 @@ async def job_log_ws(
     progress_path = job_dir / "progress.json"
     last_size = 0
     last_status = None
-    last_progress_size = 0
+    last_progress_sig = None
 
     try:
         while True:
@@ -101,33 +138,23 @@ async def job_log_ws(
                 })
                 last_status = current_status
 
-            # Stream new log content
-            if log_path.exists():
-                current_size = log_path.stat().st_size
-                if current_size > last_size:
-                    with open(log_path, "r") as f:
-                        f.seek(last_size)
-                        new_content = f.read()
-                    if new_content:
-                        await websocket.send_json({
-                            "type": "log",
-                            "content": new_content,
-                        })
-                    last_size = current_size
+            # Stream new log content (byte offsets; tolerant of partial UTF-8 sequences)
+            new_content, last_size = await asyncio.to_thread(_read_new_log, log_path, last_size)
+            if new_content:
+                await websocket.send_json({
+                    "type": "log",
+                    "content": new_content,
+                })
 
             # Stream structured progress metrics
-            if progress_path.exists():
-                try:
-                    p_size = progress_path.stat().st_size
-                    if p_size != last_progress_size:
-                        progress_data = json.loads(progress_path.read_text())
-                        await websocket.send_json({
-                            "type": "progress",
-                            "data": progress_data,
-                        })
-                        last_progress_size = p_size
-                except Exception:
-                    pass
+            progress_data, last_progress_sig = await asyncio.to_thread(
+                _read_progress_if_changed, progress_path, last_progress_sig,
+            )
+            if progress_data is not None:
+                await websocket.send_json({
+                    "type": "progress",
+                    "data": progress_data,
+                })
 
             # Stop on terminal state
             if current_status in ("completed", "failed"):

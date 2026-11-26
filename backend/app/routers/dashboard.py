@@ -9,11 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.database import get_db
 from ..core.deps import get_current_user
 from ..models.db_models import User, Project, Dataset, Job, ProjectShare, AuditLog
+from typing import List
+from ..models.schemas import (
+    DashboardResponse,
+)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
-@router.get("/")
+@router.get("/", response_model=DashboardResponse, response_model_exclude_unset=True)
 async def get_dashboard(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -45,15 +49,14 @@ async def get_dashboard(
     shared_project_ids = select(ProjectShare.project_id).where(ProjectShare.user_id == uid)
     all_project_ids = own_project_ids.union(shared_project_ids)
 
-    job_counts = {}
-    for status_val in ["running", "pending", "completed", "failed"]:
-        r = await db.execute(
-            select(func.count()).select_from(Job).where(
-                Job.project_id.in_(all_project_ids),
-                Job.status == status_val,
-            )
-        )
-        job_counts[status_val] = r.scalar() or 0
+    job_counts = {"running": 0, "pending": 0, "completed": 0, "failed": 0}
+    r = await db.execute(
+        select(Job.status, func.count())
+        .where(Job.project_id.in_(all_project_ids))
+        .group_by(Job.status)
+    )
+    for status_val, n in r.all():
+        job_counts[status_val] = n
 
     # Active jobs (running/pending) with details
     r = await db.execute(

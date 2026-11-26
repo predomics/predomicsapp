@@ -116,10 +116,10 @@ async def _run_mock_analysis(auth_client, pid, x_file_id, y_file_id):
     config = {
         "general": {"algo": "ga", "language": "bin", "data_type": "raw", "fit": "auc",
                     "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-        "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
+        "ga": {"population_size": 200, "max_epochs": 2, "k_min": 1, "k_max": 10},
     }
 
-    with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+    with patch("app.services.engine.HAS_ENGINE", False):
         resp = await auth_client.post(
             f"/api/analysis/{pid}/run",
             json=config,
@@ -516,7 +516,7 @@ class TestSchemaValidation:
         """RunConfig should have sensible defaults for all fields."""
         pid, x_id, y_id = await _create_project_with_datasets(auth_client)
 
-        with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+        with patch("app.services.engine.HAS_ENGINE", False):
             resp = await auth_client.post(
                 f"/api/analysis/{pid}/run",
                 json={},
@@ -529,7 +529,7 @@ class TestSchemaValidation:
         pid, x_id, y_id = await _create_project_with_datasets(auth_client)
 
         config = {"general": {"algo": "beam"}}
-        with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+        with patch("app.services.engine.HAS_ENGINE", False):
             resp = await auth_client.post(
                 f"/api/analysis/{pid}/run",
                 json=config,
@@ -542,7 +542,7 @@ class TestSchemaValidation:
         pid, x_id, y_id = await _create_project_with_datasets(auth_client)
 
         config = {"general": {"algo": "mcmc"}}
-        with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+        with patch("app.services.engine.HAS_ENGINE", False):
             resp = await auth_client.post(
                 f"/api/analysis/{pid}/run",
                 json=config,
@@ -742,7 +742,7 @@ class TestEngine:
         config = {
             "general": {"algo": "ga", "language": "bin", "data_type": "raw", "fit": "auc",
                         "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-            "ga": {"population_size": 100, "max_epochs": 5, "k_min": 1, "k_max": 10},
+            "ga": {"population_size": 200, "max_epochs": 5, "k_min": 1, "k_max": 10},
         }
         import yaml
         with tempfile.TemporaryDirectory() as tmp:
@@ -754,7 +754,7 @@ class TestEngine:
                 param = yaml.safe_load(f)
             assert param["general"]["algo"] == "ga"
             assert param["data"]["X"] == "/data/X.tsv"
-            assert param["ga"]["population_size"] == 100
+            assert param["ga"]["population_size"] == 200
 
     def test_mock_results_structure(self):
         mock = ml_engine._mock_results()
@@ -2097,9 +2097,12 @@ class TestAdminDeep:
         admin_h = await self._make_admin(client, db_session)
         defaults = {"general.seed": 123}
         await client.put("/api/admin/defaults", json=defaults, headers=admin_h)
-        resp = await client.get("/api/admin/defaults/public")
+        resp = await client.get("/api/admin/defaults/public", headers=admin_h)
         assert resp.status_code == 200
         assert resp.json()["general.seed"] == 123
+        # any signed-in user may read them, anonymous callers may not
+        anon = await client.get("/api/admin/defaults/public")
+        assert anon.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -2385,11 +2388,11 @@ class TestBatchRuns:
         config = {
             "general": {"algo": "ga", "language": "bin", "data_type": "raw", "fit": "auc",
                         "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-            "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
+            "ga": {"population_size": 200, "max_epochs": 2, "k_min": 1, "k_max": 10},
         }
         sweep = {"sweeps": {"general.seed": [1, 2, 3]}}
 
-        with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+        with patch("app.services.engine.HAS_ENGINE", False):
             resp = await auth_client.post(
                 f"/api/analysis/{pid}/batch",
                 json={"config": config, "sweep": sweep},
@@ -2407,12 +2410,12 @@ class TestBatchRuns:
         config = {
             "general": {"algo": "ga", "language": "bin", "data_type": "raw", "fit": "auc",
                         "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-            "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
+            "ga": {"population_size": 200, "max_epochs": 2, "k_min": 1, "k_max": 10},
         }
         # 10 x 10 = 100 > 50 max
         sweep = {"sweeps": {
             "general.seed": list(range(10)),
-            "ga.population_size": list(range(100, 200, 10)),
+            "ga.population_size": list(range(200, 300, 10)),
         }}
 
         resp = await auth_client.post(
@@ -2428,11 +2431,11 @@ class TestBatchRuns:
         config = {
             "general": {"algo": "ga", "language": "bin", "data_type": "raw", "fit": "auc",
                         "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-            "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
+            "ga": {"population_size": 200, "max_epochs": 2, "k_min": 1, "k_max": 10},
         }
         sweep = {"sweeps": {"general.seed": [1, 2]}}
 
-        with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+        with patch("app.services.engine.HAS_ENGINE", False):
             await auth_client.post(
                 f"/api/analysis/{pid}/batch",
                 json={"config": config, "sweep": sweep},
@@ -2460,11 +2463,11 @@ class TestConcurrentJobs:
         config = {
             "general": {"algo": "ga", "language": "bin", "data_type": "raw", "fit": "auc",
                         "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-            "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
+            "ga": {"population_size": 200, "max_epochs": 2, "k_min": 1, "k_max": 10},
         }
 
         job_ids = []
-        with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+        with patch("app.services.engine.HAS_ENGINE", False):
             for seed in [1, 2, 3]:
                 cfg = {**config, "general": {**config["general"], "seed": seed}}
                 resp = await auth_client.post(
@@ -2502,10 +2505,10 @@ class TestConcurrentJobs:
         config = {
             "general": {"algo": "ga", "language": "bin", "data_type": "raw", "fit": "auc",
                         "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-            "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
+            "ga": {"population_size": 200, "max_epochs": 2, "k_min": 1, "k_max": 10},
         }
 
-        with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+        with patch("app.services.engine.HAS_ENGINE", False):
             await auth_client.post(
                 f"/api/analysis/{pid1}/run", json=config,
                 params={"x_file_id": x1, "y_file_id": y1},
@@ -2535,7 +2538,7 @@ class TestErrorRecovery:
 
         pid, x_fid, y_fid = await _create_project_with_datasets(auth_client)
         # Create a pending job directly in DB (no background task)
-        job = Job(project_id=pid, user_id="test", status="pending", config={})
+        job = Job(project_id=pid, user_id=None, status="pending", config={})
         db_session.add(job)
         await db_session.commit()
 
@@ -2547,10 +2550,16 @@ class TestErrorRecovery:
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_delete_project_with_running_job(self, auth_client):
-        """Deleting a project should work even if it has jobs."""
+    async def test_delete_project_with_finished_job(self, auth_client, db_session):
+        """A project whose jobs are all terminal can be deleted."""
+        from sqlalchemy import text
+
         pid, x_fid, y_fid = await _create_project_with_datasets(auth_client)
-        await _run_mock_analysis(auth_client, pid, x_fid, y_fid)
+        job_id = await _run_mock_analysis(auth_client, pid, x_fid, y_fid)
+        status = (await db_session.execute(
+            text("SELECT status FROM jobs WHERE id = :jid"), {"jid": job_id}
+        )).scalar()
+        assert status in ("completed", "failed")
 
         resp = await auth_client.delete(f"/api/projects/{pid}")
         assert resp.status_code == 200
@@ -2558,6 +2567,29 @@ class TestErrorRecovery:
         # Project should be gone
         resp = await auth_client.get(f"/api/projects/{pid}")
         assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_project_with_running_job(self, auth_client, db_session):
+        """A project with a running job is refused (409) until the job is terminal."""
+        from sqlalchemy import text
+
+        pid, x_fid, y_fid = await _create_project_with_datasets(auth_client)
+        job_id = await _run_mock_analysis(auth_client, pid, x_fid, y_fid)
+        await db_session.execute(
+            text("UPDATE jobs SET status = 'running' WHERE id = :jid"), {"jid": job_id}
+        )
+        await db_session.commit()
+
+        resp = await auth_client.delete(f"/api/projects/{pid}")
+        assert resp.status_code == 409
+        assert (await auth_client.get(f"/api/projects/{pid}")).status_code == 200
+
+        await db_session.execute(
+            text("UPDATE jobs SET status = 'failed' WHERE id = :jid"), {"jid": job_id}
+        )
+        await db_session.commit()
+        resp = await auth_client.delete(f"/api/projects/{pid}")
+        assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_upload_empty_file_returns_error(self, auth_client):
@@ -2579,9 +2611,9 @@ class TestErrorRecovery:
             config = {
                 "general": {"algo": algo, "language": "bin", "data_type": "raw", "fit": "auc",
                             "seed": 42, "thread_number": 1, "k_penalty": 0.0001, "cv": False, "gpu": False},
-                "ga": {"population_size": 50, "max_epochs": 2, "k_min": 1, "k_max": 10},
+                "ga": {"population_size": 200, "max_epochs": 2, "k_min": 1, "k_max": 10},
             }
-            with patch("app.services.engine.run_experiment", return_value=ml_engine._mock_results()):
+            with patch("app.services.engine.HAS_ENGINE", False):
                 resp = await auth_client.post(
                     f"/api/analysis/{pid}/run",
                     json=config,
@@ -2621,7 +2653,7 @@ class TestErrorRecovery:
 # Dataset Library CRUD
 # ---------------------------------------------------------------------------
 
-class TestDatasetLibrary:
+class TestDatasetLibraryExtended:
     """Tests for dataset library endpoints (create, read, update, delete)."""
 
     @pytest.mark.asyncio
@@ -3435,7 +3467,7 @@ class TestTemplates:
             "category": category,
             "params": {
                 "general": {"algo": "ga", "language": "bin"},
-                "ga": {"population_size": 100, "max_epochs": 5},
+                "ga": {"population_size": 200, "max_epochs": 5},
             },
         }
 

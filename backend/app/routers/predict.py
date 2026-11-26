@@ -9,14 +9,15 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import numpy as np
 import pandas as pd
 
 from ..core.database import get_db
 from ..core.deps import get_current_user
 from ..models.db_models import User, Job
-from ..services import storage
-from ..services.prediction import predict_from_model
+import asyncio
+
+from ..services import results_io
+from ..services.prediction import predict_from_model, UnsupportedModelError
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
@@ -29,7 +30,7 @@ class PredictRequest(BaseModel):
 
 class PredictResponse(BaseModel):
     sample_names: list[str]
-    scores: list[float]
+    scores: list[Optional[float]]  # None when a score is not finite
     predicted_classes: list[int]
     threshold: float
     matched_features: list[str]
@@ -58,10 +59,10 @@ async def predict(
         raise HTTPException(status_code=400, detail="Job not completed")
 
     # Verify project access
-    from ..core.deps import get_project_with_access
-    await get_project_with_access(job.project_id, user, db, require_role="viewer")
+    from ..core.deps import get_project_access
+    await get_project_access(job.project_id, user, db, require_role="viewer")
 
-    results = storage.get_job_result(job.project_id, job_id)
+    results = await results_io.aload_results(job.project_id, job_id)
     if not results:
         raise HTTPException(status_code=404, detail="Results not found")
 
@@ -81,9 +82,11 @@ async def predict(
         raise HTTPException(status_code=400, detail=f"Invalid features data: {e}")
 
     try:
-        prediction = predict_from_model(
-            results, df, y_labels=None, features_in_rows=False,
+        prediction = await asyncio.to_thread(
+            predict_from_model, results, df, None, False,
         )
+    except UnsupportedModelError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
 

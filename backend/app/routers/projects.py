@@ -2,6 +2,7 @@
 
 import io
 from datetime import datetime, timezone
+from typing import Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -10,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..core.database import get_db
-from ..core.deps import get_current_user, get_project_with_access
+from ..core.deps import get_current_user, get_project_access, get_project_with_access
+from ..core.uploads import read_upload, check_role
 from ..models.db_models import User, Project, Dataset, DatasetFile, ProjectDataset
 from ..services import audit
 from ..models.schemas import ProjectInfo, ProjectUpdate, DatasetInfo, DatasetRef, DatasetFileRef
-from ..services import storage
+from ..services import storage, quota
+from ..models.api_schemas import StatusOut
 from .datasets import _infer_role
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -142,7 +145,7 @@ async def update_project(
     return _build_project_info(project)
 
 
-@router.delete("/{project_id}")
+@router.delete("/{project_id}", response_model=StatusOut)
 async def delete_project(
     project_id: str,
     user: User = Depends(get_current_user),
@@ -150,8 +153,17 @@ async def delete_project(
 ):
     """Delete a project (owner only). Datasets stay in user library."""
     project, _ = await get_project_with_access(project_id, user, db, require_role="owner")
+    active = [j for j in project.jobs if str(getattr(j.status, "value", j.status)) in ("running", "pending")]
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{len(active)} job(s) are still running or queued. Cancel them or wait before deleting the project.",
+        )
     await audit.log_action(db, user, audit.ACTION_PROJECT_DELETE, "project", project_id)
     await db.delete(project)
+    # Remove the files only once the database change is durable, so a failed
+    # commit cannot leave rows pointing at files that no longer exist.
+    await db.commit()
     storage.delete_project_files(project_id)
     return {"status": "deleted"}
 
@@ -173,6 +185,7 @@ async def upload_dataset(
     project_id: str,
     file: UploadFile = File(...),
     features_in_rows: bool = True,
+    role: Optional[str] = Query(None, description="xtrain, ytrain, xtest, ytest or metadata; inferred from the filename when omitted"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -180,21 +193,26 @@ async def upload_dataset(
 
     Creates a dataset group in the user's library with one file,
     then assigns it to the project. Owner or editor access required.
+    Pass ``role`` to say what the file is; otherwise it is guessed from the name.
     """
-    project, _ = await get_project_with_access(project_id, user, db, require_role="editor")
+    # Only the access decision is needed here, not the project's datasets and jobs.
+    project, _ = await get_project_access(project_id, user, db, require_role="editor")
+    role = check_role(role)
 
-    content = await file.read()
+    content = await read_upload(file)
+    await quota.check_quota(db, user.id, len(content))
+    filename = storage.safe_filename(file.filename, default="upload.tsv")
 
     # Create dataset group in user's library
-    dataset = Dataset(name=file.filename, user_id=user.id)
+    dataset = Dataset(name=filename, user_id=user.id)
     db.add(dataset)
     await db.flush()
 
     # Create file within the dataset group
-    role = _infer_role(file.filename)
+    role = role or _infer_role(filename)
     ds_file = DatasetFile(
         dataset_id=dataset.id,
-        filename=file.filename,
+        filename=filename,
         role=role,
         disk_path="",
     )
@@ -202,7 +220,7 @@ async def upload_dataset(
     await db.flush()
 
     # Save to user-level storage
-    disk_path = storage.save_user_dataset_file(user.id, ds_file.id, file.filename, content)
+    disk_path = storage.save_user_dataset_file(user.id, ds_file.id, filename, content)
     ds_file.disk_path = disk_path
 
     # Assign dataset group to project
@@ -212,7 +230,7 @@ async def upload_dataset(
 
     # Parse to get info
     try:
-        sep = "\t" if file.filename.endswith(".tsv") else ","
+        sep = "\t" if filename.endswith(".tsv") else ","
         df = pd.read_csv(io.BytesIO(content), sep=sep, index_col=0)
         if features_in_rows:
             n_features, n_samples = df.shape
@@ -222,7 +240,7 @@ async def upload_dataset(
         n_features, n_samples = 0, 0
 
     return DatasetInfo(
-        filename=file.filename,
+        filename=filename,
         n_features=n_features,
         n_samples=n_samples,
         n_classes=0,

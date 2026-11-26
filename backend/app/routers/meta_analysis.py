@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.database import get_db
 from ..core.deps import get_current_user, get_project_with_access
 from ..models.db_models import User, Project, Job, ProjectShare
-from ..services import storage
+from ..services import results_io
+from typing import List
+from ..models.schemas import (
+    MetaComparison, SearchableJob,
+)
 
 router = APIRouter(prefix="/meta-analysis", tags=["meta-analysis"])
 
@@ -21,7 +25,7 @@ class MetaAnalysisRequest(BaseModel):
     job_ids: list[str] = Field(..., min_length=2, max_length=10)
 
 
-@router.get("/searchable-jobs")
+@router.get("/searchable-jobs", response_model=List[SearchableJob], response_model_exclude_unset=True)
 async def list_searchable_jobs(
     q: str = Query("", description="Search filter on project/job name"),
     user: User = Depends(get_current_user),
@@ -64,14 +68,14 @@ async def list_searchable_jobs(
             "job_name": job.name,
             "best_auc": job.best_auc,
             "best_k": job.best_k,
-            "language": (job.config or {}).get("language"),
+            "language": ((job.config or {}).get("general") or {}).get("language"),
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,
         }
         for job, project_name in rows
     ]
 
 
-@router.post("/compare")
+@router.post("/compare", response_model=MetaComparison, response_model_exclude_unset=True)
 async def compare_jobs(
     body: MetaAnalysisRequest,
     user: User = Depends(get_current_user),
@@ -97,7 +101,7 @@ async def compare_jobs(
             raise HTTPException(403, f"No access to job {job_id}")
 
         # Load results
-        results = storage.get_job_result(job.project_id, job_id)
+        results = await results_io.aload_results(job.project_id, job_id)
         if not results:
             raise HTTPException(404, f"Results not found for job {job_id}")
 

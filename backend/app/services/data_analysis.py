@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import logging
+import os
+import threading
 import time
 import tempfile
 from pathlib import Path
@@ -12,7 +14,43 @@ import pandas as pd
 from scipy import stats
 import yaml
 
+from . import matrix_io
+
 logger = logging.getLogger(__name__)
+
+# Dissimilarities that are only defined for non-negative abundances.
+NONNEGATIVE_METRICS = ("braycurtis", "jaccard")
+
+
+def check_metric_transform(metric: str, transform: str) -> None:
+    """Reject distance/transform combinations that are mathematically undefined.
+
+    Bray-Curtis and Jaccard assume non-negative values; log and z-score produce
+    negative ones, which gives unbounded or NaN distances.
+    """
+    if metric in NONNEGATIVE_METRICS and transform in ("log", "zscore"):
+        raise ValueError(
+            f"The {metric} distance is not defined for {transform}-transformed data "
+            "(negative values). Use the euclidean or cosine distance with this "
+            "transform, or the raw data with this distance."
+        )
+
+
+def _class_label(c) -> str:
+    """Label of a class value as shown in the UI ('0', '1', ...)."""
+    try:
+        f = float(c)
+    except (TypeError, ValueError):
+        return str(c)
+    return str(int(f)) if f.is_integer() else str(f)
+
+
+def _load_xy(x_path: str, y_path: str, features_in_rows: bool = True):
+    """Samples x features matrix and labels on their common samples (cached, by name)."""
+    X, y = matrix_io.load_xy(x_path, y_path, features_in_rows)
+    y = pd.to_numeric(y, errors="coerce")
+    keep = y.notna().to_numpy()
+    return X.loc[keep], y.loc[keep]
 
 # Allowed data transformations for exploration and ordination
 VALID_TRANSFORMS = ("raw", "log", "zscore")
@@ -45,18 +83,37 @@ except ImportError:
     HAS_ENGINE = False
     logger.warning("gpredomicspy not installed — data analysis will use mock mode")
 
-# Simple TTL cache: (x_path, y_path, method, prevalence, pvalue) -> (timestamp, result)
+# TTL cache of filtering results, keyed by every argument plus the files' state.
 _cache: dict[tuple, tuple[float, dict]] = {}
+_cache_lock = threading.Lock()
 _CACHE_TTL = 300  # 5 minutes
+_CACHE_MAX = 12
 
 
-def _cache_key(x_path: str, y_path: str, method: str, prevalence_pct: float, max_pvalue: float) -> tuple:
-    return (x_path, y_path, method, prevalence_pct, max_pvalue)
+def _file_state(path: str) -> tuple:
+    try:
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (0, 0)
+
+
+def _cache_key(
+    x_path: str, y_path: str, method: str, prevalence_pct: float, max_pvalue: float,
+    min_feature_value: float = 0.0, features_in_rows: bool = True,
+) -> tuple:
+    return (
+        x_path, _file_state(x_path), y_path, _file_state(y_path), method,
+        float(prevalence_pct), float(max_pvalue), float(min_feature_value), bool(features_in_rows),
+    )
 
 
 def _get_cached(key: tuple) -> dict | None:
-    if key in _cache:
-        ts, result = _cache[key]
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit is None:
+            return None
+        ts, result = hit
         if time.time() - ts < _CACHE_TTL:
             return result
         del _cache[key]
@@ -64,13 +121,13 @@ def _get_cached(key: tuple) -> dict | None:
 
 
 def _set_cached(key: tuple, result: dict) -> None:
-    _cache[key] = (time.time(), result)
-    # Evict old entries if cache grows too large
-    if len(_cache) > 20:
-        now = time.time()
-        expired = [k for k, (ts, _) in _cache.items() if now - ts > _CACHE_TTL]
-        for k in expired:
+    now = time.time()
+    with _cache_lock:
+        _cache[key] = (now, result)
+        for k in [k for k, (ts, _) in _cache.items() if now - ts > _CACHE_TTL]:
             del _cache[k]
+        while len(_cache) > _CACHE_MAX:
+            del _cache[min(_cache, key=lambda k: _cache[k][0])]
 
 
 def run_filtering(
@@ -87,7 +144,9 @@ def run_filtering(
     Returns a dict with n_features, n_samples, class info, and per-feature stats.
     Falls back to mock data if gpredomicspy is not available.
     """
-    key = _cache_key(x_path, y_path, method, prevalence_pct, max_pvalue)
+    key = _cache_key(
+        x_path, y_path, method, prevalence_pct, max_pvalue, min_feature_value, features_in_rows,
+    )
     cached = _get_cached(key)
     if cached is not None:
         return cached
@@ -108,7 +167,7 @@ def run_filtering(
             "feature_maximal_adj_pvalue": max_pvalue,
             "feature_minimal_feature_value": min_feature_value,
         },
-        "general": {"algo": "ga", "seed": 42, "thread_number": 4},
+        "general": {"algo": "ga", "seed": 42, "thread_number": min(4, os.cpu_count() or 1)},
     }
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -176,24 +235,16 @@ def compute_feature_abundance(
     """
     feature_names = feature_names[:100]
 
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
+    X, y_series = _load_xy(x_path, y_path, features_in_rows)
 
-    if features_in_rows:
-        X = X.T  # now rows=samples, cols=features
-
-    y_series = y.iloc[:, 0]
-    common = X.index.intersection(y_series.index)
-    X = X.loc[common]
-    y_series = y_series.loc[common]
-
+    feature_names = [f for f in feature_names if f in X.columns]
+    X = X[feature_names]
     # Apply transformation feature-wise (z-score uses per-feature stats)
-    if transform != "raw":
-        X_num = X[[c for c in X.columns if X[c].dtype.kind in "iuf"]].astype(float)
-        transformed = apply_transform(X_num.values, transform=transform)
-        X_num = pd.DataFrame(transformed, index=X_num.index, columns=X_num.columns)
-        for c in X_num.columns:
-            X[c] = X_num[c]
+    if transform != "raw" and feature_names:
+        X = pd.DataFrame(
+            apply_transform(X.to_numpy(dtype=float), transform=transform),
+            index=X.index, columns=X.columns,
+        )
 
     results = []
     for fname in feature_names:
@@ -208,7 +259,7 @@ def compute_feature_abundance(
             if len(cls_values) == 0:
                 continue
             q1, median, q3 = cls_values.quantile([0.25, 0.5, 0.75]).values
-            classes_data[str(int(cls_val))] = {
+            classes_data[_class_label(cls_val)] = {
                 "min": float(cls_values.min()),
                 "q1": float(q1),
                 "median": float(median),
@@ -241,16 +292,8 @@ def compute_barcode_data(
     """
     feature_names = feature_names[:100]
 
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
-
-    if features_in_rows:
-        X = X.T  # rows=samples, cols=features
-
-    y_series = y.iloc[:, 0]
-    common = X.index.intersection(y_series.index)
-    X = X.loc[common]
-    y_series = y_series.loc[common]
+    X, y_series = _load_xy(x_path, y_path, features_in_rows)
+    matrix_io.class_codes(y_series)  # clear error for non-class labels
 
     # Filter to requested features that exist
     valid_features = [f for f in feature_names if f in X.columns]
@@ -319,16 +362,8 @@ def compute_class_heatmap(
     """
     feature_names = feature_names[:100]
 
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
-
-    if features_in_rows:
-        X = X.T  # rows=samples, cols=features
-
-    y_series = y.iloc[:, 0]
-    common = X.index.intersection(y_series.index)
-    X = X.loc[common]
-    y_series = y_series.loc[common]
+    X, y_series = _load_xy(x_path, y_path, features_in_rows)
+    matrix_io.class_codes(y_series)  # clear error for non-class labels
 
     valid_features = [f for f in feature_names if f in X.columns]
     if not valid_features:
@@ -380,11 +415,9 @@ def compute_pcoa(
     """
     from scipy.spatial.distance import pdist, squareform
 
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
-
-    if features_in_rows:
-        X = X.T  # rows=samples, cols=features
+    check_metric_transform(metric, transform)
+    X, y_series = _load_xy(x_path, y_path, features_in_rows)
+    matrix_io.class_codes(y_series)  # clear error for non-class labels
 
     # Filter to specific features (FBM) if requested
     if feature_names:
@@ -392,11 +425,6 @@ def compute_pcoa(
         if valid:
             X = X[valid]
         # else keep all features as fallback
-
-    y_series = y.iloc[:, 0]
-    common = X.index.intersection(y_series.index)
-    X = X.loc[common]
-    y_series = y_series.loc[common]
 
     # Stratified subsampling if too many samples
     if len(X) > max_samples:
@@ -615,21 +643,14 @@ def _load_and_prepare(
     """
     from scipy.spatial.distance import pdist, squareform
 
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
-
-    if features_in_rows:
-        X = X.T
+    check_metric_transform(metric, transform)
+    X, y_series = _load_xy(x_path, y_path, features_in_rows)
+    matrix_io.class_codes(y_series)  # clear error for non-class labels
 
     if feature_names:
         valid = [f for f in feature_names if f in X.columns]
         if valid:
             X = X[valid]
-
-    y_series = y.iloc[:, 0]
-    common = X.index.intersection(y_series.index)
-    X = X.loc[common]
-    y_series = y_series.loc[common]
 
     if len(X) > max_samples:
         sampled = []
@@ -793,19 +814,13 @@ def scan_dataset_metadata(
     """
     from datetime import datetime, timezone
 
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
+    X = matrix_io.load_matrix(x_path, features_in_rows)  # samples x features
+    feature_names = X.columns.tolist()
+    sample_names = X.index.tolist()
 
-    if features_in_rows:
-        feature_names = X.index.tolist()
-        sample_names = X.columns.tolist()
-    else:
-        feature_names = X.columns.tolist()
-        sample_names = X.index.tolist()
-
-    y_series = y.iloc[:, 0]
-    class_labels = sorted([str(int(c)) for c in y_series.unique()])
-    class_counts = {str(int(k)): int(v) for k, v in y_series.value_counts().items()}
+    y_series = matrix_io.load_labels(y_path).dropna()
+    class_labels = sorted({_class_label(c) for c in y_series.unique()})
+    class_counts = {_class_label(k): int(v) for k, v in y_series.value_counts().items()}
 
     return {
         "n_features": len(feature_names),
@@ -827,13 +842,7 @@ def compute_aberrant_correlations(
 
     Returns scatter data: for each feature pair, the correlation in class 0 vs class 1.
     """
-    X = pd.read_csv(x_path, sep="\t", index_col=0)
-    y = pd.read_csv(y_path, sep="\t", index_col=0)
-    if features_in_rows:
-        X = X.T
-    y_series = y.iloc[:, 0]
-    common = X.index.intersection(y_series.index)
-    X, y_series = X.loc[common], y_series.loc[common]
+    X, y_series = _load_xy(x_path, y_path, features_in_rows)
 
     # Prevalence filter
     n_samples = X.shape[0]

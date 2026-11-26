@@ -11,7 +11,8 @@ from ..core.database import get_db
 from ..core.deps import get_current_user
 from ..models.db_models import User, Project, Dataset, DatasetFile, ProjectDataset
 from ..models.schemas import ProjectInfo, DatasetRef, DatasetFileRef
-from ..services import storage
+from ..services import storage, quota
+from ..models.api_schemas import SampleInfo
 from .datasets import _infer_role
 
 router = APIRouter(prefix="/samples", tags=["samples"])
@@ -52,9 +53,14 @@ SAMPLE_DATASETS = {
 }
 
 
-@router.get("/")
+@router.get("/", response_model=list[SampleInfo])
 async def list_samples():
-    """List available sample datasets."""
+    """List available sample datasets.
+
+    Deliberately public: it is the static catalogue of the demo datasets shipped
+    with the application (names, citations, file names) and contains nothing
+    about users or this installation. Loading a sample requires an account.
+    """
     result = []
     for key, info in SAMPLE_DATASETS.items():
         sample_dir = settings.samples_dir / key
@@ -99,6 +105,13 @@ async def load_sample(
     existing_project = existing.scalars().first()
     if existing_project:
         return _build_project_info(existing_project)
+
+    # The sample files are copied into the user's library and count toward their quota.
+    needed = sum(
+        (sample_dir / f["filename"]).stat().st_size
+        for f in sample["files"] if (sample_dir / f["filename"]).exists()
+    )
+    await quota.check_quota(db, user.id, needed)
 
     # Create project
     project = Project(name=sample["name"], user_id=user.id)

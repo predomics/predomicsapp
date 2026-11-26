@@ -1,8 +1,11 @@
 """Signature Zoo: curated database of published biomarker signatures."""
 
+import asyncio
 import json
+import os
 import uuid
 import fcntl
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -10,9 +13,18 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ..core.config import settings
-from ..core.deps import get_current_user, get_admin_user
-from ..models.db_models import User
+from ..core.database import get_db
+from ..core.deps import get_current_user, get_admin_user, get_project_with_access
+from ..models.db_models import User, Job
+from ..services import storage
+from typing import List
+from ..models.schemas import (
+    SignatureComparison, SignatureDeleted,
+)
 
 ZOO_PATH = Path(settings.data_dir) / "signature_zoo.json"
 
@@ -93,26 +105,70 @@ class ImportFromJobRequest(BaseModel):
 # File I/O helpers (with locking)
 # ---------------------------------------------------------------------------
 
+_LOCK_PATH = ZOO_PATH.with_suffix(".lock")
+
+
+@contextmanager
+def _zoo_lock():
+    """Exclusive lock on a sidecar file, held for a whole read-modify-write cycle."""
+    ZOO_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_LOCK_PATH, "w") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 def _load_signatures() -> list[dict]:
-    """Read all signatures from the JSON file."""
+    """Read all signatures from the JSON file.
+
+    A missing file is an empty zoo. A corrupt file raises instead of returning
+    ``[]``: treating it as empty would let the next save wipe every entry.
+    """
     if not ZOO_PATH.exists():
         return []
-    try:
-        with open(ZOO_PATH, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return []
+    with open(ZOO_PATH, "r") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError("signature_zoo.json is not a list")
+    return data
 
 
 def _save_signatures(sigs: list[dict]) -> None:
-    """Write all signatures to the JSON file with file locking."""
+    """Replace the JSON file atomically (write a temp file, then rename)."""
     ZOO_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(ZOO_PATH, "w") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        try:
-            json.dump(sigs, f, indent=2, ensure_ascii=False)
-        finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    tmp = ZOO_PATH.with_suffix(".json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(sigs, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, ZOO_PATH)
+
+
+def _read_zoo() -> list[dict]:
+    try:
+        return _load_signatures()
+    except (ValueError, OSError):
+        raise HTTPException(status_code=500, detail="The signature collection could not be read")
+
+
+def _mutate_zoo(fn):
+    """Run ``fn(sigs)`` under the lock and persist; returns fn's result."""
+    with _zoo_lock():
+        sigs = _read_zoo()
+        result = fn(sigs)
+        _save_signatures(sigs)
+        return result
+
+
+def _public(sig: dict) -> dict:
+    """Signature as shown to anonymous visitors: no contributor email."""
+    return {**sig, "created_by": "contributor" if sig.get("created_by") not in (None, "", "system") else "system"}
+
+
+def _owner_id(sig: dict) -> Optional[str]:
+    return sig.get("created_by_id")
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +182,7 @@ async def list_signatures(
     search: Optional[str] = Query(None, description="Text search in name and features"),
 ):
     """List all signatures with optional filters. Public, no auth required."""
-    sigs = _load_signatures()
+    sigs = await asyncio.to_thread(_read_zoo)
 
     if disease:
         dl = disease.lower()
@@ -152,10 +208,10 @@ async def list_signatures(
                 filtered.append(s)
         sigs = filtered
 
-    return sigs
+    return [_public(s) for s in sigs]
 
 
-@router.get("/compare")
+@router.get("/compare", response_model=SignatureComparison, response_model_exclude_unset=True)
 async def compare_signatures(
     ids: str = Query(..., description="Comma-separated signature IDs"),
 ):
@@ -164,7 +220,7 @@ async def compare_signatures(
     if len(id_list) < 2:
         raise HTTPException(status_code=400, detail="Provide at least 2 signature IDs")
 
-    sigs = _load_signatures()
+    sigs = await asyncio.to_thread(_read_zoo)
     sig_map = {s["id"]: s for s in sigs}
 
     selected = []
@@ -239,10 +295,10 @@ async def compare_signatures(
 @router.get("/{signature_id}", response_model=SignatureResponse)
 async def get_signature(signature_id: str):
     """Get a single signature by ID. Public, no auth required."""
-    sigs = _load_signatures()
+    sigs = await asyncio.to_thread(_read_zoo)
     for s in sigs:
         if s["id"] == signature_id:
-            return s
+            return _public(s)
     raise HTTPException(status_code=404, detail="Signature not found")
 
 
@@ -252,15 +308,13 @@ async def create_signature(
     user: User = Depends(get_current_user),
 ):
     """Add a new signature (auth required)."""
-    sigs = _load_signatures()
-
     new_sig = body.model_dump()
     new_sig["id"] = uuid.uuid4().hex[:12]
     new_sig["created_at"] = datetime.now(timezone.utc).isoformat()
     new_sig["created_by"] = user.email
+    new_sig["created_by_id"] = user.id
 
-    sigs.append(new_sig)
-    _save_signatures(sigs)
+    await asyncio.to_thread(_mutate_zoo, lambda sigs: sigs.append(new_sig))
     return new_sig
 
 
@@ -270,35 +324,42 @@ async def update_signature(
     body: SignatureUpdate,
     user: User = Depends(get_current_user),
 ):
-    """Update an existing signature (auth required)."""
-    sigs = _load_signatures()
+    """Update a signature. Only its creator or an administrator may do so."""
+    updated = body.model_dump()
 
-    for i, s in enumerate(sigs):
-        if s["id"] == signature_id:
-            updated = body.model_dump()
-            updated["id"] = signature_id
-            updated["created_at"] = s.get("created_at", "")
-            updated["created_by"] = s.get("created_by", user.email)
-            sigs[i] = updated
-            _save_signatures(sigs)
-            return updated
+    def _apply(sigs: list[dict]):
+        for i, s in enumerate(sigs):
+            if s["id"] == signature_id:
+                is_creator = _owner_id(s) == user.id or (
+                    _owner_id(s) is None and s.get("created_by") == user.email
+                )
+                if not (user.is_admin or is_creator):
+                    raise HTTPException(status_code=403, detail="Only the creator or an administrator can edit this signature")
+                updated["id"] = signature_id
+                updated["created_at"] = s.get("created_at", "")
+                updated["created_by"] = s.get("created_by", user.email)
+                if s.get("created_by_id"):
+                    updated["created_by_id"] = s["created_by_id"]
+                sigs[i] = updated
+                return updated
+        raise HTTPException(status_code=404, detail="Signature not found")
 
-    raise HTTPException(status_code=404, detail="Signature not found")
+    return await asyncio.to_thread(_mutate_zoo, _apply)
 
 
-@router.delete("/{signature_id}")
+@router.delete("/{signature_id}", response_model=SignatureDeleted, response_model_exclude_unset=True)
 async def delete_signature(
     signature_id: str,
     admin: User = Depends(get_admin_user),
 ):
     """Delete a signature (admin only)."""
-    sigs = _load_signatures()
-    new_sigs = [s for s in sigs if s["id"] != signature_id]
+    def _apply(sigs: list[dict]):
+        kept = [s for s in sigs if s["id"] != signature_id]
+        if len(kept) == len(sigs):
+            raise HTTPException(status_code=404, detail="Signature not found")
+        sigs[:] = kept
 
-    if len(new_sigs) == len(sigs):
-        raise HTTPException(status_code=404, detail="Signature not found")
-
-    _save_signatures(new_sigs)
+    await asyncio.to_thread(_mutate_zoo, _apply)
     return {"status": "deleted", "id": signature_id}
 
 
@@ -306,30 +367,46 @@ async def delete_signature(
 async def import_from_job(
     body: ImportFromJobRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Create a signature entry from a completed job's best model."""
-    # Load job results
-    results_path = (
-        Path(settings.data_dir) / "projects" / body.project_id
-        / "jobs" / body.job_id / "results.json"
-    )
-    if not results_path.exists():
+    """Create a signature entry from a completed job's best model.
+
+    The caller must have access to the job's project (viewer or better).
+    """
+    if not storage.is_safe_id(body.project_id) or not storage.is_safe_id(body.job_id):
+        raise HTTPException(status_code=404, detail="Job results not found")
+    await get_project_with_access(body.project_id, user, db, require_role="viewer")
+    job = (await db.execute(
+        select(Job).where(Job.id == body.job_id, Job.project_id == body.project_id)
+    )).scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job results not found")
+
+    results = await asyncio.to_thread(storage.get_job_result, body.project_id, body.job_id)
+    if not results:
         raise HTTPException(
             status_code=404,
             detail="Job results not found. Ensure the job has completed successfully.",
         )
 
-    try:
-        with open(results_path) as f:
-            results = json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read job results: {e}")
+    best = results.get("best_individual") or {}
 
-    best = results.get("best_individual", {})
+    # Feature names: sklearn results carry them directly; gpredomics results
+    # give {feature index: coefficient} to be resolved against feature_names.
+    named_features = dict(best.get("named_features") or {})
+    if not named_features:
+        feature_names = results.get("feature_names") or []
+        for idx_str, coef in (best.get("features") or {}).items():
+            try:
+                idx = int(idx_str)
+                name = feature_names[idx] if 0 <= idx < len(feature_names) else f"feature_{idx}"
+                named_features[name] = float(coef)
+            except (TypeError, ValueError):
+                continue
+    if not named_features:
+        raise HTTPException(status_code=422, detail="This job's best model has no features to import")
 
-    # Extract features
     features = []
-    named_features = best.get("named_features", {})
     for fname, coef in named_features.items():
         features.append({
             "name": fname,
@@ -359,10 +436,8 @@ async def import_from_job(
         "tags": body.tags,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user.email,
+        "created_by_id": user.id,
     }
 
-    sigs = _load_signatures()
-    sigs.append(new_sig)
-    _save_signatures(sigs)
-
+    await asyncio.to_thread(_mutate_zoo, lambda sigs: sigs.append(new_sig))
     return new_sig
