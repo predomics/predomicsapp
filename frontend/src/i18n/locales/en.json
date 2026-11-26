@@ -609,7 +609,8 @@
     "copresenceTopOf": "of {n} features",
     "copresenceTopHint": "Number of most prevalent features drawn in the charts (0 = all). Statistics and the pairs table always use all features.",
     "foldAll": "Fold all",
-    "unfoldAll": "Unfold all"
+    "unfoldAll": "Unfold all",
+    "insightsAnnotationsPending": "Taxonomy of the features is still being fetched, so the biological insights are incomplete. Open this tab again in a minute or two."
   },
   "meta": {
     "title": "Multi-Cohort Meta-Analysis",

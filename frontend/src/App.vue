@@ -225,6 +225,30 @@ function handleLogout() {
 }
 
 /* ================================================================
+   Aliases used by components. They point at the theme tokens above, so
+   they follow light and dark (used to be undefined: components fell back
+   to light colours in dark mode). Defined once; never redefine per theme.
+   ================================================================ */
+:root {
+  --bg-primary: var(--bg-page);
+  --bg-surface: var(--bg-card);
+  --bg-surface-alt: var(--bg-badge);
+  --bg-secondary: var(--bg-badge);
+  --bg-hover: var(--bg-card-hover);
+  --bg-active: var(--info-bg);
+  --bg-highlight: var(--warning-bg-alt);
+  --accent-bg: var(--info-bg);
+  --accent-faint: var(--info-bg);
+  --brand-bg: var(--info-bg);
+  --border-color: var(--border);
+  --text: var(--text-body);
+  --primary: var(--tab-active);
+  --positive: var(--success);
+  --negative: var(--danger);
+  --warn: var(--warning);
+}
+
+/* ================================================================
    CSS Variables — Dark Theme
    ================================================================ */
 :root.dark {

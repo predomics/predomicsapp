@@ -609,7 +609,8 @@
     "copresenceTopOf": "premières variables sur {n}",
     "copresenceTopHint": "Nombre de variables les plus prévalentes affichées dans les graphiques (0 = toutes). Les statistiques et le tableau des paires utilisent toujours toutes les variables.",
     "foldAll": "Tout replier",
-    "unfoldAll": "Tout déplier"
+    "unfoldAll": "Tout déplier",
+    "insightsAnnotationsPending": "La taxonomie des variables est encore en cours de récupération : les insights biologiques sont incomplets. Rouvrez cet onglet dans une ou deux minutes."
   },
   "meta": {
     "title": "Méta-Analyse Multi-Cohortes",

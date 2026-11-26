@@ -161,3 +161,21 @@ describe('api module', () => {
     expect(docs).toBe(fns)
   })
 })
+
+describe('theme variables', () => {
+  it('every CSS variable a component uses is defined by the theme', () => {
+    // Variables a component sets itself (inline style) are allowed.
+    const setInline = new Set(['--delay'])
+    const app = fs.readFileSync(path.join(SRC, 'App.vue'), 'utf8')
+    const defined = new Set([...app.matchAll(/^\s*(--[\w-]+)\s*:/gm)].map(m => m[1]))
+    const missing = new Set()
+    for (const file of walk(SRC, ['.vue', '.js', '.css'])) {
+      const text = fs.readFileSync(file, 'utf8')
+      for (const m of text.matchAll(/var\(\s*(--[\w-]+)/g)) {
+        if (!defined.has(m[1]) && !setInline.has(m[1])) missing.add(`${rel(file)}: ${m[1]}`)
+      }
+    }
+    // Undefined variables silently fall back to light colours in dark mode.
+    expect([...missing].sort()).toEqual([])
+  })
+})

@@ -10,6 +10,7 @@
 
     <!-- Content -->
     <template v-if="data && !loading">
+      <p v-if="data.annotations_pending" class="pending-note" role="status">{{ $t('results.insightsAnnotationsPending') }}</p>
       <!-- Severity summary row -->
       <div class="severity-summary">
         <span v-if="data.summary?.success" class="sev-chip success">{{ data.summary?.success }} {{ $t('results.insightsSuccess') }}</span>
@@ -241,6 +242,14 @@ watch(() => props.jobId, () => {
 </script>
 
 <style scoped>
+.pending-note {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--info-bg);
+  color: var(--info);
+  font-size: 0.85rem;
+}
 .insights-tab {
   padding: 0.5rem 0;
 }

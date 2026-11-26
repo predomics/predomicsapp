@@ -826,8 +826,10 @@ export function createResultsState() {
     }
     const names = [...used]
     if (names.length === 0) return
+    const seq = _resultsSeq
     try {
-      const { data } = await api.dataExplore.mspAnnotations({ features: names }, { silentError: true })
+      const { data } = await api.dataExplore.mspAnnotations({ features: names }, { silentError: true, timeout: LONG_TIMEOUT_MS })
+      if (seq !== _resultsSeq) return // another job is shown now
       mspAnnotations.value = data.annotations || {}
     } catch (e) {
       ignoreError(e) // species names are optional
@@ -2935,9 +2937,16 @@ export function createResultsState() {
 
       // A section that does not exist for this job (e.g. jury) falls back to the first one.
       if (!tabAvailable(subTab.value)) subTab.value = 'insights'
-      await loadMspAnnotations()
       await nextTick()
       renderActiveTab()
+      // Species names are optional and can take minutes on a cold annotation
+      // cache: never hold the page in "loading" for them. Charts are redrawn
+      // with the names when they arrive, if the same job is still shown.
+      loadMspAnnotations().then(async () => {
+        if (mine !== _resultsSeq) return
+        await nextTick()
+        renderActiveTab()
+      })
     } catch (e) {
       if (mine !== _resultsSeq) { ignoreError(e); return }
       resultsError.value = apiError(e)
