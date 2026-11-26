@@ -954,8 +954,10 @@ async def get_experiment_insights(
     feature_names = results.get("feature_names", [])
     population = results.get("population", [])
 
-    # Fetch MSP annotations for biological context
-    annotations = await asyncio.to_thread(msp_annotations.get_annotations, feature_names)
+    # Taxonomy for the biological reading. Never wait for the remote service
+    # here: Insights is the first results view and a cold cache takes minutes.
+    # Missing annotations are fetched in the background for the next view.
+    annotations, annotations_pending = await asyncio.to_thread(msp_annotations.cached_annotations, feature_names)
 
     # Load job config for recommendation context
     job_config = None
@@ -979,11 +981,13 @@ async def get_experiment_insights(
                     )
                 except Exception:  # noqa: BLE001 - enrichment is optional for insights
                     enrichment_results = None
-        return insights_service.compute_insights(
+        out = insights_service.compute_insights(
             results=results,
             annotations=annotations,
             enrichment_results=enrichment_results,
             job_config=job_config,
         )
+        out["annotations_pending"] = annotations_pending
+        return out
 
     return await asyncio.to_thread(_compute)

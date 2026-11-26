@@ -199,6 +199,58 @@ class TestMspAnnotations:
         monkeypatch.setattr(msp_annotations, "_fetch_single", lambda i: (i, {"species": "B. fragilis"}))
         assert msp_annotations.get_annotations(["msp_0002"])["msp_0002"]["species"] == "B. fragilis"
 
+    def test_cached_annotations_never_wait_for_the_network(self, monkeypatch):
+        """Insights used to block ~100 s on a cold cache, past the browser timeout."""
+        import threading
+        release = threading.Event()
+        fetched = threading.Event()
+
+        def slow(msp_id):
+            release.wait(5)
+            return msp_id, {"species": "E. coli"}
+
+        monkeypatch.setattr(msp_annotations, "_fetch_single", slow)
+        msp_annotations._cache["msp_0001"] = {"species": "cached"}
+        t0 = time.time()
+        got, pending = msp_annotations.cached_annotations(["msp_0001", "msp_0002"])
+        assert time.time() - t0 < 1
+        assert got == {"msp_0001": {"species": "cached"}}
+        assert pending is True
+
+        # The background fill completes and the next look finds everything.
+        release.set()
+        for _ in range(100):
+            if "msp_0002" in msp_annotations._cache:
+                fetched.set()
+                break
+            time.sleep(0.05)
+        assert fetched.is_set()
+        for _ in range(100):  # let the background thread release its lock
+            if not msp_annotations._background_lock.locked():
+                break
+            time.sleep(0.05)
+        got, pending = msp_annotations.cached_annotations(["msp_0001", "msp_0002"])
+        assert pending is False
+        assert got["msp_0002"] == {"species": "E. coli"}
+
+    def test_cached_annotations_start_one_background_fill_at_a_time(self, monkeypatch):
+        import threading
+        release = threading.Event()
+        calls = []
+
+        def slow(msp_id):
+            calls.append(msp_id)
+            release.wait(5)
+            return msp_id, msp_annotations._MISS
+
+        monkeypatch.setattr(msp_annotations, "_fetch_single", slow)
+        msp_annotations.cached_annotations(["msp_0003"])
+        msp_annotations.cached_annotations(["msp_0003"])
+        msp_annotations.cached_annotations(["msp_0003"])
+        time.sleep(0.2)
+        assert calls == ["msp_0003"]
+        release.set()
+
     def test_taxonomy_suffix_and_bad_input(self, monkeypatch):
         asked = []
         monkeypatch.setattr(

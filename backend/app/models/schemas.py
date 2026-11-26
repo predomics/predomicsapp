@@ -746,6 +746,8 @@ class InsightsResponse(ApiModel):
     insights: Optional[List[Dict[str, Any]]] = None
     scores: Optional[Dict[str, Any]] = None
     summary: Optional[Any] = None
+    # True while feature taxonomy is still being fetched: biological insights are partial.
+    annotations_pending: Optional[bool] = None
 
 
 # --- meta-analysis ----------------------------------------------------------

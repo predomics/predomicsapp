@@ -4,6 +4,11 @@ Fetches taxonomic annotations from biobanks.gmt.bio and caches them locally in
 ``<data_dir>/cache/msp_annotations.json``. All functions here are blocking:
 call them through ``asyncio.to_thread`` from request handlers.
 
+A cold cache costs one HTTP request per feature (about a minute and a half for
+a 2,000-feature dataset). Views that must answer quickly use
+:func:`cached_annotations`, which returns what is cached and fetches the rest
+in the background.
+
 Cache entries:
 
 * ``{"species": ..., ...}`` — an annotation (kept forever);
@@ -45,6 +50,7 @@ _MSP_ID_RE = re.compile(r"^msp_[0-9a-z]{1,12}$", re.IGNORECASE)
 _cache: dict[str, dict[str, Any]] | None = None
 _lock = threading.RLock()       # protects _cache and the cache file
 _fetch_lock = threading.Lock()  # one bulk fetch at a time (bounds outbound requests)
+_background_lock = threading.Lock()  # at most one background fill at a time
 
 _MISS = object()   # definitive "unknown id"
 _ERROR = object()  # transient failure, do not cache
@@ -140,6 +146,39 @@ def get_annotations(feature_names: list[str]) -> dict[str, dict[str, Any]]:
     ignored. At most :data:`MAX_FEATURES` names are considered per call.
     Returns a dict mapping feature name (as given) -> annotation dict.
     """
+    return _lookup(feature_names, wait=True)[0]
+
+
+def cached_annotations(feature_names: list[str]) -> tuple[dict[str, dict[str, Any]], bool]:
+    """Annotations already in the cache, without waiting for the network.
+
+    Returns ``(annotations, pending)``. When some ids still need asking,
+    ``pending`` is True and one background thread fetches them, so a later call
+    finds them cached.
+    """
+    return _lookup(feature_names, wait=False)
+
+
+def _fill_in_background(feature_names: list[str]) -> None:
+    if not _background_lock.acquire(blocking=False):
+        return  # a fill is already running; the next view starts another if needed
+
+    def _run():
+        try:
+            _lookup(feature_names, wait=True)
+        except Exception as e:  # noqa: BLE001 - background best effort
+            logger.warning("Background MSP annotation fetch failed: %s", e)
+        finally:
+            _background_lock.release()
+
+    try:
+        threading.Thread(target=_run, name="msp-annotations", daemon=True).start()
+    except BaseException:
+        _background_lock.release()
+        raise
+
+
+def _lookup(feature_names: list[str], *, wait: bool) -> tuple[dict[str, dict[str, Any]], bool]:
     cache = _load_cache()
     result: dict[str, dict[str, Any]] = {}
     to_fetch: list[str] = []
@@ -160,6 +199,10 @@ def get_annotations(feature_names: list[str]) -> dict[str, dict[str, Any]]:
                     result[name] = entry
             elif first_time:
                 to_fetch.append(msp_id)
+
+    if to_fetch and not wait:
+        _fill_in_background(list(feature_names))
+        return result, True
 
     if to_fetch:
         with _fetch_lock:
@@ -202,4 +245,4 @@ def get_annotations(feature_names: list[str]) -> dict[str, dict[str, Any]]:
                     except OSError as e:
                         logger.warning("Could not save MSP annotation cache: %s", e)
 
-    return result
+    return result, False

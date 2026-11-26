@@ -156,9 +156,14 @@ class TestInsightsWithStoredConfig:
     @pytest.mark.asyncio
     async def test_endpoint_on_a_job_launched_through_the_api(self, auth_client, monkeypatch):
         from app.services import msp_annotations
-        monkeypatch.setattr(msp_annotations, "get_annotations", lambda names: {})   # no network in tests
+        def must_not_block(names):
+            raise AssertionError("insights must not wait for the annotation service")
+
+        monkeypatch.setattr(msp_annotations, "get_annotations", must_not_block)
+        monkeypatch.setattr(msp_annotations, "cached_annotations", lambda names: ({}, True))  # no network in tests
         pid, x, y = await _create_project_with_datasets(auth_client)
         job_id = await _run_mock_analysis(auth_client, pid, x, y)
         resp = await auth_client.get(f"/api/data-explore/{pid}/insights/{job_id}")
         assert resp.status_code == 200, resp.text
         assert set(resp.json()) >= {"insights", "scores", "summary"}
+        assert resp.json()["annotations_pending"] is True
