@@ -15,15 +15,29 @@
         @click="navOpen = !navOpen"
       >&#9776;</button>
       <div id="nav-links" :class="['nav-links', { open: navOpen }]">
-        <router-link v-if="auth.isLoggedIn" to="/dashboard">{{ $t('nav.dashboard') }}</router-link>
+        <router-link v-if="auth.isLoggedIn && !uiMode.isSimple" to="/dashboard">{{ $t('nav.dashboard') }}</router-link>
         <router-link v-if="auth.isLoggedIn" to="/projects">{{ $t('nav.projects') }}</router-link>
-        <router-link v-if="auth.isLoggedIn" to="/datasets">{{ $t('nav.datasets') }}</router-link>
-        <router-link v-if="auth.isLoggedIn" to="/meta-analysis">{{ $t('nav.metaAnalysis') }}</router-link>
-        <router-link v-if="auth.isLoggedIn" to="/signature-zoo">{{ $t('nav.signatureZoo') }}</router-link>
+        <template v-if="auth.isLoggedIn && !uiMode.isSimple">
+          <router-link to="/datasets">{{ $t('nav.datasets') }}</router-link>
+          <router-link to="/meta-analysis">{{ $t('nav.metaAnalysis') }}</router-link>
+          <router-link to="/signature-zoo">{{ $t('nav.signatureZoo') }}</router-link>
+        </template>
         <router-link v-if="auth.isLoggedIn && auth.isAdmin" to="/admin">{{ $t('nav.admin') }}</router-link>
         <router-link to="/credits">{{ $t('nav.credits') }}</router-link>
       </div>
       <div class="nav-right">
+        <button
+          v-if="auth.isLoggedIn"
+          type="button"
+          role="switch"
+          class="mode-switch"
+          :aria-checked="uiMode.isSimple ? 'true' : 'false'"
+          :title="$t('nav.modeHint')"
+          @click="uiMode.toggle()"
+        >
+          <span :class="['mode-opt', { on: uiMode.isSimple }]">{{ $t('nav.modeSimple') }}</span>
+          <span :class="['mode-opt', { on: !uiMode.isSimple }]">{{ $t('nav.modeExpert') }}</span>
+        </button>
         <button type="button" class="lang-btn" @click="toggleLocale" :title="currentLocaleInfo.name" :aria-label="$t('nav.switchLanguage', { name: currentLocaleInfo.name })">
           <span class="lang-flag" aria-hidden="true">{{ currentLocaleInfo.flag }}</span>
           <span class="lang-code">{{ currentLocaleInfo.label }}</span>
@@ -54,12 +68,14 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
+import { useUiModeStore } from './stores/uiMode'
 import { LOCALES, applyDocumentLang } from './i18n'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
+const uiMode = useUiModeStore()
 const router = useRouter()
 const route = useRoute()
 const { locale, t } = useI18n()
@@ -455,6 +471,28 @@ main:focus { outline: none; }
   border-color: var(--brand);
   color: var(--brand);
 }
+
+.mode-switch {
+  display: inline-flex;
+  padding: 2px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.mode-opt {
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  color: var(--text-nav-link);
+  transition: background 0.15s, color 0.15s;
+}
+.mode-opt.on {
+  background: var(--brand);
+  color: #0d0d16;
+}
+.mode-switch:hover { border-color: var(--brand); }
 
 .theme-btn {
   background: transparent;

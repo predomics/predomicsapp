@@ -75,7 +75,7 @@ describe('translations', () => {
   it('no key is left that nothing uses', () => {
     // Keys reached through a computed name (status, tab id, parameter, preset…).
     const dynamic = ['paramErrors.', 'params.', 'paramCategories.', 'parameters.presets.', 'parameters.sweep.',
-      'nav.themeMode.', 'home.uc.', 'home.ucStat.', 'admin.defaultField.', 'errors.', 'notify.', 'time.', 'checklist.steps.']
+      'nav.themeMode.', 'home.uc.', 'home.ucStat.', 'admin.defaultField.', 'errors.', 'notify.', 'time.', 'checklist.steps.', 'simple.presets.', 'simple.grade.']
     const dynamicKeys = new Set(['common.pending', 'common.running', 'common.completed', 'common.failed', 'common.cancelled',
       'data.prevalence', 'data.abundance', 'data.barcode', 'data.classHeatmap', 'data.volcano', 'data.pcoa'])
     const literals = new Set()

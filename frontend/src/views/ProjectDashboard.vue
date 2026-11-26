@@ -6,10 +6,17 @@
         {{ project.datasets?.length || 0 }} {{ $t('projectDashboard.datasets') }} &middot;
         {{ project.jobs?.length || 0 }} {{ $t('projectDashboard.jobs') }}
       </div>
+      <template v-if="!uiMode.isSimple">
       <button type="button" class="share-btn" @click="showShare = true">{{ $t('projectDashboard.share') }}</button>
       <button type="button" class="share-btn" @click="showPublicShare = true">{{ $t('projectDashboard.publicLink') }}</button>
       <button type="button" class="share-btn" :aria-expanded="showComments ? 'true' : 'false'" @click="showComments = !showComments">{{ $t('projectDashboard.notes') }}</button>
+      </template>
     </header>
+
+    <!-- Simple mode: one guided page instead of the tabs -->
+    <SimpleProject v-if="uiMode.isSimple" :project-id="projectId" />
+
+    <template v-else>
 
     <ShareModal
       v-if="showShare"
@@ -69,6 +76,7 @@
         />
       </div>
     </div>
+    </template>
   </div>
   <div v-else class="project-dashboard">
     <AsyncState
@@ -99,6 +107,8 @@ import ShareModal from '../components/ShareModal.vue'
 import CommentsSidebar from '../components/CommentsSidebar.vue'
 import PublicShareModal from '../components/PublicShareModal.vue'
 import AsyncState from '../components/AsyncState.vue'
+import SimpleProject from './SimpleProject.vue'
+import { useUiModeStore } from '../stores/uiMode'
 import { notifyJobCompleted, notifyJobFailed } from '../utils/notify'
 import { apiError, ignoreError } from '../utils/apiError'
 import { useToast } from '../composables/useToast'
@@ -107,6 +117,7 @@ import { useI18n } from 'vue-i18n'
 const route = useRoute()
 const router = useRouter()
 const store = useProjectStore()
+const uiMode = useUiModeStore()
 const { addToast } = useToast()
 const { t } = useI18n()
 const showShare = ref(route.query.share === '1')

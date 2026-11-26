@@ -18,7 +18,10 @@
       "light": "clair",
       "dark": "sombre",
       "system": "système"
-    }
+    },
+    "modeSimple": "Simple",
+    "modeExpert": "Expert",
+    "modeHint": "Le mode simple affiche une page guidée par projet ; le mode expert affiche tous les outils."
   },
   "home": {
     "subtitle": "Découvrez des modèles prédictifs parcimonieux et interprétables à partir de données omiques.",
@@ -2166,6 +2169,92 @@
       "results": {
         "label": "Consulter les résultats",
         "hint": "Ouvrez l'onglet Résultats une fois l'analyse terminée."
+      }
+    }
+  },
+  "simple": {
+    "jobName": "Analyse simple ({preset})",
+    "step1": {
+      "title": "Vos données",
+      "help": "Il faut deux fichiers texte : les mesures (une ligne par variable, une colonne par échantillon) et le groupe de chaque échantillon.",
+      "x": "Mesures",
+      "xHint": "Variables en lignes, échantillons en colonnes (.tsv ou .csv)",
+      "y": "Groupes",
+      "yHint": "Une ligne par échantillon : son nom, puis son groupe (0 ou 1)",
+      "missing": "Pas encore ajouté",
+      "choose": "Choisir un fichier",
+      "replace": "Remplacer",
+      "formatTitle": "À quoi doivent ressembler les fichiers ?",
+      "formatText": "Texte séparé par des tabulations ou des virgules. Le premier fichier a une ligne par variable ; le second donne le groupe de chaque échantillon. Les noms d'échantillons doivent correspondre."
+    },
+    "step2": {
+      "title": "Lancer l'analyse",
+      "help": "Predomics cherche un petit ensemble de variables qui distingue les deux groupes. Choisissez combien de temps la recherche peut durer.",
+      "run": "Lancer l'analyse",
+      "needData": "Ajoutez d'abord les deux fichiers.",
+      "readOnly": "Vous pouvez consulter ce projet mais pas y lancer d'analyse."
+    },
+    "presets": {
+      "quick": {
+        "name": "Rapide",
+        "time": "Environ une minute",
+        "desc": "Un premier aperçu. Utile pour vérifier que les données se chargent bien."
+      },
+      "standard": {
+        "name": "Standard",
+        "time": "Quelques minutes",
+        "desc": "Les réglages recommandés."
+      },
+      "thorough": {
+        "name": "Approfondie",
+        "time": "Peut être beaucoup plus long",
+        "desc": "Une recherche plus large, vérifiée par validation croisée. Pour des résultats à publier."
+      }
+    },
+    "step3": {
+      "title": "Résultat",
+      "running": "L'analyse est en cours. Vous pouvez quitter cette page, elle continue.",
+      "progress": "{pct} % effectués",
+      "starting": "Démarrage…",
+      "cancel": "Arrêter l'analyse",
+      "failed": "L'analyse ne s'est pas terminée.",
+      "empty": "Le résultat s'affichera ici une fois une analyse lancée."
+    },
+    "result": {
+      "aucTest": "AUC sur les échantillons de test",
+      "aucTrain": "AUC sur les échantillons d'apprentissage",
+      "noTest": "Ce score est mesuré sur les échantillons qui ont servi à construire le modèle : il est optimiste. Utilisez le réglage Approfondie, ou ajoutez un jeu de test en mode expert, pour une estimation honnête.",
+      "overfit": "Le modèle fait bien mieux sur les échantillons d'apprentissage ({train}) que sur ceux de test ({test}) : il est probablement sur-ajusté.",
+      "k": "Variables dans le modèle",
+      "accuracy": "Bien classés",
+      "sensitivity": "Sensibilité",
+      "specificity": "Spécificité",
+      "signature": "La signature",
+      "signatureHelp": "Le modèle additionne les variables d'un côté et soustrait celles de l'autre. Ces listes sont les variables qu'il utilise.",
+      "higherIn": "Plus élevé chez {cls}",
+      "history": "Analyses précédentes :",
+      "openExpert": "Voir tous les détails en mode expert"
+    },
+    "grade": {
+      "excellent": {
+        "title": "Séparation excellente",
+        "text": "Les groupes sont distingués presque parfaitement. Vérifiez que cela se confirme sur des échantillons indépendants avant de conclure."
+      },
+      "good": {
+        "title": "Bonne séparation",
+        "text": "La signature sépare bien les groupes."
+      },
+      "fair": {
+        "title": "Séparation modérée",
+        "text": "Il y a une différence réelle mais partielle entre les groupes."
+      },
+      "weak": {
+        "title": "Séparation faible",
+        "text": "La signature fait à peine mieux que le hasard."
+      },
+      "chance": {
+        "title": "Pas de séparation nette",
+        "text": "Avec ces données, le modèle ne distingue pas les groupes mieux que le hasard."
       }
     }
   }

@@ -10,7 +10,7 @@ const DRAFT_VERSION = 1
  * Build default form values from PARAM_DEFS — single source of truth.
  * Structure: { general: {...}, ga: {...}, beam: {...}, ... }
  */
-function buildDefaults() {
+export function buildDefaults() {
   const form = {}
   for (const cat of CATEGORIES) form[cat.id] = {}
   for (const p of PARAM_DEFS) form[p.category][p.key] = p.defaultValue
@@ -18,7 +18,7 @@ function buildDefaults() {
 }
 
 /** Data section: loading options + feature pre-filtering, edited in the Data tab. */
-function dataDefaults() {
+export function dataDefaults() {
   return {
     features_in_rows: true,
     inverse_classes: false,

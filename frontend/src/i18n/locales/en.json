@@ -18,7 +18,10 @@
       "light": "light",
       "dark": "dark",
       "system": "system"
-    }
+    },
+    "modeSimple": "Simple",
+    "modeExpert": "Expert",
+    "modeHint": "Simple mode shows one guided page per project; Expert mode shows every tool."
   },
   "home": {
     "subtitle": "Discover sparse, interpretable predictive models from omics data.",
@@ -2166,6 +2169,92 @@
       "results": {
         "label": "Look at the results",
         "hint": "Open the Results tab once the job has completed."
+      }
+    }
+  },
+  "simple": {
+    "jobName": "Simple run ({preset})",
+    "step1": {
+      "title": "Your data",
+      "help": "Two text files are needed: the measurements (one row per feature, one column per sample) and the group of each sample.",
+      "x": "Measurements",
+      "xHint": "Features in rows, samples in columns (.tsv or .csv)",
+      "y": "Groups",
+      "yHint": "One line per sample: sample name, then its group (0 or 1)",
+      "missing": "Not added yet",
+      "choose": "Choose a file",
+      "replace": "Replace",
+      "formatTitle": "What should the files look like?",
+      "formatText": "Tab- or comma-separated text. The first file has one row per feature; the second gives the group of each sample. Sample names must match."
+    },
+    "step2": {
+      "title": "Run the analysis",
+      "help": "Predomics looks for a small set of features that tells the two groups apart. Choose how long it may search.",
+      "run": "Run the analysis",
+      "needData": "Add both files first.",
+      "readOnly": "You can view this project but not run analyses in it."
+    },
+    "presets": {
+      "quick": {
+        "name": "Quick",
+        "time": "About a minute",
+        "desc": "A first look. Good to check that the data load correctly."
+      },
+      "standard": {
+        "name": "Standard",
+        "time": "A few minutes",
+        "desc": "The recommended settings."
+      },
+      "thorough": {
+        "name": "Thorough",
+        "time": "Can take much longer",
+        "desc": "A larger search checked by cross-validation. For results you will report."
+      }
+    },
+    "step3": {
+      "title": "Result",
+      "running": "The analysis is running. You can leave this page; it carries on.",
+      "progress": "{pct} % done",
+      "starting": "Starting…",
+      "cancel": "Stop the analysis",
+      "failed": "The analysis did not finish.",
+      "empty": "The result will appear here once an analysis has run."
+    },
+    "result": {
+      "aucTest": "AUC on the test samples",
+      "aucTrain": "AUC on the training samples",
+      "noTest": "This score is measured on the samples used to build the model, so it is optimistic. Use the Thorough setting, or add a test set in Expert mode, for an honest estimate.",
+      "overfit": "The model does much better on the training samples ({train}) than on the test samples ({test}): it is likely over-fitted.",
+      "k": "Features in the model",
+      "accuracy": "Correctly classified",
+      "sensitivity": "Sensitivity",
+      "specificity": "Specificity",
+      "signature": "The signature",
+      "signatureHelp": "The model adds up the features on one side and subtracts those on the other. These lists are the features it uses.",
+      "higherIn": "Higher in {cls}",
+      "history": "Earlier analyses:",
+      "openExpert": "See every detail in Expert mode"
+    },
+    "grade": {
+      "excellent": {
+        "title": "Excellent separation",
+        "text": "The groups are told apart almost perfectly. Check that this holds on independent samples before drawing conclusions."
+      },
+      "good": {
+        "title": "Good separation",
+        "text": "The signature separates the groups well."
+      },
+      "fair": {
+        "title": "Moderate separation",
+        "text": "There is a real but partial difference between the groups."
+      },
+      "weak": {
+        "title": "Weak separation",
+        "text": "The signature does only slightly better than chance."
+      },
+      "chance": {
+        "title": "No clear separation",
+        "text": "The model does not tell the groups apart better than chance with these data."
       }
     }
   }
