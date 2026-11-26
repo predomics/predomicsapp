@@ -52,6 +52,37 @@ SAMPLE_DATASETS = {
     },
 }
 
+# Pasolli et al. 2016 (PLoS Comput Biol) benchmark: six binary disease-prediction
+# tasks on MetaPhlAn2 species profiles (relative abundance), stratified 80/20 split.
+_PASOLLI_FILES = [
+    {"filename": "Xtrain.tsv", "features_in_rows": True},
+    {"filename": "Ytrain.tsv", "features_in_rows": False},
+    {"filename": "Xtest.tsv", "features_in_rows": True},
+    {"filename": "Ytest.tsv", "features_in_rows": False},
+    {"filename": "metadata.tsv", "features_in_rows": False},
+]
+for _key, _name, _desc in (
+    ("pasolli2016_cirrhosis", "Pasolli2016 Liver Cirrhosis",
+     "Pasolli et al. 2016 benchmark — Qin N et al. 2014 cohort, cirrhosis vs healthy, "
+     "542 MetaPhlAn2 species, 185 train + 47 test samples"),
+    ("pasolli2016_colorectal", "Pasolli2016 Colorectal Cancer",
+     "Pasolli et al. 2016 benchmark — Zeller et al. 2014 cohort, CRC vs controls (incl. small adenomas), "
+     "503 MetaPhlAn2 species, 96 train + 25 test samples"),
+    ("pasolli2016_ibd", "Pasolli2016 IBD",
+     "Pasolli et al. 2016 benchmark — MetaHIT cohort, IBD (Crohn's + ulcerative colitis) vs controls, "
+     "443 MetaPhlAn2 species, 88 train + 22 test samples"),
+    ("pasolli2016_obesity", "Pasolli2016 Obesity",
+     "Pasolli et al. 2016 benchmark — Le Chatelier et al. 2013 cohort, obese vs lean, "
+     "465 MetaPhlAn2 species, 202 train + 51 test samples"),
+    ("pasolli2016_t2d", "Pasolli2016 Type 2 Diabetes (China)",
+     "Pasolli et al. 2016 benchmark — Qin J et al. 2012 cohort, T2D vs controls, "
+     "572 MetaPhlAn2 species, 275 train + 69 test samples"),
+    ("pasolli2016_wt2d", "Pasolli2016 Type 2 Diabetes (European women)",
+     "Pasolli et al. 2016 benchmark — Karlsson et al. 2013 cohort, T2D vs normal glucose tolerance, "
+     "381 MetaPhlAn2 species, 76 train + 20 test samples"),
+):
+    SAMPLE_DATASETS[_key] = {"name": _name, "description": _desc, "files": _PASOLLI_FILES}
+
 
 @router.get("/", response_model=list[SampleInfo])
 async def list_samples():
