@@ -149,6 +149,38 @@ class TestLaunchChecks:
         assert len((await client.get(f"/api/analysis/{bob_pid}/jobs")).json()) == 1
 
     @pytest.mark.asyncio
+    async def test_rerun_uses_the_original_jobs_files(self, auth_client):
+        """Rerun used to take the project's latest uploads, i.e. possibly another dataset."""
+        pid, x, y = await _create_project_with_datasets(auth_client)
+        with patch("app.services.engine.HAS_ENGINE", False):
+            first = (await auth_client.post(
+                f"/api/analysis/{pid}/run", json=_CONFIG, params={"x_file_id": x, "y_file_id": y},
+            )).json()["job_id"]
+            # a second dataset uploaded later to the same project
+            for name, body in (("X.tsv", b"id\ts3\ts4\nf1\t0.5\t0.6\n"), ("y.tsv", b"id\tclass\ns3\t0\ns4\t1\n")):
+                await auth_client.post(f"/api/projects/{pid}/datasets", files={"file": (name, body, "text/plain")})
+            resp = await auth_client.post(f"/api/analysis/{pid}/jobs/{first}/rerun")
+        assert resp.status_code == 200
+        import yaml
+        def data_paths(job_id):
+            d = yaml.safe_load((results_io.job_dir(pid, job_id) / "param.yaml").read_text())["data"]
+            return d["X"], d["y"]
+        assert data_paths(resp.json()["job_id"]) == data_paths(first)
+        assert _job_row(resp.json()["job_id"]).config_hash == _job_row(first).config_hash
+
+    @pytest.mark.asyncio
+    async def test_rerun_refuses_when_original_files_are_gone(self, auth_client):
+        pid, x, y = await _create_project_with_datasets(auth_client)
+        with patch("app.services.engine.HAS_ENGINE", False):
+            first = (await auth_client.post(
+                f"/api/analysis/{pid}/run", json=_CONFIG, params={"x_file_id": x, "y_file_id": y},
+            )).json()["job_id"]
+            for ds in (await auth_client.get(f"/api/projects/{pid}")).json()["datasets"]:
+                await auth_client.delete(f"/api/datasets/{ds['id']}/assign/{pid}")
+            resp = await auth_client.post(f"/api/analysis/{pid}/jobs/{first}/rerun")
+        assert resp.status_code == 409
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("general", [
         {"thread_number": 0}, {"thread_number": 100000}, {"seed": -1},
     ])

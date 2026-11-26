@@ -10,6 +10,8 @@ import logging
 import shutil
 import uuid
 from datetime import datetime, timezone
+
+import yaml
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, File, UploadFile, Form
@@ -82,6 +84,47 @@ async def _project_file_path(db: AsyncSession, project_id: str, file_id: str, wh
             detail=f"Dataset file not found in this project ({what})",
         )
     return f.disk_path
+
+
+async def _original_job_files(db: AsyncSession, project_id: str, job_id: str) -> dict:
+    """Dataset files a job ran on, read back from the param.yaml written at launch.
+
+    Returns {"X", "y", "Xtest", "ytest", "clinical"} -> DatasetFile (or None when
+    the job had no such input). Raises 409 when the original training files are
+    no longer available in this project: re-running on other files would give
+    results that silently belong to different data.
+    """
+    param_path = Path(storage.settings.project_dir) / project_id / "jobs" / job_id / "param.yaml"
+    try:
+        param = yaml.safe_load(param_path.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        param = {}
+    data = param.get("data") or {}
+    paths = {
+        "X": data.get("X") or "", "y": data.get("y") or "",
+        "Xtest": data.get("Xtest") or "", "ytest": data.get("ytest") or "",
+        "clinical": (param.get("clinical") or {}).get("path") or "",
+    }
+    wanted = [p for p in paths.values() if p]
+    by_path = {}
+    if wanted:
+        r = await db.execute(
+            select(DatasetFile)
+            .join(Dataset, DatasetFile.dataset_id == Dataset.id)
+            .join(ProjectDataset, ProjectDataset.dataset_id == Dataset.id)
+            .where(ProjectDataset.project_id == project_id, DatasetFile.disk_path.in_(wanted))
+        )
+        by_path = {f.disk_path: f for f in r.scalars().all()}
+    files = {role: by_path.get(p) if p else None for role, p in paths.items()}
+    missing = [role for role, p in paths.items() if p and files[role] is None]
+    if not paths["X"] or not paths["y"] or missing:
+        raise HTTPException(
+            status_code=409,
+            detail="The data files of the original job are no longer available in this project"
+                   + (f" ({', '.join(missing)})" if missing else "")
+                   + "; launch a new run instead.",
+        )
+    return files
 
 
 def _prepare_config(config: RunConfig | dict, label: str = "") -> dict:
@@ -468,8 +511,8 @@ async def rerun_job(
 ):
     """Re-run a job with the same configuration (editor access required).
 
-    Creates a new job using the original job's config and the project's
-    current dataset files.  Useful for reproducibility testing.
+    Creates a new job with the original job's config and the same data files
+    (409 if they were removed from the project). Useful for reproducibility testing.
     """
     await get_project_access(project_id, user, db, require_role="editor")
 
@@ -483,36 +526,17 @@ async def rerun_job(
     if not original.config:
         raise HTTPException(status_code=400, detail="Job has no stored configuration")
 
-    # Resolve current dataset files from the project
-    result = await db.execute(
-        select(DatasetFile)
-        .join(DatasetFile.dataset)
-        .join(Dataset.project_links)
-        .where(ProjectDataset.project_id == project_id)
-        .order_by(DatasetFile.uploaded_at, DatasetFile.id)  # latest upload wins per role
-    )
-    files = result.scalars().all()
-
-    file_map = {}
-    for f in files:
-        if f.role:
-            file_map[f.role] = f
-
-    xtrain = file_map.get("xtrain")
-    ytrain = file_map.get("ytrain")
-    if not xtrain or not ytrain:
-        raise HTTPException(status_code=400, detail="Project has no training data files")
-
-    x_path = xtrain.disk_path
-    y_path = ytrain.disk_path
-    xtest_path = file_map["xtest"].disk_path if "xtest" in file_map else ""
-    ytest_path = file_map["ytest"].disk_path if "ytest" in file_map else ""
-    clinical_file = file_map.get("clinical") or file_map.get("metadata")
-    clinical_path = clinical_file.disk_path if clinical_file else ""
+    # Re-use the exact files of the original job (not the project's latest
+    # uploads: a project can hold several datasets, e.g. one per CV split).
+    file_map = await _original_job_files(db, project_id, original.id)
+    xtrain, ytrain = file_map["X"], file_map["y"]
+    xtest_file, ytest_file = file_map["Xtest"], file_map["ytest"]
+    x_path, y_path = xtrain.disk_path, ytrain.disk_path
+    xtest_path = xtest_file.disk_path if xtest_file else ""
+    ytest_path = ytest_file.disk_path if ytest_file else ""
+    clinical_path = file_map["clinical"].disk_path if file_map["clinical"] else ""
 
     config_dict = _prepare_config(original.config)
-    xtest_file = file_map.get("xtest")
-    ytest_file = file_map.get("ytest")
     config_hash = _compute_config_hash(config_dict, {
         "x": xtrain.id, "y": ytrain.id,
         "xtest": xtest_file.id if xtest_file else "",
