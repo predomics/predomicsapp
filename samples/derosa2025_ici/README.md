@@ -58,3 +58,14 @@ data:
 
 - Derosa L, et al. Custom scoring based on ecological topology of gut microbiota associated with cancer immunotherapy outcome. *Cell*. 2024;187(13):3373-3389.e16. doi:[10.1016/j.cell.2024.05.029](https://doi.org/10.1016/j.cell.2024.05.029). PMID: [38906102](https://pubmed.ncbi.nlm.nih.gov/38906102/).
 - Routy B, Le Chatelier E, Derosa L, et al. Gut microbiome influences efficacy of PD-1-based immunotherapy against epithelial tumors. *Science*. 2018;359(6371):91-97. doi:[10.1126/science.aan3706](https://doi.org/10.1126/science.aan3706). PMID: [29097494](https://pubmed.ncbi.nlm.nih.gov/29097494/).
+
+## Licence and reuse
+
+The tables in this directory are derived from the published study cited above
+and are bundled for demonstration. The licence under which these derived
+tables may be redistributed, and their exact provenance (gene catalogue and
+version, profiling pipeline, normalisation), are **to be completed by the data
+owner**. Cite the original publication when you use them.
+
+Note: the directory is named `derosa2025_ici` while the reference above is the
+2024 *Cell* article; the name is kept because the application refers to it.

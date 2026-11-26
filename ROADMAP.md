@@ -1,6 +1,6 @@
-# PredomicsApp-Web — Roadmap
+# PredomicsApp — Roadmap
 
-_Last updated: 2026-02-18_
+_Last updated: 2026-11-25 (stale statements corrected; items 1–59 describe the state when each was completed — see [CHANGELOG.md](CHANGELOG.md) for what changed since)_
 
 ---
 
@@ -12,7 +12,7 @@ _Last updated: 2026-02-18_
 Add ability to download results as CSV/HTML report from the Results tab.
 
 - CSV exports: coefficients, population, jury, generation tracking
-- HTML report: self-contained with embedded charts and metrics
+- HTML report: single file with embedded data and metrics (the charting library, Plotly, is loaded from `cdn.plot.ly`, so charts need internet access when the file is opened)
 - Backend endpoints for CSV sections and full HTML report
 - Frontend: Export dropdown in Results tab header
 
@@ -128,8 +128,8 @@ Real-world use cases with results on the landing page.
 
 Expanded test suite to cover critical paths — **86% coverage** on testable backend code.
 
-- **Backend: 207 tests** (69 new) covering all 11 routers — datasets (94%), projects (97%), sharing (99%), admin (98%), auth (100%), export (93%), health (100%), analysis (73%), data_explore (90%), samples (97%)
-- **Frontend: 59 tests** (all new) — Vitest 4 + Vue Test Utils + jsdom: parameter definitions (13), notification utility (13), Pinia stores (14), Vue components (14), router config (5)
+- **Backend: 207 tests** at the time (69 new) covering the 11 routers that existed then (the suite and the number of routers have grown since; `make test-backend` gives the current count) — datasets (94%), projects (97%), sharing (99%), admin (98%), auth (100%), export (93%), health (100%), analysis (73%), data_explore (90%), samples (97%)
+- **Frontend: 59 tests** at the time (all new; more since, `make test-frontend`) — Vitest 4 + Vue Test Utils + jsdom: parameter definitions (13), notification utility (13), Pinia stores (14), Vue components (14), router config (5)
 - Edge cases: concurrent jobs, batch runs, error recovery, export helpers
 - Coverage config: `pyproject.toml` with `concurrency = ["greenlet", "thread"]` for accurate async tracking
 - Remaining uncovered: DB migrations (main.py, PostgreSQL-specific), subprocess worker (worker.py), gpredomicspy internals
@@ -139,8 +139,7 @@ Expanded test suite to cover critical paths — **86% coverage** on testable bac
 
 Auto-generate OpenAPI documentation.
 
-- Fixed SPA catch-all to not intercept `/docs`, `/redoc`, `/openapi.json` paths
-- FastAPI Swagger UI available at `/docs`, ReDoc at `/redoc`
+- FastAPI Swagger UI available at `/api/docs`, ReDoc at `/api/redoc`, OpenAPI JSON at `/api/openapi.json` (the bare `/docs` path is served by the single-page app)
 - OpenAPI JSON schema at `/openapi.json`
 
 ### 13. Production Deployment Guide ✅
@@ -428,7 +427,7 @@ Automated end-to-end testing using Playwright.
   9. Health API endpoint returns ok
   10. Swagger docs accessible
 - Root `package.json` with `test:e2e` script and `@playwright/test` dependency
-- CI integration: `e2e-test` job in GitHub Actions after Docker build
+- CI integration: the end-to-end tests run in the `image` job of `.github/workflows/ci.yml`, against the image built in that job (on pull requests and on `main`)
 
 ### 36. CI/CD Pipeline & Docker Registry ✅
 **Priority:** LOW | **Effort:** Low | **Status:** Done
@@ -436,7 +435,8 @@ Automated end-to-end testing using Playwright.
 Auto-deploy on tag push with container registry publishing.
 
 - `.github/workflows/release.yml` triggered on `v*` tags
-- Multi-repo checkout (predomicsapp, gpredomics, gpredomicspy)
+- Single checkout: gpredomics and gpredomicspy are fetched at pinned commits during the image build
+- Gated on the full CI workflow; published for amd64 and arm64
 - Login to GHCR, build and push with `docker/build-push-action`
 - Tags: `ghcr.io/{owner}/predomicsapp:latest` + `:{version}`
 - GitHub Actions cache (`type=gha`) for faster rebuilds
@@ -449,7 +449,7 @@ Multi-language support starting with French.
 
 - `vue-i18n@9` integration with JSON locale files
 - `frontend/src/i18n/` module with `createI18n()` setup
-- English (`en.json`) and French (`fr.json`) locale files (~100 strings each)
+- English (`en.json`) and French (`fr.json`) locale files (about 100 strings each at the time; over 1,100 keys each today)
 - Namespaces: nav, home, login, dashboard, projects, results, meta, common
 - Language selector button (EN/FR toggle) in navbar next to theme toggle
 - `localStorage.locale` persistence across sessions
@@ -691,7 +691,17 @@ Bundled demos in samples/ (baked in image). User workspace in data/ (persistent 
 ### 59. Documentation ✅
 **Priority:** MEDIUM | **Effort:** Medium | **Status:** Done
 
-17-page PDF documentation. Vignette tutorial. All 7 algorithm docs with references. Fully documented param.yaml.
+Codebase documentation (the February 2026 HTML/PDF snapshot was retired in favour of `docs/architecture.md`, `docs/tutorial.md` and `docs/api-guide.md`). Fully documented `samples/qin2014_cirrhosis/param.yaml`. The vignette tutorial and the per-algorithm documentation are in the gpredomics repository and on <https://predomics.github.io>, not in this repository.
+
+### Shipped without a roadmap entry
+
+Added after Phase 6 and not listed above (see [CHANGELOG.md](CHANGELOG.md)):
+scikit-learn comparison models (random forest, SVM, logistic regression,
+XGBoost, LightGBM, extra trees, AdaBoost, k-NN), the Insights tab, taxonomic and
+functional enrichment, the z-score data type and data transformations in data
+exploration, and the build, deployment and security hardening of November 2026
+(pinned engine, non-root image, administrator bootstrap setting, job queue
+limits, working scheduled backups).
 
 ---
 
@@ -700,7 +710,7 @@ Bundled demos in samples/ (baked in image). User workspace in data/ (persistent 
 ### 60. Multi-user Workspace Management [predomicsapp#4](https://github.com/predomics/predomicsapp/issues/4)
 **Priority:** HIGH | **Effort:** High | **Status:** Open
 
-Job concurrency limits (semaphore), per-user disk quotas, job timeouts, dataset deduplication, admin dashboard.
+Per-user disk quotas, dataset deduplication, admin dashboard. (Partly done since: a global job concurrency limit, `PREDOMICS_MAX_CONCURRENT_JOBS`, and a job timeout, `PREDOMICS_JOB_TIMEOUT_MINUTES`, now exist.)
 
 ### 61. Data Scanning Console Feedback [predomicsapp#5](https://github.com/predomics/predomicsapp/issues/5)
 **Priority:** MEDIUM | **Effort:** Low | **Status:** Open
@@ -718,7 +728,7 @@ Bayesian hyperparameter tuning via Optuna in gpredomicspy. Search space for k_pe
 One-vs-All and One-vs-One strategies for multi-class problems. Orchestrate K binary gpredomics runs.
 
 ### 64. Clinical Data Integration [gpredomics#51](https://github.com/predomics/gpredomics/issues/51)
-**Priority:** MEDIUM | **Effort:** Medium | **Status:** Open
+**Priority:** MEDIUM | **Effort:** Medium | **Status:** Partly done (a "Clinical" parameter section and clinical-file selection exist in the app; the engine-side work tracked in the issue is open)
 
 Stacking, calibration, stratification of omics scores with clinical variables.
 

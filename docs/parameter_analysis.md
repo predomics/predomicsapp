@@ -1,5 +1,14 @@
 # Parameter Analysis: gpredomics vs PredomicsApp Web
 
+> **Status of this document (2026-11-25):** written in February 2026. It covers
+> the parameter sections that existed then (general, GA, Beam, MCMC, data,
+> cross-validation and related). The application has since
+> gained Simulated Annealing, LASSO, ILS, ACO, the scikit-learn comparison
+> models, clinical-data and feature-selection parameters; those are **not**
+> analysed here. The authoritative list of parameters shown in the UI is
+> `frontend/src/data/parameterDefs.js`, and the request schema is `RunConfig`
+> in `backend/app/models/schemas.py`.
+
 This document compares all parameters from the gpredomics engine (`param.yaml` / `param.rs`) with what is currently implemented in the PredomicsApp web frontend and backend.
 
 ## Summary

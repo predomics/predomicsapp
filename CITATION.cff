@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: >-
+  If you use PredomicsApp or the gpredomics engine in your work, please cite
+  the article below.
+title: PredomicsApp
+type: software
+abstract: >-
+  Web application for building interpretable predictive models from microbiome
+  and other omics data with the gpredomics engine.
+authors:
+  - name: The Predomics team
+repository-code: https://github.com/predomics/predomicsapp
+url: https://predomics.github.io
+keywords:
+  - microbiome
+  - metagenomics
+  - interpretable machine learning
+  - biomarker discovery
+preferred-citation:
+  type: article
+  title: Interpretable and accurate prediction models for metagenomics data
+  authors:
+    - family-names: Prifti
+      given-names: Edi
+    - family-names: Chevaleyre
+      given-names: Yann
+    - family-names: Hanczar
+      given-names: Blaise
+    - family-names: Belda
+      given-names: Eugeni
+    - family-names: Danchin
+      given-names: Antoine
+    - family-names: Clément
+      given-names: Karine
+    - family-names: Zucker
+      given-names: Jean-Daniel
+  journal: GigaScience
+  volume: 9
+  issue: 3
+  start: giaa010
+  year: 2020
+  publisher:
+    name: Oxford University Press
+  doi: 10.1093/gigascience/giaa010

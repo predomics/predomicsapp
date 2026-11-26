@@ -60,3 +60,11 @@ With the genetic algorithm (GA), ternary language, and default parameters, gpred
 ## Reference
 
 Qin N, Yang F, Li A, Prifti E, Chen Y, Shao L, Guo J, Le Chatelier E, Yao J, Wu L, Zhou J, Ni S, Liu L, Pons N, Batto JM, Kennedy SP, Leonard P, Yuan C, Ding W, Chen Y, Hu X, Zheng B, Qian G, Xu W, Ehrlich SD, Zheng S, Li L. Alterations of the human gut microbiome in liver cirrhosis. *Nature*. 2014 Sep 4;513(7516):59-64. doi:[10.1038/nature13568](https://doi.org/10.1038/nature13568). PMID: [25079328](https://pubmed.ncbi.nlm.nih.gov/25079328/).
+
+## Licence and reuse
+
+The tables in this directory are derived from the published study cited above
+and are bundled for demonstration. The licence under which these derived
+tables may be redistributed, and their exact provenance (gene catalogue and
+version, profiling pipeline, normalisation), are **to be completed by the data
+owner**. Cite the original publication when you use them.
