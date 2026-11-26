@@ -298,23 +298,19 @@ jobs:
           curl -sI http://localhost:8080/ | grep -i '^content-security-policy:'
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/metrics)" = "404" ]
 
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install E2E dependencies
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
-
+      # The official Playwright image already holds Chromium and its system
+      # libraries: no apt-get on every run (the step that used to fail), and the
+      # same image as `make test-e2e`. Keep its tag equal to the Playwright
+      # version in package-lock.json.
       - name: Run E2E tests
-        run: npm run test:e2e
-        env:
-          BASE_URL: http://localhost:8080
-          E2E_REQUIRE_CSP: "1"
+        run: |
+          want=$(jq -r '.packages["node_modules/playwright"].version' package-lock.json)
+          [ "$want" = "1.58.2" ] || { echo "package-lock.json has Playwright $want: update the image tag below (and PLAYWRIGHT_IMG in the Makefile)"; exit 1; }
+          docker run --rm --network ci-net \
+            -v "$PWD:/work" -w /work \
+            -e BASE_URL=http://ci-nginx -e E2E_REQUIRE_CSP=1 -e CI=1 \
+            mcr.microsoft.com/playwright:v1.58.2-noble@sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d \
+            sh -c "npm ci --no-audit --no-fund && npx playwright test"
 
       - name: Upload Playwright report
         if: failure()
