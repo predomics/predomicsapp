@@ -224,12 +224,11 @@ test.describe.serial('PredomicsApp E2E', () => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
     const page = await ctx.newPage()
 
-    // Access with an invalid token — page should render SPA even if API returns 404
+    // An invalid token renders the public page with an error, never project data.
     await page.goto(`${BASE}/public/invalid-token-test`)
-    await page.waitForTimeout(3000)
-
-    const body = await page.textContent('body')
-    expect(body.length).toBeGreaterThan(0)
+    await expect(page.locator('.public-header')).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('.error-box')).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('.project-info')).toHaveCount(0)
     await ctx.close()
   })
 

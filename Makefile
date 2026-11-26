@@ -57,9 +57,9 @@ test-e2e: ## End-to-end tests (Playwright) on a throwaway stack built from E2E_I
 		-v "$(CURDIR)/nginx/http:/etc/nginx/templates:ro" -v "$(CURDIR)/nginx/snippets:/etc/nginx/predomics:ro" \
 		$(NGINX_IMG)
 	docker run --rm --network $(E2E_STACK)_default \
-		-v "$(CURDIR):/work" -v predomics-e2e-node-modules:/work/node_modules -w /work \
+		-v "$(CURDIR):/work" -v predomics-e2e-node-modules:/work/node_modules -v predomics-e2e-npm-cache:/root/.npm -w /work \
 		-e BASE_URL=http://$(E2E_STACK)-nginx -e E2E_REQUIRE_CSP=1 -e CI=1 \
-		$(PLAYWRIGHT_IMG) sh -c "npm ci --no-audit --no-fund && npx playwright test"; \
+		$(PLAYWRIGHT_IMG) sh -c "npm ci --prefer-offline --no-audit --no-fund && npx playwright test"; \
 	status=$$?; docker stop $(E2E_STACK)-nginx > /dev/null; $(E2E_COMPOSE) down -v; exit $$status
 
 test-e2e-url: ## End-to-end tests against an existing instance: make test-e2e-url BASE_URL=http://host:port (needs Node.js; creates test users there)
