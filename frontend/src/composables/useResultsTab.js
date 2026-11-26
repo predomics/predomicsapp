@@ -7,6 +7,7 @@
  * of the former single-file component: watchers, URL sync and chart rendering
  * are unchanged, only the markup moved.
  */
+import { densityGrid } from '../utils/density'
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick , inject, getCurrentInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../stores/project'
@@ -3133,18 +3134,16 @@ export function createResultsState() {
     const textColor = c.text
     const bgColor = c.transparent
 
-    // Collect data points
-    let ks = [], fits = [], colors = []
+    // Collect data points (all generations, or the one selected)
+    const ks = [], fits = []
     const nGens = generationTracking.value.length
 
     if (explorationGen.value === -1) {
-      // All generations — color by generation
       for (let g = 0; g < nGens; g++) {
         const samples = generationTracking.value[g].k_fit_sample || []
         for (const [k, f] of samples) {
           ks.push(k)
           fits.push(f)
-          colors.push(g)
         }
       }
     } else {
@@ -3153,33 +3152,35 @@ export function createResultsState() {
       for (const [k, f] of samples) {
         ks.push(k)
         fits.push(f)
-        colors.push(explorationGen.value)
       }
     }
 
     if (ks.length === 0) return
 
+    // Density of sampled models. Empty bins stay blank (null) so the explored region
+    // stands out; colour goes from light (few models) to dark (many).
+    const grid = densityGrid(ks, fits, { nx: 40, ny: 40, integerX: true })
     const traces = [{
-      type: 'histogram2d',
-      x: ks,
-      y: fits,
-      colorscale: c.sequentialWarm,
-      reversescale: true,
-      nbinsx: 40,
-      nbinsy: 40,
-      colorbar: { title: { text: ct('Density'), font: { color: textColor } }, tickfont: { color: textColor } },
+      type: 'heatmap',
+      x: grid.x,
+      y: grid.y,
+      z: grid.z,
+      zmin: 1,
+      zmax: Math.max(2, grid.max),
+      colorscale: c.scaleDensity,
+      xgap: 0,
+      ygap: 0,
+      hoverongaps: false,
+      colorbar: { title: { text: ct('Models'), font: { color: textColor } }, tickfont: { color: textColor } },
+      hovertemplate: `k≈%{x:.0f}, fit≈%{y:.3f}<br>${ct('Models')}: %{z}<extra></extra>`,
     }, {
+      // individual models, faint, for the outline of sparse regions
       type: 'scatter',
       mode: 'markers',
       x: ks,
       y: fits,
-      marker: {
-        size: 3,
-        color: colors,
-        colorscale: c.scaleUniform,
-        opacity: 0.3,
-      },
-      hovertemplate: 'k=%{x}, fit=%{y:.4f}<extra></extra>',
+      marker: { size: 2, color: textColor, opacity: 0.18 },
+      hoverinfo: 'skip',
       showlegend: false,
     }]
 
@@ -3192,7 +3193,7 @@ export function createResultsState() {
       x: bestKs,
       y: bestFits,
       name: ct('Best model trajectory'),
-      marker: { size: 6, color: c.good, symbol: 'star' },
+      marker: { size: 8, color: c.good, symbol: 'star', line: { color: c.paper, width: 1 } },
       line: { color: c.good, width: 2 },
       hovertemplate: `${ct('Generation')} %{customdata}: k=%{x}, fit=%{y:.4f}<extra>${ct('Best')}</extra>`,
       customdata: generationTracking.value.map((_, i) => i),
@@ -3200,14 +3201,15 @@ export function createResultsState() {
 
     const genLabel = explorationGen.value === -1 ? ct('All generations') : `${ct('Generation')} ${explorationGen.value}`
     const layout = {
-      title: { text: t('charts.explorationTitle', { gen: genLabel, n: ks.length }), font: { color: textColor, size: 14 } },
-      xaxis: { title: { text: ct('k (model complexity)'), font: { color: textColor } }, tickfont: { color: textColor } },
-      yaxis: { title: { text: ct('Penalized fitness'), font: { color: textColor } }, tickfont: { color: textColor } },
+      title: { text: t('charts.explorationTitle', { gen: genLabel, n: ks.length }), font: { color: textColor, size: 14 }, x: 0, xanchor: 'left' },
+      xaxis: { title: { text: ct('k (model complexity)'), font: { color: textColor } }, tickfont: { color: textColor }, gridcolor: c.grid, zeroline: false },
+      yaxis: { title: { text: ct('Penalized fitness'), font: { color: textColor } }, tickfont: { color: textColor }, gridcolor: c.grid, zeroline: false },
       height: 500,
-      margin: { l: 60, r: 30, t: 40, b: 50 },
+      margin: { l: 60, r: 30, t: 70, b: 50 },
       paper_bgcolor: bgColor,
       plot_bgcolor: bgColor,
-      legend: { font: { color: textColor }, x: 0.01, y: 0.99 },
+      // legend above the plot: the best models sit in the top-left corner
+      legend: { font: { color: textColor }, orientation: 'h', x: 1, xanchor: 'right', y: 1.02, yanchor: 'bottom' },
     }
 
     Plotly.react(explorationChartEl.value, traces, layout, { responsive: true })

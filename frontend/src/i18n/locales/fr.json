@@ -2022,7 +2022,6 @@
     "count": "Nombre",
     "cumulativeContribution": "Contribution cumulée",
     "cumulativeShapValue": "Valeur SHAP cumulée",
-    "density": "Densité",
     "entropy": "Entropie",
     "error": "Erreur",
     "experts": "Experts",

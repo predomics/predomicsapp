@@ -89,6 +89,13 @@ export function useChartTheme() {
       sequentialWarm: dark
         ? [[0, '#1e1e2e'], [0.25, '#5c3a12'], [0.5, '#9c5a10'], [0.8, '#d98a1c'], [1, '#ffd27a']]
         : [[0, '#ffffff'], [0.2, '#fee8c8'], [0.5, '#fdbb84'], [0.8, '#e34a33'], [1, '#b30000']],
+      // Density (counts): magma, light → dark on a light page and dark → light on a dark
+      // one, so more models always means more contrast with the background. The ends
+      // closest to the background are trimmed so a single model is still visible;
+      // empty cells are not coloured at all (null), they show the background.
+      scaleDensity: dark
+        ? [[0, '#3b0f70'], [0.2, '#641a80'], [0.4, '#b73779'], [0.6, '#f7705c'], [0.8, '#fecf92'], [1, '#fcfdbf']]
+        : [[0, '#fecf92'], [0.2, '#fe9f6d'], [0.4, '#f7705c'], [0.6, '#de4968'], [0.8, '#8c2981'], [1, '#3b0f70']],
       // Perceptually uniform, colour-blind-safe named scales for dense heatmaps.
       scaleUniform: 'Viridis',
       scaleHeat: 'Cividis',
