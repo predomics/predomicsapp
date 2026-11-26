@@ -666,7 +666,7 @@ cluster's tooling), NetworkPolicies, and a PodDisruptionBudget.
   "version": "2.2.0",
   "gpredomicspy_available": true,
   "engine_version": "0.1.0",
-  "engine_ref": "faff348892ca…",
+  "engine_ref": "acc2a6bf08b1…",
   "enginepy_ref": "d963ec310be7…",
   "scitq_enabled": false
 }

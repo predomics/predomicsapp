@@ -18,7 +18,7 @@
 # that this version of the app was built and tested against. Any git ref works
 # (commit, tag or branch), but only a commit or tag gives a reproducible image.
 # TODO: replace by release tags once both repositories are tagged.
-ARG GPREDOMICS_REF=faff348892ca0047de560daf41ec89029861b4fe
+ARG GPREDOMICS_REF=acc2a6bf08b140b6bac356cb8797e2141d0f98cc
 ARG GPREDOMICSPY_REF=d963ec310be71afc7f9517084d6a348450160029
 
 # =============================================================================

@@ -43,7 +43,7 @@ services:
       dockerfile: Dockerfile
       args:
         # Engine pin: leave unset to use the commits pinned in the Dockerfile.
-        - GPREDOMICS_REF=${GPREDOMICS_REF:-faff348892ca0047de560daf41ec89029861b4fe}
+        - GPREDOMICS_REF=${GPREDOMICS_REF:-acc2a6bf08b140b6bac356cb8797e2141d0f98cc}
         - GPREDOMICSPY_REF=${GPREDOMICSPY_REF:-d963ec310be71afc7f9517084d6a348450160029}
         - APP_VERSION=${APP_VERSION:-}
         - VCS_REF=${VCS_REF:-unknown}
