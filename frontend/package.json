@@ -20,7 +20,7 @@
     "pinia": "^2.1",
     "plotly.js": "^3.7.0",
     "vue": "^3.4",
-    "vue-i18n": "^9.14",
+    "vue-i18n": "^11.4",
     "vue-router": "^4.3"
   },
   "devDependencies": {
