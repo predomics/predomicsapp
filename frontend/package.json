@@ -16,10 +16,10 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "axios": "^1.6",
+    "axios": "^1.21",
     "pinia": "^2.1",
     "plotly.js": "^3.7.0",
-    "vue": "^3.4",
+    "vue": "^3.5",
     "vue-i18n": "^9.14",
     "vue-router": "^4.3"
   },
@@ -27,7 +27,7 @@
     "@eslint/js": "^9.39.5",
     "@vitejs/plugin-vue": "^5.0",
     "@vitest/coverage-v8": "^4.0.18",
-    "@vue/test-utils": "^2.4.6",
+    "@vue/test-utils": "^2.6.0",
     "eslint": "^9.39.5",
     "eslint-plugin-vue": "^10.12.1",
     "globals": "^17.14.0",
