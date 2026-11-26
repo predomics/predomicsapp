@@ -18,7 +18,7 @@
       <div class="jobs-section" v-if="projectData.jobs.length > 0">
         <h3>{{ $t('publicShare.completedJobs') }}</h3>
         <div class="job-cards">
-          <div
+          <div tabindex="0" role="button" @keydown.enter.prevent="selectJob(j.job_id)" @keydown.space.prevent="selectJob(j.job_id)"
             v-for="j in projectData.jobs" :key="j.job_id"
             class="job-card"
             :class="{ selected: selectedJobId === j.job_id }"
@@ -75,7 +75,7 @@
               class="feature-chip"
               :class="f.coef > 0 ? 'positive' : 'negative'"
             >
-              {{ f.name }} ({{ f.coef > 0 ? '+' : '' }}{{ f.coef }})
+              <span :title="f.name">{{ shortName(f.name) }}</span> ({{ f.coef > 0 ? '+' : '' }}{{ f.coef }})
             </span>
           </div>
         </div>
@@ -91,10 +91,12 @@
 </template>
 
 <script setup>
+import { shortFeatureName as shortName } from '../utils/chartLabels'
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
+import { api } from '../api'
 import { useI18n } from 'vue-i18n'
+import { apiError } from '../utils/apiError'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -123,14 +125,14 @@ const bestFeatures = computed(() => {
 async function loadProject() {
   loading.value = true
   try {
-    const { data } = await axios.get(`/api/public/${token.value}`)
+    const { data } = await api.publicShare.get(token.value)
     projectData.value = data
     // Auto-select first job
     if (data.jobs.length > 0) {
       selectJob(data.jobs[0].job_id)
     }
   } catch (e) {
-    error.value = e.response?.data?.detail || t('publicShare.invalidLink')
+    error.value = apiError(e, t('publicShare.invalidLink'))
   } finally {
     loading.value = false
   }
@@ -141,7 +143,7 @@ async function selectJob(jobId) {
   jobLoading.value = true
   jobResults.value = null
   try {
-    const { data } = await axios.get(`/api/public/${token.value}/jobs/${jobId}/results`)
+    const { data } = await api.publicShare.jobResults(token.value, jobId)
     jobResults.value = data
   } catch (e) {
     console.error('Failed to load job results:', e)
@@ -175,7 +177,7 @@ onMounted(loadProject)
 .public-badge {
   background: var(--info-bg); color: var(--info);
   padding: 0.2rem 0.6rem; border-radius: 10px;
-  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
 }
 
 .project-info { margin-bottom: 1.5rem; }
@@ -195,7 +197,7 @@ onMounted(loadProject)
 .job-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .job-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
 .job-metrics { font-size: 0.8rem; color: var(--accent); display: flex; gap: 0.75rem; }
-.job-date { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem; }
+.job-date { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
 
 .results-section h3 { margin-bottom: 0.75rem; }
 
@@ -208,7 +210,7 @@ onMounted(loadProject)
   border-radius: 8px; padding: 0.75rem; text-align: center;
 }
 .metric-value { font-size: 1.3rem; font-weight: 700; color: var(--accent); }
-.metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
+.metric-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
 
 .features-section { margin-bottom: 1.5rem; }
 .features-section h4 { margin-bottom: 0.5rem; font-size: 0.95rem; }

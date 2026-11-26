@@ -17,8 +17,8 @@
           {{ $t('results.ecoClassFilter') }}
           <select v-model="classFilter">
             <option value="all">{{ $t('results.ecoAllSamples') }}</option>
-            <option value="0">{{ classLabels[0] || 'Class 0' }}</option>
-            <option value="1">{{ classLabels[1] || 'Class 1' }}</option>
+            <option value="0">{{ classLabelAt(0) }}</option>
+            <option value="1">{{ classLabelAt(1) }}</option>
           </select>
         </label>
         <label class="eco-control">
@@ -88,17 +88,17 @@
       <div class="eco-dual-header">
         <span class="eco-dual-stats">
           {{ $t('results.ecoCommonEdges') }}: <strong>{{ dualData.comparison.common_edges }}</strong>
-          &middot; {{ classLabels[0] || 'Class 0' }}: <strong>{{ dualData.comparison.specific_0 }}</strong> {{ $t('results.ecoSpecific') }}
-          &middot; {{ classLabels[1] || 'Class 1' }}: <strong>{{ dualData.comparison.specific_1 }}</strong> {{ $t('results.ecoSpecific') }}
+          &middot; {{ classLabelAt(0) }}: <strong>{{ dualData.comparison.specific_0 }}</strong> {{ $t('results.ecoSpecific') }}
+          &middot; {{ classLabelAt(1) }}: <strong>{{ dualData.comparison.specific_1 }}</strong> {{ $t('results.ecoSpecific') }}
         </span>
       </div>
       <div class="eco-dual-grid">
         <div class="eco-dual-panel">
-          <h4>{{ classLabels[0] || 'Class 0' }} ({{ $t('results.ecoControls') }})</h4>
+          <h4>{{ classLabelAt(0) }} ({{ $t('results.ecoControls') }})</h4>
           <div ref="dualChart0El" class="eco-chart eco-chart-dual"></div>
         </div>
         <div class="eco-dual-panel">
-          <h4>{{ classLabels[1] || 'Class 1' }} ({{ $t('results.ecoPatients') }})</h4>
+          <h4>{{ classLabelAt(1) }} ({{ $t('results.ecoPatients') }})</h4>
           <div ref="dualChart1El" class="eco-chart eco-chart-dual"></div>
         </div>
       </div>
@@ -116,14 +116,14 @@
       <!-- Module list -->
       <section class="eco-modules">
         <h4>{{ $t('results.ecoModulesTitle') }}</h4>
-        <div v-for="mod in networkData.modules" :key="mod.id" class="eco-module-item"
+        <div tabindex="0" role="button" @keydown.enter.prevent="toggleModuleHighlight(mod.id)" @keydown.space.prevent="toggleModuleHighlight(mod.id)" v-for="mod in networkData.modules" :key="mod.id" class="eco-module-item"
              :class="{ highlighted: highlightedModule === mod.id }"
              @click="toggleModuleHighlight(mod.id)">
           <span class="eco-module-dot" :style="{ backgroundColor: mod.color }"></span>
           <span>{{ $t('results.ecoModule') }} {{ mod.id + 1 }}</span>
           <span class="eco-module-size">{{ mod.size }} {{ $t('results.ecoNodes') }}</span>
           <span class="eco-module-phylum">{{ mod.dominant_phylum }}</span>
-          <button class="btn-icon btn-zoom" @click.stop="zoomIntoModule(mod)" :title="$t('results.ecoZoomModule')">&#128269;</button>
+          <button :aria-label="$t('results.ecoZoomModule')" class="btn-icon btn-zoom" @click.stop="zoomIntoModule(mod)" :title="$t('results.ecoZoomModule')">&#128269;</button>
         </div>
       </section>
 
@@ -145,7 +145,7 @@
       <div class="eco-external-header">
         <h4>{{ $t('results.ecoExternalTitle') }}</h4>
         <div class="eco-external-controls">
-          <select v-model="selectedExternalId" class="eco-external-select" v-if="allNetworks.length > 0">
+          <select :aria-label="$t('results.ecoSelectNetwork')" v-model="selectedExternalId" class="eco-external-select" v-if="allNetworks.length > 0">
             <option value="">{{ $t('results.ecoSelectNetwork') }}</option>
             <optgroup v-if="referenceNetworks.length" :label="$t('results.ecoReferenceNetworks')">
               <option v-for="net in referenceNetworks" :key="net.id" :value="net.id">
@@ -274,17 +274,20 @@
 </template>
 
 <script setup>
+import { ct } from '../../utils/chartText'
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { useChartTheme } from '../../composables/useChartTheme'
+import { useChartTheme, withAlpha } from '../../composables/useChartTheme'
 import { useI18n } from 'vue-i18n'
 import { MODULE_COLORS } from '../../utils/taxonomyColors'
-import axios from 'axios'
+import { api, http } from '../../api'
+import { loadPlotlyLib, usePlotlyCleanup } from '../../utils/plotly'
+import { apiError } from '../../utils/apiError'
 
 let Plotly = null
+usePlotlyCleanup()
 async function ensurePlotly() {
   if (!Plotly) {
-    const mod = await import('plotly.js-dist-min')
-    Plotly = mod.default
+    Plotly = await loadPlotlyLib()
   }
   return Plotly
 }
@@ -301,6 +304,11 @@ const emit = defineEmits(['module-filter-applied'])
 
 const { chartColors, chartLayout } = useChartTheme()
 const { t } = useI18n()
+
+/** Display name of class 0 / 1 (the project's own label when the parent provides one). */
+function classLabelAt(i) {
+  return props.classLabels?.[i] || t('data.classN', { label: i })
+}
 
 // Controls
 const prevalenceThreshold = ref(30)
@@ -379,12 +387,12 @@ async function zoomIntoModule(mod) {
     if (fbmOverlay.value && props.jobId) {
       params.job_id = props.jobId
     }
-    const { data } = await axios.get(`/api/data-explore/${props.projectId}/coabundance-network`, { params })
+    const { data } = await api.dataExplore.coabundanceNetwork(props.projectId, { params })
     zoomedNetworkData.value = data
     await nextTick()
     await renderNetwork()
   } catch (err) {
-    error.value = err.response?.data?.detail || err.message
+    error.value = apiError(err)
   } finally {
     loading.value = false
   }
@@ -432,14 +440,14 @@ async function fetchNetwork() {
       }
     }
 
-    const { data } = await axios.get(`/api/data-explore/${props.projectId}/coabundance-network`, { params })
+    const { data } = await api.dataExplore.coabundanceNetwork(props.projectId, { params })
     networkData.value = data
 
     await nextTick()
     await renderNetwork()
   } catch (err) {
     console.error('Ecosystem network error:', err)
-    error.value = err.response?.data?.detail || err.message
+    error.value = apiError(err)
   } finally {
     loading.value = false
   }
@@ -457,12 +465,12 @@ async function fetchDualNetwork() {
     if (fbmOverlay.value && props.jobId) {
       params.job_id = props.jobId
     }
-    const { data } = await axios.get(`/api/data-explore/${props.projectId}/dual-network`, { params })
+    const { data } = await api.dataExplore.dualNetwork(props.projectId, { params })
     dualData.value = data
     await nextTick()
     renderDualNetworks()
   } catch (err) {
-    error.value = err.response?.data?.detail || err.message
+    error.value = apiError(err)
   } finally {
     loading.value = false
   }
@@ -493,7 +501,7 @@ async function renderDualNetworks() {
         x: [nodeX[i], nodeX[j], null],
         y: [nodeY[i], nodeY[j], null],
         line: {
-          color: isShared ? 'rgba(150,150,150,0.3)' : specificColor,
+          color: isShared ? chartColors().edge : specificColor,
           width: isShared ? 1 : Math.min(4, 0.5 + Math.abs(edge.correlation) * 3),
           dash: edge.correlation > 0 ? 'solid' : 'dash',
         },
@@ -539,8 +547,8 @@ async function renderDualNetworks() {
     Plotly.newPlot(el, [...edgeTraces, nodeTrace], layout, { responsive: true, displayModeBar: false })
   }
 
-  renderOne(dualData.value.network_0, dualChart0El.value, 'rgba(38,166,154,0.7)')
-  renderOne(dualData.value.network_1, dualChart1El.value, 'rgba(255,152,0,0.7)')
+  renderOne(dualData.value.network_0, dualChart0El.value, withAlpha(chartColors().class0, 0.7))
+  renderOne(dualData.value.network_1, dualChart1El.value, withAlpha(chartColors().class1, 0.7))
 
   await nextTick()
   renderSankeyChart()
@@ -559,8 +567,8 @@ async function renderSankeyChart() {
   const n0 = mods0.length
 
   const nodeLabels = [
-    ...mods0.map(m => `${props.classLabels[0] || 'Class 0'} M${m.id + 1} (${m.dominant_phylum})`),
-    ...mods1.map(m => `${props.classLabels[1] || 'Class 1'} M${m.id + 1} (${m.dominant_phylum})`),
+    ...mods0.map(m => `${classLabelAt(0)} M${m.id + 1} (${m.dominant_phylum})`),
+    ...mods1.map(m => `${classLabelAt(1)} M${m.id + 1} (${m.dominant_phylum})`),
   ]
   const nodeColors = [
     ...mods0.map(m => m.color || MODULE_COLORS[m.id % MODULE_COLORS.length]),
@@ -579,18 +587,7 @@ async function renderSankeyChart() {
     value.push(link.value)
     // Color by source module with transparency
     const col = mods0[link.source_module]?.color || MODULE_COLORS[link.source_module % MODULE_COLORS.length]
-    // Handle both rgb() and hex color formats
-    if (col.startsWith('rgb(')) {
-      linkColor.push(col.replace(')', ', 0.4)').replace('rgb(', 'rgba('))
-    } else if (col.startsWith('#')) {
-      // Convert hex to rgba
-      const r = parseInt(col.slice(1, 3), 16)
-      const g = parseInt(col.slice(3, 5), 16)
-      const b = parseInt(col.slice(5, 7), 16)
-      linkColor.push(`rgba(${r}, ${g}, ${b}, 0.4)`)
-    } else {
-      linkColor.push(col)
-    }
+    linkColor.push(withAlpha(col, 0.4))
   }
 
   const trace = {
@@ -874,8 +871,8 @@ async function renderNetwork() {
       y: [nodeY[i], nodeY[j], null],
       line: {
         color: isPositive
-          ? `rgba(150, 150, 150, ${highlightedModule.value !== null ? 0.1 : 0.3})`
-          : `rgba(200, 80, 80, ${highlightedModule.value !== null ? 0.1 : 0.35})`,
+          ? withAlpha(chartColors().dimmed, highlightedModule.value !== null ? 0.1 : 0.3)
+          : withAlpha(chartColors().class1, highlightedModule.value !== null ? 0.1 : 0.35),
         width: Math.min(4, 0.5 + Math.abs(edge.correlation) * 3),
         dash: isPositive ? 'solid' : 'dash',
       },
@@ -921,13 +918,13 @@ async function renderNetwork() {
   const hoverTexts = nodes.map(nd => {
     let text = `<b>${nd.species || nd.id}</b><br>`
     text += `${nd.phylum} / ${nd.family}<br>`
-    text += `Degree: ${nd.degree}<br>`
-    text += `Module: ${nd.module + 1}<br>`
-    text += `Betweenness: ${nd.betweenness}<br>`
-    text += `Prev(0): ${(nd.prevalence_0 * 100).toFixed(1)}% | Prev(1): ${(nd.prevalence_1 * 100).toFixed(1)}%`
+    text += `${ct('Degree')}: ${nd.degree}<br>`
+    text += `${ct('Module')}: ${nd.module + 1}<br>`
+    text += `${ct('Betweenness')}: ${nd.betweenness}<br>`
+    text += `${ct('Prevalence')} (${classLabelAt(0)}): ${(nd.prevalence_0 * 100).toFixed(1)}% | ${ct('Prevalence')} (${classLabelAt(1)}): ${(nd.prevalence_1 * 100).toFixed(1)}%`
     if (fbmOverlay.value && nd.fbm_prevalence != null) {
-      text += `<br>FBM prev: ${(nd.fbm_prevalence * 100).toFixed(1)}%`
-      text += ` | coeff: ${nd.fbm_coefficient > 0 ? '+1' : nd.fbm_coefficient < 0 ? '-1' : '0'}`
+      text += `<br>${ct('FBM prevalence')}: ${(nd.fbm_prevalence * 100).toFixed(1)}%`
+      text += ` | ${ct('Coeff')}: ${nd.fbm_coefficient > 0 ? '+1' : nd.fbm_coefficient < 0 ? '-1' : '0'}`
     }
     return text
   })
@@ -956,7 +953,7 @@ async function renderNetwork() {
       return sp
     }),
     textposition: 'top center',
-    textfont: { color: c.text, size: 8 },
+    textfont: { color: c.text, size: 10 },
     marker: {
       size: nodeSizes,
       color: nodeColors,
@@ -1002,8 +999,8 @@ watch(() => props.active, (active) => {
 async function fetchExternalNetworks() {
   try {
     const [userRes, refRes] = await Promise.all([
-      axios.get(`/api/data-explore/${props.projectId}/external-networks`),
-      axios.get('/api/data-explore/reference-networks/list'),
+      api.dataExplore.externalNetworks(props.projectId),
+      api.dataExplore.referenceNetworks(),
     ])
     externalNetworks.value = userRes.data.map(n => ({ ...n, source: 'uploaded' }))
     referenceNetworks.value = refRes.data.map(n => ({ ...n, source: 'reference' }))
@@ -1022,10 +1019,10 @@ async function uploadExternalNetwork(event) {
   formData.append('file', file)
   try {
     loadingExternal.value = true
-    await axios.post(`/api/data-explore/${props.projectId}/external-networks`, formData)
+    await api.dataExplore.uploadExternalNetwork(props.projectId, formData)
     await fetchExternalNetworks()
   } catch (err) {
-    error.value = err.response?.data?.detail || 'Upload failed'
+    error.value = apiError(err)
   } finally {
     loadingExternal.value = false
     event.target.value = ''  // reset file input
@@ -1035,12 +1032,12 @@ async function uploadExternalNetwork(event) {
 async function deleteExternalNetwork() {
   if (!selectedExternalId.value) return
   try {
-    await axios.delete(`/api/data-explore/${props.projectId}/external-networks/${selectedExternalId.value}`)
+    await api.dataExplore.deleteExternalNetwork(props.projectId, selectedExternalId.value)
     selectedExternalId.value = ''
     externalNetworkData.value = null
     await fetchExternalNetworks()
   } catch (err) {
-    error.value = err.response?.data?.detail || 'Delete failed'
+    error.value = apiError(err)
   }
 }
 
@@ -1052,12 +1049,12 @@ async function loadExternalNetwork(id) {
     const url = net?.source === 'reference'
       ? `/api/data-explore/reference-networks/${id}`
       : `/api/data-explore/${props.projectId}/external-networks/${id}`
-    const { data } = await axios.get(url)
+    const { data } = await http.get(url)
     externalNetworkData.value = data
     await nextTick()
     renderExternalNetwork()
   } catch (err) {
-    error.value = err.response?.data?.detail || 'Load failed'
+    error.value = apiError(err)
   } finally {
     loadingExternal.value = false
   }
@@ -1112,7 +1109,7 @@ async function renderExternalNetwork() {
       x: [nodeX[i], nodeX[j], null],
       y: [nodeY[i], nodeY[j], null],
       line: {
-        color: isPositive ? 'rgba(150,150,150,0.3)' : 'rgba(200,80,80,0.35)',
+        color: isPositive ? chartColors().edge : chartColors().edgeNegative,
         width: Math.min(4, 0.5 + Math.abs(edge.weight || 0.5) * 3),
         dash: isPositive ? 'solid' : 'dash',
       },
@@ -1123,17 +1120,17 @@ async function renderExternalNetwork() {
 
   // Node trace
   const nodeColors = nodes.map(nd => {
-    if (fbmFeatures.has(nd.id)) return '#FFD700'  // gold for FBM species
+    if (fbmFeatures.has(nd.id)) return c.highlight  // species in the FBM signature
     return nd.color || c.class0
   })
   const nodeSizes = nodes.map(nd => fbmFeatures.has(nd.id) ? 16 : 10)
   const nodeBorderWidth = nodes.map(nd => fbmFeatures.has(nd.id) ? 2.5 : 1)
-  const nodeBorderColor = nodes.map(nd => fbmFeatures.has(nd.id) ? '#FF6F00' : c.text)
+  const nodeBorderColor = nodes.map(nd => fbmFeatures.has(nd.id) ? c.class1 : c.text)
 
   const hoverTexts = nodes.map(nd => {
     let t = `<b>${nd.label || nd.id}</b>`
     if (nd.group) t += `<br>${nd.group}`
-    if (fbmFeatures.has(nd.id)) t += `<br><b>In FBM signature</b>`
+    if (fbmFeatures.has(nd.id)) t += `<br><b>${ct('In FBM signature')}</b>`
     return t
   })
 
@@ -1145,7 +1142,7 @@ async function renderExternalNetwork() {
       return label.length > 20 ? label.substring(0, 18) + '..' : label
     }),
     textposition: 'top center',
-    textfont: { color: c.text, size: 8 },
+    textfont: { color: c.text, size: 10 },
     marker: {
       size: nodeSizes,
       color: nodeColors,
@@ -1182,8 +1179,7 @@ async function applyFbmModuleFilter() {
   fbmFilterShowCount.value = 20
 
   try {
-    const { data } = await axios.post(
-      `/api/data-explore/${props.projectId}/fbm-module-filter`,
+    const { data } = await api.dataExplore.fbmModuleFilter(props.projectId,
       {
         job_id: props.jobId,
         module_ids: selectedModuleIds.value,
@@ -1195,7 +1191,7 @@ async function applyFbmModuleFilter() {
     fbmFilterResult.value = data
     emit('module-filter-applied', data)
   } catch (err) {
-    fbmFilterError.value = err.response?.data?.detail || err.message
+    fbmFilterError.value = apiError(err)
   } finally {
     fbmFilterLoading.value = false
   }

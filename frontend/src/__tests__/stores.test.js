@@ -110,7 +110,7 @@ describe('useConfigStore', () => {
     const config = useConfigStore()
     expect(config.form.general.algo).toBe('ga')
     expect(config.form.general.seed).toBe(42)
-    expect(config.form.ga.population_size).toBe(5000)
+    expect(config.form.ga.population_size).toBe(500)
     expect(config.form.ga.max_epochs).toBe(200)
     expect(config.form.ga.k_min).toBe(1)
     expect(config.form.ga.k_max).toBe(200)
@@ -130,7 +130,7 @@ describe('useConfigStore', () => {
     config.form.ga.population_size = 100
     config.resetToDefaults()
     expect(config.form.general.seed).toBe(42)
-    expect(config.form.ga.population_size).toBe(5000)
+    expect(config.form.ga.population_size).toBe(500)
   })
 
   it('resetCategory resets only that category', async () => {
@@ -140,7 +140,7 @@ describe('useConfigStore', () => {
     config.form.ga.population_size = 100
     config.resetCategory('ga')
     expect(config.form.general.seed).toBe(999) // unchanged
-    expect(config.form.ga.population_size).toBe(5000) // reset
+    expect(config.form.ga.population_size).toBe(500) // reset
   })
 
   it('filterParams returns correct values', async () => {

@@ -29,27 +29,51 @@
           <div class="section-title">{{ $t('data.datasets') }}</div>
           <div class="ds-grid">
             <div v-for="slot in dsSlots" :key="slot.role" class="ds-slot" :class="{ ok: slot.ds, missing: !slot.ds && slot.required, optional: !slot.required && !slot.ds }">
-              <span class="ds-role">{{ slot.label }}</span>
+              <span class="ds-role">
+                <span class="ds-state" aria-hidden="true">{{ slot.ds ? '\u2713' : (slot.required ? '\u26A0' : '\u25CB') }}</span>
+                {{ slot.label }}
+                <span class="ds-req">{{ slot.ds ? $t('data.slotProvided') : (slot.required ? $t('data.slotRequired') : $t('data.slotOptional')) }}</span>
+              </span>
               <span v-if="slot.ds" class="ds-file">{{ slot.ds.filename }}
-                <button class="ds-clear" @click="clearSlot(slot.role)" title="Remove"><SvgIcon name="x" :size="12" /></button>
+                <button type="button" class="ds-clear" @click="clearSlot(slot.role)" :title="$t('data.removeFromProject')" :aria-label="$t('data.removeNamed', { name: slot.ds.filename })"><SvgIcon name="x" :size="12" /></button>
               </span>
               <template v-else>
-                <select v-if="libraryDatasets.length > 0" class="ds-picker" @change="e => pickFromLibrary(e, slot.role)">
+                <span class="ds-hint">{{ slot.hint }}</span>
+                <select v-if="libraryDatasets.length > 0" class="ds-picker" :aria-label="$t('data.pickFromLibraryFor', { slot: slot.label })" @change="e => pickFromLibrary(e, slot.role)">
                   <option value="">{{ $t('data.pickFromLibrary') }}</option>
                   <option v-for="d in libraryDatasets" :key="d.id" :value="d.id">{{ d.name }}</option>
                 </select>
-                <label :class="['ds-upload', { 'ds-optional': !slot.required }]">{{ $t('data.upload') }}<input type="file" accept=".tsv,.csv,.txt" @change="e => uploadFile(e, slot.role)" /></label>
+                <label :class="['ds-upload', { 'ds-optional': !slot.required, busy: uploads[slot.role]?.busy }]">
+                  <template v-if="uploads[slot.role]?.busy">{{ $t('data.uploadingPct', { pct: uploads[slot.role].pct }) }}</template>
+                  <template v-else>{{ $t('data.uploadFor', { slot: slot.label }) }}</template>
+                  <input type="file" accept=".tsv,.csv,.txt" :disabled="uploads[slot.role]?.busy" @change="e => uploadFile(e, slot.role)" />
+                </label>
+                <div v-if="uploads[slot.role]?.busy" class="ds-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="uploads[slot.role].pct">
+                  <div class="ds-progress-bar" :style="{ width: uploads[slot.role].pct + '%' }"></div>
+                </div>
               </template>
+              <p v-if="uploads[slot.role]?.error" class="ds-error" role="alert">{{ uploads[slot.role].error }}</p>
+              <p v-else-if="uploads[slot.role]?.done" class="ds-done" role="status">{{ $t('data.uploadDone') }}</p>
             </div>
             <!-- Metadata upload slot -->
             <div class="ds-slot" :class="{ ok: metadataDs, optional: !metadataDs }">
-              <span class="ds-role">{{ $t('data.metadata') }}</span>
+              <span class="ds-role">
+                <span class="ds-state" aria-hidden="true">{{ metadataDs ? '\u2713' : '\u25CB' }}</span>
+                {{ $t('data.metadata') }}
+                <span class="ds-req">{{ metadataDs ? $t('data.slotProvided') : $t('data.slotOptional') }}</span>
+              </span>
               <span v-if="metadataDs" class="ds-file">{{ metadataDs.filename }}
-                <button class="ds-clear" @click="clearSlot('metadata')" title="Remove"><SvgIcon name="x" :size="12" /></button>
+                <button type="button" class="ds-clear" @click="clearSlot('metadata')" :title="$t('data.removeFromProject')" :aria-label="$t('data.removeNamed', { name: metadataDs.filename })"><SvgIcon name="x" :size="12" /></button>
               </span>
               <template v-else>
-                <label class="ds-upload ds-optional">{{ $t('data.metadataUpload') }}<input type="file" accept=".tsv,.csv,.txt" @change="e => uploadMetadata(e)" /></label>
+                <span class="ds-hint">{{ $t('data.slotHint.metadata') }}</span>
+                <label :class="['ds-upload', 'ds-optional', { busy: uploads.metadata?.busy }]">
+                  <template v-if="uploads.metadata?.busy">{{ $t('data.uploadingPct', { pct: uploads.metadata.pct }) }}</template>
+                  <template v-else>{{ $t('data.metadataUpload') }}</template>
+                  <input type="file" accept=".tsv,.csv,.txt" :disabled="uploads.metadata?.busy" @change="e => uploadFile(e, 'metadata')" />
+                </label>
               </template>
+              <p v-if="uploads.metadata?.error" class="ds-error" role="alert">{{ uploads.metadata.error }}</p>
               <div v-if="metadataDs && metadataColumns.length > 0" class="metadata-y-select">
                 <label>{{ $t('data.selectYVariable') }}
                   <select v-model="selectedYColumn" @change="onYColumnSelected">
@@ -61,6 +85,16 @@
               </div>
             </div>
           </div>
+          <details class="format-help">
+            <summary>{{ $t('data.formatHelp.title') }}</summary>
+            <ul>
+              <li><strong>X</strong> — {{ $t('data.formatHelp.x') }}</li>
+              <li><strong>y</strong> — {{ $t('data.formatHelp.y') }}</li>
+              <li>{{ $t('data.formatHelp.test') }}</li>
+              <li>{{ $t('data.formatHelp.sep') }}</li>
+            </ul>
+            <pre class="format-example" :aria-label="$t('data.formatHelp.example')">{{ formatExample }}</pre>
+          </details>
         </section>
 
         <!-- Data options -->
@@ -70,17 +104,20 @@
             <input type="checkbox" v-model="cfg.data.features_in_rows" />
             {{ $t('data.featuresInRows') }}
           </label>
+          <p class="opt-help">{{ $t('data.featuresInRowsHelp') }}</p>
           <label class="inline-check">
             <input type="checkbox" v-model="cfg.data.inverse_classes" />
             {{ $t('data.inverseClasses') }}
           </label>
+          <p class="opt-help">{{ $t('data.inverseClassesHelp') }}</p>
           <div class="form-row">
             <label>{{ $t('data.holdoutRatio') }}
               <input type="number" v-model.number="cfg.data.holdout_ratio" min="0" max="1" step="0.05" />
             </label>
           </div>
+          <p class="opt-help">{{ $t('data.holdoutRatioHelp') }}</p>
           <div class="form-col" v-if="summary && summary.class_labels">
-            <label>{{ $t('data.classLabels') }}</label>
+            <span class="group-label">{{ $t('data.classLabels') }}</span>
             <div class="class-labels-row">
               <div
                 v-for="(cls, i) in summary.class_labels"
@@ -95,6 +132,7 @@
                   @input="e => setClassLabel(i, e.target.value)"
                   @blur="saveClassNames"
                   class="class-label-input"
+                  :aria-label="$t('data.classNameFor', { label: cls })"
                   :placeholder="$t('data.className')"
                 />
                 <span v-if="isTargetClass(i)" class="target-badge">{{ $t('data.target') }}</span>
@@ -106,7 +144,9 @@
 
         <!-- Feature filtering -->
         <section class="section">
-          <div class="section-title">{{ $t('data.featureFiltering') }}</div>
+          <div class="section-title">{{ $t('data.featureFiltering') }}
+            <span v-if="refreshing" class="refreshing" role="status">{{ $t('data.updating') }}</span>
+          </div>
           <div class="form-col">
             <label>{{ $t('data.selectionMethod') }}
               <select v-model="cfg.data.feature_selection_method" @change="debouncedRefresh">
@@ -138,9 +178,9 @@
             <table class="feature-table">
               <thead>
                 <tr>
-                  <th class="sortable" @click="sortBy('name')">{{ $t('data.name') }} {{ sortIcon('name') }}</th>
-                  <th class="sortable" @click="sortBy('significance')">{{ $t('data.significance') }} {{ sortIcon('significance') }}</th>
-                  <th class="sortable" @click="sortBy('prevalence')">{{ $t('data.prevalenceShort') }} {{ sortIcon('prevalence') }}</th>
+                  <th scope="col" :aria-sort="ariaSort('name')"><button type="button" class="sort-btn" @click="sortBy('name')">{{ $t('data.name') }} <span aria-hidden="true">{{ sortIcon('name') }}</span></button></th>
+                  <th scope="col" :aria-sort="ariaSort('significance')"><button type="button" class="sort-btn" @click="sortBy('significance')">{{ $t('data.significance') }} <span aria-hidden="true">{{ sortIcon('significance') }}</span></button></th>
+                  <th scope="col" :aria-sort="ariaSort('prevalence')"><button type="button" class="sort-btn" @click="sortBy('prevalence')">{{ $t('data.prevalenceShort') }} <span aria-hidden="true">{{ sortIcon('prevalence') }}</span></button></th>
                 </tr>
               </thead>
               <tbody>
@@ -148,10 +188,13 @@
                   v-for="f in paginatedFeatures"
                   :key="f.index"
                   :class="[featureRowClass(f), { 'selected-row': plotFeatureNames.includes(f.name) }]"
+                  tabindex="0"
                   @click="toggleFeature(f)"
+                  @keydown.enter.prevent="toggleFeature(f)"
                 >
                   <td class="feature-name-cell" :title="mspAnnotations[f.name]?.species || ''">
-                    {{ f.name }}
+                    <span v-if="f.selected && (f.class === 0 || f.class === 1)" class="class-mark" :title="classNameFor(f.class)">{{ f.class === 0 ? '\u25CF' : '\u25C6' }}<span class="sr-only">{{ classNameFor(f.class) }}</span></span>
+                    <span :title="f.name">{{ shortName(f.name) }}</span>
                     <span v-if="mspAnnotations[f.name]?.species" class="species-tag">{{ mspAnnotations[f.name].species.split(' ').length >= 2 ? mspAnnotations[f.name].species.split(' ')[0][0] + '. ' + mspAnnotations[f.name].species.split(' ').slice(1).join(' ') : mspAnnotations[f.name].species }}</span>
                   </td>
                   <td>{{ f.significance != null ? f.significance.toExponential(2) : '—' }}</td>
@@ -161,24 +204,42 @@
             </table>
           </div>
           <div class="pagination" v-if="sortedFeatures.length > featPageSize">
-            <button @click="featPage = Math.max(0, featPage - 1)" :disabled="featPage === 0">&laquo;</button>
+            <button type="button" :aria-label="$t('common.prev')" @click="featPage = Math.max(0, featPage - 1)" :disabled="featPage === 0">&laquo;</button>
             <span>{{ featPage + 1 }}/{{ Math.ceil(sortedFeatures.length / featPageSize) }}</span>
-            <button @click="featPage++" :disabled="(featPage + 1) * featPageSize >= sortedFeatures.length">&raquo;</button>
+            <button type="button" :aria-label="$t('common.next')" @click="featPage++" :disabled="(featPage + 1) * featPageSize >= sortedFeatures.length">&raquo;</button>
           </div>
         </section>
       </aside>
 
       <!-- RIGHT PANEL -->
-      <main class="right-panel">
+      <section class="right-panel" :aria-label="$t('data.chartsRegion')">
+        <AsyncState
+          v-if="!hasTrainData || loadError || (loading && !featureStats)"
+          :loading="loading"
+          :error="loadError"
+          :retry="loadAll"
+          :empty="!hasTrainData"
+          :loading-text="$t('data.loadingData')"
+          :error-title="$t('data.loadFailed')"
+        >
+          <template #empty>
+            <div class="no-data-yet">
+              <p class="no-data-title">{{ $t('data.noDataTitle') }}</p>
+              <p>{{ $t('data.noDataMsg') }}</p>
+            </div>
+          </template>
+        </AsyncState>
+        <template v-else>
         <div class="viz-header">
-          <nav class="viz-tabs">
-            <button :class="{ active: vizTab === 'prevalence' }" @click="vizTab = 'prevalence'">{{ $t('data.prevalence') }}</button>
-            <button :class="{ active: vizTab === 'abundance' }" @click="vizTab = 'abundance'">{{ $t('data.abundance') }}</button>
-            <button :class="{ active: vizTab === 'barcode' }" @click="vizTab = 'barcode'">{{ $t('data.barcode') }}</button>
-            <button :class="{ active: vizTab === 'classHeatmap' }" @click="vizTab = 'classHeatmap'">{{ $t('data.classHeatmap') }}</button>
-            <button :class="{ active: vizTab === 'volcano' }" @click="vizTab = 'volcano'">{{ $t('data.volcano') }}</button>
-            <button :class="{ active: vizTab === 'pcoa' }" @click="vizTab = 'pcoa'">{{ $t('data.pcoa') }}</button>
-          </nav>
+          <div class="viz-tabs" role="tablist" :aria-label="$t('data.chartsRegion')">
+            <button type="button" role="tab" :aria-selected="vizTab === 'prevalence'" :class="{ active: vizTab === 'prevalence' }" @click="vizTab = 'prevalence'">{{ $t('data.prevalence') }}</button>
+            <button type="button" role="tab" :aria-selected="vizTab === 'abundance'" :class="{ active: vizTab === 'abundance' }" @click="vizTab = 'abundance'">{{ $t('data.abundance') }}</button>
+            <button type="button" role="tab" :aria-selected="vizTab === 'barcode'" :class="{ active: vizTab === 'barcode' }" @click="vizTab = 'barcode'">{{ $t('data.barcode') }}</button>
+            <button type="button" role="tab" :aria-selected="vizTab === 'classHeatmap'" :class="{ active: vizTab === 'classHeatmap' }" @click="vizTab = 'classHeatmap'">{{ $t('data.classHeatmap') }}</button>
+            <button type="button" role="tab" :aria-selected="vizTab === 'volcano'" :class="{ active: vizTab === 'volcano' }" @click="vizTab = 'volcano'">{{ $t('data.volcano') }}</button>
+            <button type="button" role="tab" :aria-selected="vizTab === 'pcoa'" :class="{ active: vizTab === 'pcoa' }" @click="vizTab = 'pcoa'">{{ $t('data.pcoa') }}</button>
+          </div>
+          <span v-if="refreshing || loading" class="refreshing" role="status"><span class="mini-spinner" aria-hidden="true"></span>{{ $t('data.updating') }}</span>
           <label class="topn-control" v-if="featureStats">
             {{ $t('data.top') }}
             <input type="number" v-model.number="topN" :min="1" :max="maxTopN" step="1" class="topn-input" />
@@ -186,10 +247,13 @@
           </label>
         </div>
 
+        <AsyncState v-if="vizErrors[vizTab]" :error="vizErrors[vizTab]" :retry="retryCurrentViz" :error-title="$t('data.chartFailed')" />
+        <p v-if="chartSummary" class="chart-summary" role="status">{{ chartSummary }}</p>
+
         <!-- Prevalence plot -->
         <section class="section viz-section" v-if="vizTab === 'prevalence'">
           <div ref="prevalenceChartEl" class="plotly-chart plotly-chart-tall"></div>
-          <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see prevalence.</p>
+          <p v-if="!featureStats" class="info-text">{{ $t('data.noChartYet') }}</p>
         </section>
 
         <!-- Abundance by class -->
@@ -197,19 +261,19 @@
           <div class="viz-controls">
             <label class="toggle-label" :class="{ disabled: dataTransform !== 'raw' }">
               <input type="checkbox" v-model="abundanceLogScale" @change="renderAbundanceChart()" :disabled="dataTransform !== 'raw'" />
-              Log scale
+              {{ $t('data.logScale') }}
             </label>
             <label class="toggle-label">
               <span>{{ $t('data.transform') }}</span>
               <select v-model="dataTransform" @change="loadAbundance">
-                <option value="raw">Raw</option>
-                <option value="log">Log</option>
-                <option value="zscore">Z-score</option>
+                <option value="raw">{{ $t('data.transformRaw') }}</option>
+                <option value="log">{{ $t('data.transformLog') }}</option>
+                <option value="zscore">{{ $t('data.transformZscore') }}</option>
               </select>
             </label>
           </div>
           <div ref="abundanceChartEl" class="plotly-chart plotly-chart-tall"></div>
-          <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see abundance.</p>
+          <p v-if="!featureStats" class="info-text">{{ $t('data.noChartYet') }}</p>
         </section>
 
         <!-- Barcode heatmap -->
@@ -218,14 +282,14 @@
             <label class="toggle-label">
               <span>{{ $t('data.transform') }}</span>
               <select v-model="dataTransform" @change="loadBarcodeData">
-                <option value="raw">Raw</option>
-                <option value="log">Log</option>
-                <option value="zscore">Z-score</option>
+                <option value="raw">{{ $t('data.transformRaw') }}</option>
+                <option value="log">{{ $t('data.transformLog') }}</option>
+                <option value="zscore">{{ $t('data.transformZscore') }}</option>
               </select>
             </label>
           </div>
           <div ref="barcodeChartEl" class="plotly-chart plotly-chart-tall"></div>
-          <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see barcode.</p>
+          <p v-if="!featureStats" class="info-text">{{ $t('data.noChartYet') }}</p>
         </section>
 
         <!-- Class mean heatmap (features x classes) -->
@@ -234,20 +298,20 @@
             <label class="toggle-label">
               <span>{{ $t('data.transform') }}</span>
               <select v-model="dataTransform" @change="loadClassHeatmap">
-                <option value="raw">Raw</option>
-                <option value="log">Log</option>
-                <option value="zscore">Z-score</option>
+                <option value="raw">{{ $t('data.transformRaw') }}</option>
+                <option value="log">{{ $t('data.transformLog') }}</option>
+                <option value="zscore">{{ $t('data.transformZscore') }}</option>
               </select>
             </label>
           </div>
           <div ref="classHeatmapChartEl" class="plotly-chart plotly-chart-tall"></div>
-          <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see class heatmap.</p>
+          <p v-if="!featureStats" class="info-text">{{ $t('data.noChartYet') }}</p>
         </section>
 
         <!-- Volcano plot -->
         <section class="section viz-section" v-if="vizTab === 'volcano'">
           <div ref="volcanoChartEl" class="plotly-chart plotly-chart-tall"></div>
-          <p v-if="!featureStats" class="info-text">Upload datasets and run filtering to see the volcano plot.</p>
+          <p v-if="!featureStats" class="info-text">{{ $t('data.noChartYet') }}</p>
         </section>
 
         <!-- PCoA -->
@@ -273,9 +337,9 @@
             <label class="pcoa-control-item">
               <span>{{ $t('data.transform') }}</span>
               <select v-model="dataTransform" @change="loadPcoa">
-                <option value="raw">Raw</option>
-                <option value="log">Log</option>
-                <option value="zscore">Z-score</option>
+                <option value="raw">{{ $t('data.transformRaw') }}</option>
+                <option value="log">{{ $t('data.transformLog') }}</option>
+                <option value="zscore">{{ $t('data.transformZscore') }}</option>
               </select>
             </label>
             <label v-if="pcoaMethod === 'tsne'" class="pcoa-control-item">
@@ -302,8 +366,8 @@
               {{ $t('data.ellipses') }}
             </label>
             <div class="pcoa-dim-toggle">
-              <button :class="{ active: pcoaDim === '2d' }" @click="pcoaDim = '2d'">2D</button>
-              <button :class="{ active: pcoaDim === '3d' }" @click="pcoaDim = '3d'">3D</button>
+              <button type="button" :aria-pressed="pcoaDim === '2d'" :class="{ active: pcoaDim === '2d' }" @click="pcoaDim = '2d'">2D</button>
+              <button type="button" :aria-pressed="pcoaDim === '3d'" :class="{ active: pcoaDim === '3d' }" @click="pcoaDim = '3d'">3D</button>
             </div>
           </div>
           <div v-if="pcoaData" class="pcoa-stats-row">
@@ -321,47 +385,66 @@
             </span>
           </div>
           <div ref="pcoaChartEl" class="plotly-chart plotly-chart-pcoa"></div>
-          <div v-if="loadingPcoa" class="loading">{{ $t('data.loadingPcoa') }}</div>
-          <p v-if="!hasTrainData && !loadingPcoa" class="info-text">Upload datasets to compute PCoA.</p>
+          <AsyncState v-if="loadingPcoa" :loading="true" :loading-text="$t('data.loadingPcoa')" :slow-text="$t('data.pcoaSlow')" />
         </section>
-      </main>
+        </template>
+      </section>
     </div>
-
-    <div v-if="loading" class="loading">{{ $t('data.loadingData') }}</div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { shortFeatureName as shortName } from '../utils/chartLabels'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 import { useDatasetStore } from '../stores/dataset'
 import { useConfigStore } from '../stores/config'
 import { useThemeStore } from '../stores/theme'
 import { useChartTheme } from '../composables/useChartTheme'
-import axios from 'axios'
-import Plotly from 'plotly.js-dist-min'
+import { api } from '../api'
+import { ct } from '../utils/chartText'
+import { loadPlotlyLib, loadPlotly3d } from '../utils/plotly'
+
+// Plotly is fetched on first render, not with the page.
+let Plotly = null
+async function ensurePlotly() {
+  if (!Plotly) Plotly = await loadPlotlyLib()
+  return Plotly
+}
 import { useI18n } from 'vue-i18n'
 import SvgIcon from '../components/SvgIcon.vue'
+import AsyncState from '../components/AsyncState.vue'
+import { useToast } from '../composables/useToast'
+import { apiError, ignoreError } from '../utils/apiError'
+import { LONG_TIMEOUT_MS } from '../utils/http'
+import { allProjectFiles } from '../utils/analysis'
 
 const route = useRoute()
+const router = useRouter()
+const { toast, addToast } = useToast()
 const store = useProjectStore()
 const dsStore = useDatasetStore()
 const configStore = useConfigStore()
 const themeStore = useThemeStore()
-const { chartColors, chartLayout, featureLabel: _featureLabel } = useChartTheme()
+const { chartColors, chartLayout, classStyle, featureLabel: _featureLabel } = useChartTheme()
 const cfg = configStore.form
 const { t } = useI18n()
 
 // State
 const loading = ref(false)
+const refreshing = ref(false)
+const loadError = ref('')
+const vizErrors = reactive({})
 const summary = ref(null)
 const featureStats = ref(null)
 const abundanceData = ref([])
 const barcodeData = ref(null)
 const classHeatmapData = ref(null)
 const mspAnnotations = ref({})
-const vizTab = ref('prevalence')
+const VIZ_TABS = ['prevalence', 'abundance', 'barcode', 'classHeatmap', 'volcano', 'pcoa']
+// The chart being looked at is part of the URL: it survives a refresh and the back button.
+const vizTab = ref(VIZ_TABS.includes(route.query.viz) ? route.query.viz : 'prevalence')
 const pcoaData = ref(null)
 const loadingPcoa = ref(false)
 const pcoaMethod = ref('pcoa')
@@ -411,9 +494,7 @@ const projectId = computed(() => route.params.id)
 // --- Dataset slot logic (from SettingsTab) ---
 const datasets = computed(() => store.current?.datasets || [])
 const libraryDatasets = computed(() => dsStore.datasets)
-const allFiles = computed(() =>
-  datasets.value.flatMap(ds => (ds.files || []).map(f => ({ ...f, datasetId: ds.id, datasetName: ds.name })))
-)
+const allFiles = computed(() => allProjectFiles(datasets.value))
 function findFile(role) { return allFiles.value.find(f => f.role === role) || null }
 const xTrainDs = computed(() => findFile('xtrain'))
 const yTrainDs = computed(() => findFile('ytrain'))
@@ -422,12 +503,26 @@ const yTestDs = computed(() => findFile('ytest'))
 const clinicalDs = computed(() => findFile('clinical'))
 const metadataDs = computed(() => findFile('metadata'))
 const dsSlots = computed(() => [
-  { role: 'xtrain', label: 'X train', ds: xTrainDs.value, required: true },
-  { role: 'ytrain', label: 'y train', ds: yTrainDs.value, required: true },
-  { role: 'xtest', label: 'X test', ds: xTestDs.value, required: false },
-  { role: 'ytest', label: 'y test', ds: yTestDs.value, required: false },
-  { role: 'clinical', label: 'Clinical metadata', ds: clinicalDs.value, required: false },
+  { role: 'xtrain', label: t('data.slot.xtrain'), hint: t('data.slotHint.xtrain'), ds: xTrainDs.value, required: true },
+  { role: 'ytrain', label: t('data.slot.ytrain'), hint: t('data.slotHint.ytrain'), ds: yTrainDs.value, required: true },
+  { role: 'xtest', label: t('data.slot.xtest'), hint: t('data.slotHint.xtest'), ds: xTestDs.value, required: false },
+  { role: 'ytest', label: t('data.slot.ytest'), hint: t('data.slotHint.ytest'), ds: yTestDs.value, required: false },
+  { role: 'clinical', label: t('data.slot.clinical'), hint: t('data.slotHint.clinical'), ds: clinicalDs.value, required: false },
 ])
+
+const formatExample = [
+  'feature\tsample_1\tsample_2\tsample_3',
+  'msp_0001\t0.0012\t0\t0.0450',
+  'msp_0002\t0\t0.0031\t0.0007',
+  '',
+  'sample\tclass',
+  'sample_1\t0',
+  'sample_2\t1',
+  'sample_3\t1',
+].join('\n')
+
+/** Per-slot upload state: { busy, pct, error, done } */
+const uploads = reactive({})
 const hasTrainData = computed(() => xTrainDs.value && yTrainDs.value)
 
 // Metadata column selection for regression
@@ -441,17 +536,36 @@ onMounted(() => {
 })
 
 async function uploadFile(event, role) {
-  const file = event.target.files[0]
+  const input = event.target
+  const file = input.files[0]
   if (!file) return
   const formData = new FormData()
   formData.append('file', file)
+  uploads[role] = { busy: true, pct: 0, error: '', done: false }
   try {
-    await axios.post(`/api/projects/${projectId.value}/datasets`, formData)
+    // The slot that was clicked decides the role — not the file's name.
+    await api.projects.uploadDataset(projectId.value, formData, {
+      params: { role },
+      timeout: LONG_TIMEOUT_MS,
+      onUploadProgress: (ev) => {
+        if (ev.total) uploads[role].pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100))
+      },
+    })
     await store.fetchOne(projectId.value)
-    await dsStore.fetchDatasets()
-    loadAll()
+    dsStore.fetchDatasets().catch(ignoreError)
+    if (findFile(role)) {
+      uploads[role] = { busy: false, pct: 100, error: '', done: true }
+      setTimeout(() => { if (uploads[role]?.done) uploads[role].done = false }, 4000)
+    } else {
+      // The file is stored but was not attached to this slot.
+      uploads[role] = { busy: false, pct: 0, done: false, error: t('data.uploadNotAssigned', { name: file.name }) }
+    }
+    if (role === 'metadata') await fetchMetadataColumns()
+    else loadAll()
   } catch (e) {
-    alert('Upload failed: ' + (e.response?.data?.detail || e.message))
+    uploads[role] = { busy: false, pct: 0, done: false, error: t('data.uploadFailed', { error: apiError(e) }) }
+  } finally {
+    input.value = ''
   }
 }
 
@@ -461,9 +575,14 @@ async function pickFromLibrary(event, role) {
   try {
     await dsStore.assignDataset(dsId, projectId.value)
     await store.fetchOne(projectId.value)
+    if (!findFile(role)) {
+      uploads[role] = { busy: false, pct: 0, done: false, error: t('data.libraryNoRole', { slot: role }) }
+    } else {
+      uploads[role] = { busy: false, pct: 0, done: false, error: '' }
+    }
     loadAll()
   } catch (e) {
-    alert('Assign failed: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('data.assignFailed', { error: apiError(e) }))
   }
   event.target.value = ''
 }
@@ -478,25 +597,26 @@ async function clearSlot(role) {
       metadataColumns.value = []
       selectedYColumn.value = null
     }
+    if (!hasTrainData.value) {
+      summary.value = null
+      featureStats.value = null
+    }
+    // Nothing is deleted (the dataset stays in the library), so offer the way back.
+    addToast(t('data.removedFromProject', { name: file.filename }), 'info', 8000, {
+      action: { label: t('common.undo'), onClick: () => undoClear(file.datasetId) },
+    })
   } catch (e) {
-    alert('Unassign failed: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('data.unassignFailed', { error: apiError(e) }))
   }
 }
 
-async function uploadMetadata(event) {
-  const file = event.target.files[0]
-  if (!file) return
-  const formData = new FormData()
-  formData.append('file', file)
+async function undoClear(datasetId) {
   try {
-    await axios.post(`/api/projects/${projectId.value}/datasets`, formData, {
-      params: { role: 'metadata' },
-    })
+    await dsStore.assignDataset(datasetId, projectId.value)
     await store.fetchOne(projectId.value)
-    await dsStore.fetchDatasets()
-    await fetchMetadataColumns()
+    loadAll()
   } catch (e) {
-    alert('Upload failed: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('data.assignFailed', { error: apiError(e) }))
   }
 }
 
@@ -504,11 +624,12 @@ async function fetchMetadataColumns() {
   const md = metadataDs.value
   if (!md) { metadataColumns.value = []; return }
   try {
-    const { data } = await axios.get(
-      `/api/datasets/${md.datasetId}/metadata-columns`
+    const { data } = await api.datasets.metadataColumns(md.datasetId,
+      { silentError: true },
     )
     metadataColumns.value = (data.columns || []).filter(c => c.type === "numeric").map(c => c.name)
-  } catch {
+  } catch (e) {
+    ignoreError(e)
     metadataColumns.value = []
   }
 }
@@ -516,14 +637,13 @@ async function fetchMetadataColumns() {
 async function onYColumnSelected() {
   if (!selectedYColumn.value || !metadataDs.value) return
   try {
-    await axios.post(
-      `/api/datasets/${metadataDs.value.datasetId}/y-from-metadata`,
+    await api.datasets.yFromMetadata(metadataDs.value.datasetId,
       { column: selectedYColumn.value }
     )
     await store.fetchOne(projectId.value)
     loadAll()
   } catch (e) {
-    alert('Failed to set y variable: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('data.yVariableFailed', { error: apiError(e) }))
   }
 }
 
@@ -557,6 +677,11 @@ function sortBy(field) {
     sortDir.value = 'asc'
   }
   featPage.value = 0
+}
+
+function ariaSort(field) {
+  if (sortField.value !== field) return 'none'
+  return sortDir.value === 'asc' ? 'ascending' : 'descending'
 }
 
 function sortIcon(field) {
@@ -596,6 +721,15 @@ function classDisplayName(index, rawLabel) {
   return ''
 }
 
+/** Name of a class for charts and tables: the user's own label when one was given. */
+function classNameFor(cls) {
+  const labels = summary.value?.class_labels || []
+  const idx = labels.findIndex(l => String(l) === String(cls))
+  const custom = idx >= 0 ? classDisplayName(idx, labels[idx]) : ''
+  if (custom && String(custom) !== String(cls)) return custom
+  return t('data.classN', { label: cls })
+}
+
 function isTargetClass(index) {
   const labels = summary.value?.class_labels || []
   // By default, last class (typically "1") is the target
@@ -613,8 +747,9 @@ async function saveClassNames() {
   })
   try {
     await store.updateProject(projectId.value, { class_names: names })
+    renderCurrentViz()
   } catch (e) {
-    console.error('Failed to save class names:', e)
+    toast.error(t('data.classNamesFailed', { error: apiError(e) }))
   }
 }
 
@@ -625,49 +760,64 @@ async function saveClassNames() {
 async function loadSummary() {
   if (!hasTrainData.value) return
   try {
-    const { data } = await axios.get(`/api/data-explore/${projectId.value}/summary`)
+    const { data } = await api.dataExplore.summary(projectId.value, { timeout: LONG_TIMEOUT_MS })
     summary.value = data
     // Restore saved class names into config
     const saved = store.current?.class_names
     if (saved && data.class_labels) {
       cfg.data.classes = data.class_labels.map(cls => saved[cls] || cls)
     }
-  } catch { summary.value = null }
+  } catch (e) {
+    summary.value = null
+    throw e
+  }
 }
 
 async function loadFeatureStats() {
   if (!hasTrainData.value) return
   featPage.value = 0
   try {
-    const { data } = await axios.get(`/api/data-explore/${projectId.value}/feature-stats`, {
+    const { data } = await api.dataExplore.featureStats(projectId.value, {
       params: {
         method: cfg.data.feature_selection_method,
         prevalence_pct: cfg.data.feature_minimal_prevalence_pct,
         max_pvalue: cfg.data.feature_maximal_adj_pvalue,
         min_feature_value: cfg.data.feature_minimal_feature_value,
       },
+      timeout: LONG_TIMEOUT_MS,
     })
     featureStats.value = data
     // Set topN to min(selected_count, 50)
     topN.value = Math.min(data.selected_count || 50, 50)
   } catch (e) {
-    console.error('Failed to load feature stats:', e)
+    featureStats.value = null
+    throw e
+  }
+}
+
+/** Run one chart loader; a failure shows in that chart's panel with Retry. */
+async function guardViz(tab, fn) {
+  vizErrors[tab] = ''
+  try {
+    await fn()
+  } catch (e) {
+    if (e?.response?.status === 404 && tab === 'pcoa') { ignoreError(e); pcoaData.value = null; return }
+    vizErrors[tab] = apiError(e)
   }
 }
 
 async function loadAbundance() {
   const feats = plotFeatureNames.value
   if (feats.length === 0 || !hasTrainData.value) return
-  try {
-    const { data } = await axios.get(`/api/data-explore/${projectId.value}/feature-abundance`, {
+  await guardViz('abundance', async () => {
+    const { data } = await api.dataExplore.featureAbundance(projectId.value, {
       params: { features: feats.join(','), transform: dataTransform.value },
+      timeout: LONG_TIMEOUT_MS,
     })
     abundanceData.value = data.features || []
     await nextTick()
     renderAbundanceChart()
-  } catch (e) {
-    console.error('Failed to load abundance:', e)
-  }
+  })
 }
 
 async function loadMspAnnotations() {
@@ -675,10 +825,12 @@ async function loadMspAnnotations() {
   const names = featureStats.value.features.map(f => f.name).filter(n => n.startsWith('msp_'))
   if (names.length === 0) return
   try {
-    const { data } = await axios.post('/api/data-explore/msp-annotations', { features: names })
+    // Annotations are a nicety (species names): never block or alarm the page for them.
+    const { data } = await api.dataExplore.mspAnnotations({ features: names }, { silentError: true })
     mspAnnotations.value = data.annotations || {}
+    renderCurrentViz()
   } catch (e) {
-    console.error('Failed to load MSP annotations:', e)
+    ignoreError(e)
   }
 }
 
@@ -690,40 +842,38 @@ function featureLabel(name) {
 async function loadBarcodeData() {
   const feats = plotFeatureNames.value
   if (feats.length === 0 || !hasTrainData.value) return
-  try {
-    const { data } = await axios.get(`/api/data-explore/${projectId.value}/barcode-data`, {
+  await guardViz('barcode', async () => {
+    const { data } = await api.dataExplore.barcode(projectId.value, {
       params: { features: feats.join(','), transform: dataTransform.value },
+      timeout: LONG_TIMEOUT_MS,
     })
     barcodeData.value = data
     await nextTick()
     renderBarcodeChart()
-  } catch (e) {
-    console.error('Failed to load barcode data:', e)
-  }
+  })
 }
 
 async function loadClassHeatmap() {
   const feats = plotFeatureNames.value
   if (feats.length === 0 || !hasTrainData.value) return
-  try {
-    const { data } = await axios.get(`/api/data-explore/${projectId.value}/class-heatmap`, {
+  await guardViz('classHeatmap', async () => {
+    const { data } = await api.dataExplore.classHeatmap(projectId.value, {
       params: { features: feats.join(','), transform: dataTransform.value },
+      timeout: LONG_TIMEOUT_MS,
     })
     classHeatmapData.value = data
     await nextTick()
     renderClassHeatmapChart()
-  } catch (e) {
-    console.error('Failed to load class heatmap:', e)
-  }
+  })
 }
 
 async function loadPcoaJobs() {
   try {
-    const { data } = await axios.get(`/api/analysis/${projectId.value}/jobs`)
+    const { data } = await api.analysis.listJobs(projectId.value, { silentError: true })
     pcoaJobs.value = (data || [])
       .filter(j => j.status === 'completed')
-      .map(j => ({ id: j.job_id, label: j.name || `Job ${j.job_id.slice(0, 8)}` }))
-  } catch { pcoaJobs.value = [] }
+      .map(j => ({ id: j.job_id, label: j.name || t('data.jobNamed', { id: j.job_id.slice(0, 8) }) }))
+  } catch (e) { ignoreError(e); pcoaJobs.value = [] }
 }
 
 async function onFbmJobChange() {
@@ -733,7 +883,7 @@ async function onFbmJobChange() {
     return
   }
   try {
-    const { data } = await axios.get(`/api/analysis/${projectId.value}/jobs/${pcoaFbmJobId.value}/results`)
+    const { data } = await api.analysis.jobResults(projectId.value, pcoaFbmJobId.value, { timeout: LONG_TIMEOUT_MS })
     const pop = data?.population || []
     // FBM filter: models within 95% CI of best fit
     const bestFit = pop[0]?.metrics?.fit
@@ -752,7 +902,7 @@ async function onFbmJobChange() {
     pcoaFbmFeatures.value = [...nameSet]
     loadPcoa()
   } catch (e) {
-    console.error('Failed to load FBM features:', e)
+    toast.error(t('data.fbmFailed', { error: apiError(e) }))
     pcoaFbmFeatures.value = []
     loadPcoa()
   }
@@ -761,6 +911,7 @@ async function onFbmJobChange() {
 async function loadPcoa() {
   if (!hasTrainData.value) return
   loadingPcoa.value = true
+  vizErrors.pcoa = ''
   try {
     const params = { method: pcoaMethod.value, metric: pcoaMetric.value, transform: dataTransform.value }
     if (pcoaMethod.value === 'tsne') {
@@ -773,49 +924,95 @@ async function loadPcoa() {
     if (pcoaFbmFeatures.value.length > 0) {
       params.features = pcoaFbmFeatures.value.join(',')
     }
-    const { data } = await axios.get(`/api/data-explore/${projectId.value}/ordination`, { params })
+    const { data } = await api.dataExplore.ordination(projectId.value, { params, timeout: LONG_TIMEOUT_MS })
     pcoaData.value = data
     await nextTick()
     renderPcoaChart()
   } catch (e) {
     if (e.response?.status === 404) {
+      ignoreError(e)
       pcoaData.value = null
     } else {
-      console.error('Failed to load ordination:', e)
+      vizErrors.pcoa = apiError(e)
     }
   } finally {
     loadingPcoa.value = false
   }
 }
 
+let _loadSeq = 0
 async function loadAll() {
   if (!hasTrainData.value) return
+  const mine = ++_loadSeq
   loading.value = true
+  loadError.value = ''
   try {
-    await loadSummary()
-    await loadFeatureStats()
-    await Promise.all([loadAbundance(), loadBarcodeData(), loadMspAnnotations()])
+    // Summary and feature statistics are independent: ask for both at once.
+    await Promise.all([loadSummary(), loadFeatureStats()])
+    if (mine !== _loadSeq) return
+    loading.value = false
     await nextTick()
     renderCurrentViz()
+    // The remaining charts fill in behind the first one; each reports its own failure.
+    loadMspAnnotations()
+    await Promise.all([loadAbundance(), loadBarcodeData()])
+  } catch (e) {
+    if (mine !== _loadSeq) { ignoreError(e); return }
+    loadError.value = apiError(e)
   } finally {
-    loading.value = false
+    if (mine === _loadSeq) loading.value = false
   }
 }
+
+function retryCurrentViz() {
+  const tab = vizTab.value
+  if (tab === 'abundance') return loadAbundance()
+  if (tab === 'barcode') return loadBarcodeData()
+  if (tab === 'classHeatmap') return loadClassHeatmap()
+  if (tab === 'pcoa') return loadPcoa()
+  return loadAll()
+}
+
+/** One sentence describing the visible chart, for screen-reader users. */
+const chartSummary = computed(() => {
+  if (!featureStats.value) return ''
+  return t('data.chartSummary', {
+    chart: t(`data.${vizTab.value}`),
+    n: plotFeatureNames.value.length,
+    selected: featureStats.value.selected_count,
+    total: featureStats.value.n_features,
+  })
+})
 
 // Debounced refresh for filter changes
 let _refreshTimer = null
 function debouncedRefresh() {
   clearTimeout(_refreshTimer)
   _refreshTimer = setTimeout(async () => {
-    await loadFeatureStats()
-    await Promise.all([loadAbundance(), loadBarcodeData()])
-    renderCurrentViz()
+    refreshing.value = true
+    try {
+      await loadFeatureStats()
+      loadError.value = ''
+      await Promise.all([loadAbundance(), loadBarcodeData()])
+      renderCurrentViz()
+    } catch (e) {
+      loadError.value = apiError(e)
+    } finally {
+      refreshing.value = false
+    }
   }, 500)
+}
+
+/** Left margin for feature labels: generous on a desktop, bounded on a narrow screen. */
+function leftMargin(max) {
+  const w = typeof window !== 'undefined' ? window.innerWidth : 1200
+  return Math.max(70, Math.min(max, Math.round(w * 0.28)))
 }
 
 // --- Chart renderers ---
 async function renderPrevalenceChart() {
   await nextTick()
+  await ensurePlotly()
   if (!prevalenceChartEl.value || !featureStats.value) return
   const c = chartColors()
 
@@ -854,13 +1051,13 @@ async function renderPrevalenceChart() {
   // Class-specific markers as scatter traces
   const traces = [
     {
-      type: 'scatter', mode: 'markers', name: 'Class 0',
+      type: 'scatter', mode: 'markers', name: classNameFor(0),
       x: features.map(f => f.prevalence_0),
       y: features.map((_, i) => i),
       marker: { color: c.class0, size: 8, symbol: 'circle' },
     },
     {
-      type: 'scatter', mode: 'markers', name: 'Class 1',
+      type: 'scatter', mode: 'markers', name: classNameFor(1),
       x: features.map(f => f.prevalence_1),
       y: features.map((_, i) => i),
       marker: { color: c.class1, size: 8, symbol: 'diamond' },
@@ -868,7 +1065,7 @@ async function renderPrevalenceChart() {
   ]
 
   Plotly.newPlot(prevalenceChartEl.value, traces, chartLayout({
-    xaxis: { title: { text: 'Prevalence (%)', font: { color: c.text } }, range: [0, 105], gridcolor: c.grid, color: c.text },
+    xaxis: { title: { text: t('data.axis.prevalencePct'), font: { color: c.text } }, range: [0, 105], gridcolor: c.grid, color: c.text },
     yaxis: {
       tickvals: features.map((_, i) => i), ticktext: features.map(f => featureLabel(f.name)),
       range: [nFeat - 0.5, -0.5], automargin: true, color: c.text, fixedrange: true,
@@ -877,12 +1074,13 @@ async function renderPrevalenceChart() {
     shapes,
     annotations,
     legend: { orientation: 'h', y: 1.05, font: { color: c.text } },
-    margin: { t: 30, b: 50, l: 180, r: 40 },
+    margin: { t: 30, b: 50, l: leftMargin(180), r: 40 },
   }), { responsive: true, displayModeBar: false })
 }
 
 async function renderAbundanceChart() {
   await nextTick()
+  await ensurePlotly()
   if (!abundanceChartEl.value || abundanceData.value.length === 0) return
   const c = chartColors()
 
@@ -913,7 +1111,7 @@ async function renderAbundanceChart() {
   for (let ci = 0; ci < nCls; ci++) {
     traces.push({
       type: 'scatter', mode: 'markers', x: [null], y: [null],
-      name: `Class ${classKeys[ci]}`,
+      name: classNameFor(classKeys[ci]),
       marker: { color: clsColors[ci], size: 10, symbol: 'square' },
       showlegend: true,
     })
@@ -978,10 +1176,10 @@ async function renderAbundanceChart() {
       hoverX.push(stats.median)
       hoverY.push(yC)
       hoverText.push(
-        `<b>${features[i].name}</b> (Class ${cls})<br>` +
-        `Min: ${stats.min.toFixed(6)}<br>Q1: ${stats.q1.toFixed(6)}<br>` +
-        `Median: ${stats.median.toFixed(6)}<br>Q3: ${stats.q3.toFixed(6)}<br>` +
-        `Max: ${stats.max.toFixed(6)}<br>Mean: ${stats.mean.toFixed(6)}<br>` +
+        `<b>${features[i].name}</b> (${classNameFor(cls)})<br>` +
+        `${ct('Min')}: ${stats.min.toFixed(6)}<br>Q1: ${stats.q1.toFixed(6)}<br>` +
+        `${ct('Median')}: ${stats.median.toFixed(6)}<br>Q3: ${stats.q3.toFixed(6)}<br>` +
+        `${ct('Max')}: ${stats.max.toFixed(6)}<br>${ct('Mean')}: ${stats.mean.toFixed(6)}<br>` +
         `n=${stats.n}<extra></extra>`
       )
     }
@@ -991,7 +1189,7 @@ async function renderAbundanceChart() {
       type: 'scatter', mode: 'markers',
       x: hoverX, y: hoverY,
       hovertemplate: hoverText,
-      marker: { color: 'rgba(0,0,0,0)', size: 14 },
+      marker: { color: c.transparent, size: 14 },
       showlegend: false,
     })
   }
@@ -1017,8 +1215,8 @@ async function renderAbundanceChart() {
   const isTransformed = dataTransform.value && dataTransform.value !== 'raw'
   const useLogAxis = abundanceLogScale.value && !isTransformed
   const axisTitle = isTransformed
-    ? (dataTransform.value === 'log' ? 'log(abundance)' : 'z-score')
-    : (useLogAxis ? 'Abundance (log)' : 'Abundance')
+    ? (dataTransform.value === 'log' ? ct('log(abundance)') : ct('z-score'))
+    : (useLogAxis ? ct('Abundance (log)') : ct('Abundance'))
 
   // Compute explicit x-range across all class stats. Plotly's autorange is
   // driven by trace data (here, only medians), not by layout shapes, so the
@@ -1056,12 +1254,13 @@ async function renderAbundanceChart() {
     shapes,
     annotations,
     legend: { orientation: 'h', y: 1.05, font: { color: c.text } },
-    margin: { t: 30, b: 50, l: 180, r: 40 },
+    margin: { t: 30, b: 50, l: leftMargin(180), r: 40 },
   }), { responsive: true, displayModeBar: false })
 }
 
 async function renderBarcodeChart() {
   await nextTick()
+  await ensurePlotly()
   if (!barcodeChartEl.value || !barcodeData.value || barcodeData.value.matrix.length === 0) return
   const c = chartColors()
   const d = barcodeData.value
@@ -1096,7 +1295,8 @@ async function renderBarcodeChart() {
 
     const span = hi - floor
     const whiteEnd = Math.max(0.01, (lo - floor) / span)
-    const dataColors = ['#00bfff', '#0000ff', '#00cd00', '#ffff00', '#ffa500', '#ff0000', '#ee4000', '#8b0000']
+    // Viridis, light → dark: perceptually uniform and readable with colour-vision deficiencies.
+    const dataColors = ['#fde725', '#a0da39', '#4ac16d', '#1fa187', '#277f8e', '#365c8d', '#46327e', '#440154']
     const zeroBg = c.paper
     colorscale = [[0, zeroBg], [whiteEnd, zeroBg]]
     for (let i = 0; i < dataColors.length; i++) {
@@ -1108,7 +1308,7 @@ async function renderBarcodeChart() {
       tickVals.push(lv)
       tickTexts.push(Math.pow(4, lv).toExponential(1))
     }
-    colorbarTitle = 'Value (log\u2084)'
+    colorbarTitle = `${ct('Value')} (log\u2084)`
   } else {
     // log or zscore: use the values directly. Raw zeros are masked to null
     // (renders as background) so "absent" cells stay visually empty regardless
@@ -1125,14 +1325,11 @@ async function renderBarcodeChart() {
     if (!isFinite(hi)) hi = 1
     floor = lo
 
-    // Unified divergent blue/white/red colormap. zscore anchors white at 0
+    // Unified divergent colormap (class-0 colour / neutral / class-1 colour, from the chart theme). zscore anchors white at 0
     // (data-independent meaning: above/below the mean). log has no natural
     // zero anchor — every value is negative — so stretch the colormap across
     // the actual data range so both blue and red are used.
-    colorscale = [
-      [0, '#0000b8'], [0.25, '#4472ff'], [0.5, '#ffffff'],
-      [0.75, '#ff6060'], [1, '#b80000'],
-    ]
+    colorscale = c.diverging
     if (transform === 'zscore') {
       // Symmetric around 0 using the 95th percentile of |value| so a few
       // outliers don't wash the rest toward white.
@@ -1205,19 +1402,19 @@ async function renderBarcodeChart() {
       colorbar: ci === nCls - 1 ? {
         title: { text: colorbarTitle, font: { color: c.text, size: 10 } },
         ...(tickVals.length > 0 ? { tickvals: tickVals, ticktext: tickTexts } : {}),
-        tickfont: { color: c.text, size: 9 },
+        tickfont: { color: c.text, size: 10 },
         len: 0.8, thickness: 12,
       } : undefined,
       hovertemplate: classRaw.map((row, ri) =>
         row.map((v, si) =>
-          `Feature: ${d.feature_names[ri]}<br>Sample: ${classSamples[si]}<br>Value: ${v.toExponential(4)}<extra></extra>`
+          `${ct('Feature')}: ${d.feature_names[ri]}<br>${ct('Sample')}: ${classSamples[si]}<br>${ct('Value')}: ${v.toExponential(4)}<extra></extra>`
         )
       ),
     })
 
     // Facet title annotation (class label above each panel)
     annotations.push({
-      text: `<b>Class ${d.class_labels[ci]}</b> (n=${classSizes[ci]})`,
+      text: `<b>${classNameFor(d.class_labels[ci])}</b> (n=${classSizes[ci]})`,
       xref: 'paper', yref: 'paper',
       x: (domains[ci][0] + domains[ci][1]) / 2,
       y: 1.04,
@@ -1229,7 +1426,7 @@ async function renderBarcodeChart() {
   // Build layout with multiple x/y axes
   const layout = {
     height: Math.max(300, d.feature_names.length * 20 + 80),
-    margin: { t: 40, b: 30, l: 120, r: 60 },
+    margin: { t: 40, b: 30, l: leftMargin(120), r: 60 },
     paper_bgcolor: c.paper,
     plot_bgcolor: c.paper,
     font: { family: 'system-ui, sans-serif', size: 12, color: c.text },
@@ -1259,6 +1456,7 @@ async function renderBarcodeChart() {
 
 async function renderVolcanoChart() {
   await nextTick()
+  await ensurePlotly()
   if (!volcanoChartEl.value || !featureStats.value) return
   const c = chartColors()
   const features = featureStats.value.features
@@ -1278,29 +1476,29 @@ async function renderVolcanoChart() {
     traces.push({
       x: notSig.map(meanDiff), y: notSig.map(negLog10),
       text: notSig.map(f => f.name), mode: 'markers', type: 'scatter',
-      name: 'Not significant', marker: { color: c.dimmed, size: 4, opacity: 0.5 },
+      name: ct('Not significant'), marker: { color: c.dimmed, size: 4, opacity: 0.5 },
     })
   }
   if (class0.length > 0) {
     traces.push({
       x: class0.map(meanDiff), y: class0.map(negLog10),
       text: class0.map(f => f.name), mode: 'markers', type: 'scatter',
-      name: 'Class 0', marker: { color: c.class0, size: 6 },
+      name: classNameFor(0), marker: { color: c.class0, size: 6, symbol: 'circle' },
     })
   }
   if (class1.length > 0) {
     traces.push({
       x: class1.map(meanDiff), y: class1.map(negLog10),
       text: class1.map(f => f.name), mode: 'markers', type: 'scatter',
-      name: 'Class 1', marker: { color: c.class1, size: 6 },
+      name: classNameFor(1), marker: { color: c.class1, size: 6, symbol: 'diamond' },
     })
   }
 
   const pThreshold = -Math.log10(cfg.data.feature_maximal_adj_pvalue)
 
   Plotly.newPlot(volcanoChartEl.value, traces, chartLayout({
-    xaxis: { title: { text: 'Mean Difference (Class 1 - Class 0)', font: { color: c.text } }, gridcolor: c.grid, color: c.text, zeroline: true, zerolinecolor: c.grid },
-    yaxis: { title: { text: '-log10(significance)', font: { color: c.text } }, gridcolor: c.grid, color: c.text },
+    xaxis: { title: { text: t('data.axis.meanDifference', { a: classNameFor(1), b: classNameFor(0) }), font: { color: c.text } }, gridcolor: c.grid, color: c.text, zeroline: true, zerolinecolor: c.grid },
+    yaxis: { title: { text: t('data.axis.negLogSignificance'), font: { color: c.text } }, gridcolor: c.grid, color: c.text },
     legend: { orientation: 'h', y: 1.12, font: { color: c.text } },
     height: 400,
     shapes: [{
@@ -1313,6 +1511,7 @@ async function renderVolcanoChart() {
 
 async function renderPcoaChart() {
   await nextTick()
+  await ensurePlotly()
   if (!pcoaChartEl.value || !pcoaData.value) return
   const c = chartColors()
   const d = pcoaData.value
@@ -1324,15 +1523,22 @@ async function renderPcoaChart() {
     if (method === 'pcoa' && ve) return `PCo${dim} (${ve[dim - 1]}%)`
     if (method === 'tsne') return `t-SNE ${dim}`
     if (method === 'umap') return `UMAP ${dim}`
-    return `Dim ${dim}`
+    return `${ct('Dim')} ${dim}`
   }
-  const hoverPrefix = method === 'pcoa' ? 'PCo' : method === 'tsne' ? 't-SNE ' : method === 'umap' ? 'UMAP ' : 'Dim '
+  const hoverPrefix = method === 'pcoa' ? 'PCo' : method === 'tsne' ? 't-SNE ' : method === 'umap' ? 'UMAP ' : `${ct('Dim')} `
 
-  const palette = [c.class0, c.class1, c.accent, c.danger]
+  // Colour and marker symbol per class: the symbol keeps classes apart without colour.
   const classColorMap = {}
-  d.class_labels.forEach((lbl, i) => { classColorMap[lbl] = palette[i % palette.length] })
+  const classSymbolMap = {}
+  d.class_labels.forEach((lbl, i) => {
+    const style = classStyle(i)
+    classColorMap[lbl] = style.color
+    classSymbolMap[lbl] = style.symbol
+  })
 
   if (pcoaDim.value === '3d') {
+    await loadPlotly3d()
+    if (!pcoaChartEl.value) return
     const traces = d.class_labels.map(cls => {
       const mask = d.sample_classes.map((sc, i) => String(sc) === cls ? i : -1).filter(i => i >= 0)
       return {
@@ -1342,8 +1548,8 @@ async function renderPcoaChart() {
         text: mask.map(i => d.sample_names[i]),
         mode: 'markers',
         type: 'scatter3d',
-        name: `Class ${cls}`,
-        marker: { color: classColorMap[cls], size: 4, opacity: 0.85 },
+        name: classNameFor(cls),
+        marker: { color: classColorMap[cls], symbol: classSymbolMap[cls], size: 4, opacity: 0.85 },
         hovertemplate: `%{text}<br>${hoverPrefix}1: %{x:.3f}<br>${hoverPrefix}2: %{y:.3f}<br>${hoverPrefix}3: %{z:.3f}<extra></extra>`,
       }
     })
@@ -1367,8 +1573,8 @@ async function renderPcoaChart() {
         text: mask.map(i => d.sample_names[i]),
         mode: 'markers',
         type: 'scatter',
-        name: `Class ${cls}`,
-        marker: { color: classColorMap[cls], size: 7, opacity: 0.8, line: { color: classColorMap[cls], width: 0.5 } },
+        name: classNameFor(cls),
+        marker: { color: classColorMap[cls], symbol: classSymbolMap[cls], size: 7, opacity: 0.8, line: { color: classColorMap[cls], width: 0.5 } },
         hovertemplate: `%{text}<br>${hoverPrefix}1: %{x:.3f}<br>${hoverPrefix}2: %{y:.3f}<extra></extra>`,
       }
     })
@@ -1383,7 +1589,7 @@ async function renderPcoaChart() {
           y: ell.y,
           mode: 'lines',
           type: 'scatter',
-          name: `95% CI – Class ${cls}`,
+          name: t('data.ci95For', { name: classNameFor(cls) }),
           line: { color: classColorMap[cls], width: 2, dash: 'dash' },
           fill: 'toself',
           fillcolor: classColorMap[cls] + '18',
@@ -1419,6 +1625,7 @@ function renderCurrentViz() {
 
 async function renderClassHeatmapChart() {
   await nextTick()
+  await ensurePlotly()
   if (!classHeatmapChartEl.value || !classHeatmapData.value || classHeatmapData.value.matrix.length === 0) return
   const d = classHeatmapData.value
 
@@ -1440,11 +1647,8 @@ async function renderClassHeatmapChart() {
   const p95 = absVals.length > 0 ? absVals[Math.floor(absVals.length * 0.95)] : 1
   const maxAbs = p95 > 0 ? p95 : 1
 
-  // Divergent colorscale: blue (below mean) → white (mean) → red (above mean)
-  const colorscale = [
-    [0, '#0000b8'], [0.25, '#4472ff'], [0.5, '#f8f8f8'],
-    [0.75, '#ff6060'], [1, '#b80000'],
-  ]
+  // Divergent colorscale from the chart theme: below the row mean → neutral → above it
+  const colorscale = chartColors().diverging
 
   const customdata = d.matrix.map((row, i) =>
     row.map((v, j) => [v, rowCentered[i][j]])
@@ -1452,7 +1656,7 @@ async function renderClassHeatmapChart() {
 
   const trace = {
     z: rowCentered,
-    x: d.class_labels.map(cls => `Class ${cls}`),
+    x: d.class_labels.map(cls => classNameFor(cls)),
     y: d.feature_names.map(featureLabel),
     type: 'heatmap',
     colorscale,
@@ -1460,15 +1664,15 @@ async function renderClassHeatmapChart() {
     zmax: maxAbs,
     zmid: 0,
     customdata,
-    hovertemplate: 'Feature: %{y}<br>Class: %{x}<br>Value (' + d.transform + '): %{customdata[0]:.4g}<br>Δ from row mean: %{customdata[1]:.4g}<extra></extra>',
+    hovertemplate: `${ct('Feature')}: %{y}<br>${ct('Class')}: %{x}<br>${ct('Value')} (${d.transform}): %{customdata[0]:.4g}<br>${ct('Δ from row mean')}: %{customdata[1]:.4g}<extra></extra>`,
     colorbar: { title: { text: 'Δ ' + d.transform }, thickness: 12 },
   }
 
   const layout = chartLayout({
-    title: `Class mean heatmap (${d.transform}, row-centered, p95 scale)`,
-    xaxis: { title: 'Class', side: 'bottom' },
-    yaxis: { title: 'Feature', autorange: 'reversed', tickfont: { size: 10 } },
-    margin: { l: 220, r: 40, t: 50, b: 60 },
+    title: t('data.classHeatmapTitle', { transform: d.transform }),
+    xaxis: { title: t('data.axis.class'), side: 'bottom' },
+    yaxis: { title: t('data.axis.feature'), autorange: 'reversed', tickfont: { size: 10 } },
+    margin: { l: leftMargin(220), r: 40, t: 50, b: 60 },
   })
 
   // Force complete redraw to avoid Plotly cached state when transform changes
@@ -1477,7 +1681,8 @@ async function renderClassHeatmapChart() {
 }
 
 // Watchers for chart rendering
-watch(vizTab, async () => {
+watch(vizTab, async (tab) => {
+  router.replace({ query: { ...route.query, viz: tab === 'prevalence' ? undefined : tab } }).catch(() => {})
   await nextTick()
   renderCurrentViz()
 })
@@ -1499,8 +1704,20 @@ watch(pcoaDim, () => {
   if (pcoaData.value) renderPcoaChart()
 })
 
-// Watch for dataset changes (after upload/assign)
-watch(hasTrainData, (val) => { if (val) loadAll() })
+// Watch for dataset changes (after upload/assign). loadAll() ignores stale
+// answers, so a second trigger while one is running cannot leave old data up.
+watch(hasTrainData, (val, old) => { if (val && !old) loadAll() })
+
+const CHART_REFS = [prevalenceChartEl, abundanceChartEl, barcodeChartEl, classHeatmapChartEl, volcanoChartEl, pcoaChartEl]
+onBeforeUnmount(() => {
+  clearTimeout(_refreshTimer)
+  clearTimeout(_topNTimer)
+  _loadSeq++
+  // Plotly keeps WebGL contexts and listeners alive until purged.
+  for (const r of CHART_REFS) {
+    if (Plotly && r.value) { try { Plotly.purge(r.value) } catch { /* already gone */ } }
+  }
+})
 
 onMounted(() => {
   if (hasTrainData.value) loadAll()
@@ -1564,13 +1781,16 @@ onMounted(() => {
 /* Dataset slots (2x2) */
 .ds-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …): a wide child (a select, a long file name) must not widen its
+     column and push the other one out of the panel. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.5rem;
 }
 
 .ds-slot {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: 0.2rem;
   padding: 0.4rem 0.6rem;
   border-radius: 6px;
@@ -1584,7 +1804,7 @@ onMounted(() => {
 .ds-role {
   font-weight: 600;
   color: var(--text-secondary);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -1599,7 +1819,7 @@ onMounted(() => {
 .ds-upload {
   cursor: pointer;
   color: var(--text-primary);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.15rem 0.4rem;
@@ -1607,6 +1827,7 @@ onMounted(() => {
   transition: background 0.15s;
 }
 .ds-upload:hover { background: var(--bg-card-hover); }
+.ds-slot select, .ds-slot input { max-width: 100%; min-width: 0; }
 
 .metadata-y-select {
   margin-top: 0.3rem;
@@ -1615,11 +1836,11 @@ onMounted(() => {
   gap: 0.25rem;
 }
 .metadata-y-select label {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
 }
 .metadata-y-select select {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.15rem 0.3rem;
   border-radius: 4px;
   border: 1px solid var(--border);
@@ -1628,7 +1849,7 @@ onMounted(() => {
 }
 .regression-badge {
   display: inline-block;
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   color: var(--accent);
@@ -1641,7 +1862,7 @@ onMounted(() => {
 .ds-upload input[type="file"] { display: none; }
 
 .ds-picker {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   padding: 0.15rem 0.25rem;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1681,7 +1902,7 @@ onMounted(() => {
 }
 
 .badge {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--accent);
   background: var(--bg-badge);
@@ -1786,7 +2007,7 @@ input[type="checkbox"] {
 .species-tag {
   font-weight: 400;
   font-style: italic;
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
   margin-left: 0.2rem;
 }
@@ -1854,7 +2075,7 @@ input[type="checkbox"] {
   color: var(--text-body);
 }
 .target-badge, .ref-badge {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -1917,36 +2138,64 @@ input[type="checkbox"] {
   accent-color: var(--brand);
 }
 
-/* Viz tabs */
+/* Viz tabs: segmented control */
 .viz-tabs {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border-light);
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--bg-tab-switcher);
+  border: 1px solid var(--border);
+  border-radius: 9px;
 }
 
 .viz-tabs button {
-  padding: 0.45rem 1rem;
+  padding: 0.4rem 0.8rem;
   border: none;
-  background: none;
-  color: var(--text-muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-body);
   font-size: 0.82rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  white-space: nowrap;
 }
-
+.viz-tabs button:hover { background: var(--bg-card); color: var(--text-primary); }
 .viz-tabs button.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
+.viz-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .viz-section { min-height: 350px; }
 
 .plotly-chart { width: 100%; min-height: 300px; }
 .plotly-chart-tall { min-height: 400px; }
 
-.info-text { color: var(--text-faint); font-size: 0.82rem; font-style: italic; text-align: center; padding: 2rem 0; }
+.ds-state { font-weight: 700; margin-right: 0.15rem; }
+.ds-req { font-weight: 400; font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.3rem; text-transform: none; }
+.ds-hint { display: block; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.3; margin: 0.15rem 0 0.3rem; }
+.ds-upload.busy { opacity: 0.8; cursor: progress; }
+.ds-progress { height: 4px; background: var(--border-light); border-radius: 2px; margin-top: 0.3rem; overflow: hidden; }
+.ds-progress-bar { height: 100%; background: var(--info); transition: width 0.2s; }
+.ds-error { font-size: 0.75rem; color: var(--danger-dark); font-weight: 600; margin-top: 0.3rem; }
+.ds-done { font-size: 0.75rem; color: var(--success-dark); font-weight: 600; margin-top: 0.3rem; }
+.format-help { margin-top: 0.6rem; font-size: 0.78rem; color: var(--text-secondary); }
+.format-help summary { cursor: pointer; font-weight: 600; }
+.format-help ul { margin: 0.4rem 0 0.4rem 1.1rem; line-height: 1.45; }
+.format-example { background: var(--bg-badge); border-radius: 6px; padding: 0.5rem 0.6rem; font-size: 0.75rem; overflow-x: auto; }
+.opt-help { font-size: 0.75rem; color: var(--text-secondary); margin: -0.1rem 0 0.45rem 1.4rem; line-height: 1.35; }
+.group-label { font-size: 0.8rem; color: var(--text-secondary); }
+.sort-btn { background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: pointer; font-weight: inherit; }
+.class-mark { margin-right: 0.25rem; font-size: 0.75rem; }
+.refreshing { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; font-weight: 400; color: var(--text-secondary); margin-left: 0.6rem; }
+.mini-spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--info); animation: dt-spin 0.8s linear infinite; }
+@keyframes dt-spin { to { transform: rotate(360deg); } }
+.no-data-yet { text-align: center; }
+.no-data-title { font-weight: 600; color: var(--text-primary); margin-bottom: 0.3rem; }
+.viz-tabs { overflow-x: auto; }
+.info-text { color: var(--text-muted); font-size: 0.82rem; font-style: italic; text-align: center; padding: 2rem 0; }
 .loading { text-align: center; padding: 2rem; color: var(--text-faint); }
 
 /* PCoA */
@@ -2004,4 +2253,5 @@ input[type="checkbox"] {
   .data-panels { grid-template-columns: 1fr; }
   .left-panel { max-height: none; position: static; }
 }
+.chart-summary { font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 0.5rem; }
 </style>

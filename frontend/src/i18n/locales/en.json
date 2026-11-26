@@ -7,12 +7,20 @@
     "admin": "Admin",
     "login": "Login",
     "logout": "Logout",
-    "profile": "Profile",
     "credits": "Credits",
-    "signatureZoo": "Signature Zoo"
+    "signatureZoo": "Signature Zoo",
+    "skipToContent": "Skip to content",
+    "mainNavigation": "Main navigation",
+    "toggleMenu": "Toggle menu",
+    "switchLanguage": "Language: {name}. Switch language",
+    "theme": "Theme: {mode}",
+    "themeMode": {
+      "light": "light",
+      "dark": "dark",
+      "system": "system"
+    }
   },
   "home": {
-    "title": "PredomicsApp",
     "subtitle": "Discover sparse, interpretable predictive models from omics data.",
     "description": "Powered by gpredomics — a high-performance Rust engine for Binary, Ternary, and Ratio model languages using genetic algorithms, beam search, and Bayesian MCMC.",
     "getStarted": "Get Started",
@@ -70,7 +78,31 @@
     "openSource": "Open Source",
     "openSourceDesc": "GPL-3.0 licensed. Inspect, extend, and contribute to the codebase.",
     "ecosystemNetwork": "Ecosystem Network",
-    "ecosystemNetworkDesc": "Visualize species co-abundance networks with taxonomic coloring, Louvain community detection, and FBM overlay to bridge ecology with predictive models."
+    "ecosystemNetworkDesc": "Visualize species co-abundance networks with taxonomic coloring, Louvain community detection, and FBM overlay to bridge ecology with predictive models.",
+    "demoBadge": "Demo",
+    "ucStat": {
+      "auc": "AUC",
+      "features": "features",
+      "samples": "samples"
+    },
+    "uc": {
+      "cirrhosis": {
+        "title": "Cirrhosis prediction",
+        "desc": "Predict liver cirrhosis from gut microbiome composition using 1,980 metagenomic species profiles in a Chinese cohort of 210 subjects."
+      },
+      "cancer": {
+        "title": "Cancer classification",
+        "desc": "Classify colorectal cancer status from stool metagenomic data using sparse ternary models."
+      },
+      "ici": {
+        "title": "ICI response prediction",
+        "desc": "Predict immune checkpoint inhibitor response (OS12) from baseline gut microbiome in the NSAT multi-cancer cohort of 417 patients."
+      },
+      "metabolic": {
+        "title": "Metabolic disease",
+        "desc": "Identify type 2 diabetes biomarkers from metagenome-wide association studies of European and Chinese cohorts."
+      }
+    }
   },
   "login": {
     "title": "PredomicsApp",
@@ -87,7 +119,16 @@
     "registerButton": "Create Account",
     "loading": "Please wait...",
     "forgotPassword": "Forgot password?",
-    "error": "Something went wrong. Please try again."
+    "error": "Something went wrong. Please try again.",
+    "modeLabel": "Sign in or create an account",
+    "passwordHint": "At least {n} characters.",
+    "confirmPassword": "Confirm password",
+    "confirmPasswordPlaceholder": "Repeat the password",
+    "invalidEmail": "Enter a valid email address.",
+    "passwordRequired": "Enter your password.",
+    "passwordTooShort": "The password must have at least {n} characters.",
+    "lockedSeconds": "You can try again in {n} s.",
+    "lockedMinutes": "You can try again in about {n} min."
   },
   "dashboard": {
     "title": "Dashboard",
@@ -101,17 +142,13 @@
     "recentCompletions": "Recent Completions",
     "recentActivity": "Recent Activity",
     "job": "Job",
-    "auc": "AUC",
     "k": "k",
     "completedAt": "Completed",
     "loading": "Loading dashboard...",
     "noProjects": "No projects yet.",
     "createFirst": "Create your first project",
     "toGetStarted": "to get started.",
-    "justNow": "just now",
-    "minutesAgo": "{n}m ago",
-    "hoursAgo": "{n}h ago",
-    "daysAgo": "{n}d ago"
+    "bestScore": "Best score"
   },
   "projects": {
     "title": "Projects",
@@ -132,7 +169,38 @@
     "showArchived": "Show archived",
     "archive": "Archive",
     "unarchive": "Unarchive",
-    "archiveFailed": "Archive failed: {error}"
+    "archiveFailed": "Archive failed: {error}",
+    "openNamed": "Open project {name}",
+    "detailsNamed": "Details and actions for {name}",
+    "archivedTag": "archived",
+    "projectName": "Project name",
+    "rename": "Rename",
+    "addDescription": "Add a description…",
+    "descriptionPlaceholder": "Project description",
+    "createdOn": "Created {date}",
+    "modified": "Modified {when}",
+    "openProject": "Open project",
+    "jobs": "Jobs",
+    "shared": "Shared",
+    "recentJobs": "Recent jobs",
+    "jobNumbered": "Job {n} ({id})",
+    "renameFailed": "Rename failed: {error}",
+    "updateFailed": "Update failed: {error}",
+    "sampleLoaded": "Already loaded as a project",
+    "loadHint": "Creates a new project with this demo dataset",
+    "loadingSample": "Loading…",
+    "noMatch": "No project matches “{query}”.",
+    "detailsRegion": "Project details",
+    "welcomeTitle": "Start your first analysis",
+    "welcomeMsg": "Try the app on a published dataset, or create a project for your own data.",
+    "tryDemo": "Try the demo dataset",
+    "createProject": "Create a project",
+    "sampleFailed": "Could not load the demo dataset: {error}",
+    "createFailed": "Could not create the project: {error}",
+    "archivedToast": "“{name}” archived.",
+    "unarchivedToast": "“{name}” restored.",
+    "noProjectSelected": "No project selected",
+    "selectOrCreate": "Select a project from the list or create a new one."
   },
   "results": {
     "summary": "Summary",
@@ -141,7 +209,6 @@
     "jury": "Jury",
     "comparative": "Comparative",
     "copresence": "Co-presence",
-    "explanations": "Feature Explanations (SHAP-like)",
     "jobs": "Jobs",
     "job": "job | jobs",
     "searchJobs": "Search jobs...",
@@ -197,8 +264,6 @@
     "totalFeatures": "Total Features",
     "samples": "Samples",
     "aucEvolution": "AUC Evolution (Train vs Test)",
-    "trainAuc": "Train AUC",
-    "testAuc": "Test AUC",
     "modelComplexity": "Model Complexity (k)",
     "fitVsAuc": "Fit vs AUC",
     "metrics": "Metrics",
@@ -278,9 +343,9 @@
     "identicalConfig": "All selected jobs have identical configuration.",
     "performanceComparison": "Performance Comparison",
     "featureAnalysis": "Feature Analysis",
-    "commonToAll": "Common to all jobs:",
-    "unionAny": "Union (any job):",
-    "overlapRatio": "Overlap ratio:",
+    "commonToAll": "Common to all",
+    "unionAny": "Union (any)",
+    "overlapRatio": "Overlap",
     "features": "features",
     "commonFeatures": "Common features:",
     "convergenceOverlay": "Convergence Overlay",
@@ -341,21 +406,13 @@
     "basketConsensusFeatures": "Consensus features (in all basket models):",
     "basketCoefficientHeatmap": "Feature Coefficient Heatmap",
     "basketModelCount": "Models containing feature",
-    "basketModel": "Model",
-    "commonToAll": "Common to all",
-    "unionAny": "Union (any)",
-    "overlapRatio": "Overlap",
     "copresenceRequires2": "Co-presence analysis requires at least 2 models in the population.",
     "noJobsYet": "No analysis jobs yet. Go to Data & Run to launch an analysis.",
     "selectCompletedJob": "Select a completed job above to view results.",
     "loadingResults": "Loading results...",
     "sensitivity": "Sensitivity",
     "specificity": "Specificity",
-    "threshold": "Threshold",
-    "epoch": "Epoch",
-    "kFeatures": "k (features)",
     "metric": "Metric",
-    "generation": "Generation",
     "enrichment": "Enrichment",
     "enrichmentDesc": "Taxonomic and functional enrichment analysis of microbial signatures using Fisher's exact test with Benjamini-Hochberg FDR correction.",
     "enrichmentSignatureLevel": "Signature level",
@@ -390,7 +447,6 @@
     "insightsBiology": "Biological Context",
     "insightsJury": "Jury Assessment",
     "insightsRecommendations": "Recommendations",
-    "insightsScore": "Health Score",
     "insightsNoData": "No insights available. Run an analysis first.",
     "insightsLoading": "Analyzing experiment...",
     "insightsSuccess": "success",
@@ -398,8 +454,8 @@
     "insightsWarning": "warning",
     "insightsCritical": "critical",
     "ecosystem": "Ecosystem",
-    "ecoPrevalence": "Prevalence \u2265",
-    "ecoCorrelation": "Correlation \u2265",
+    "ecoPrevalence": "Prevalence ≥",
+    "ecoCorrelation": "Correlation ≥",
     "ecoClassFilter": "Samples",
     "ecoAllSamples": "All samples",
     "ecoColorBy": "Color by",
@@ -474,7 +530,83 @@
     "rerun": "Rerun this job",
     "duplicate": "Duplicate & modify parameters",
     "rerunFailed": "Rerun failed",
-    "duplicateFailed": "Failed to load job config"
+    "duplicateFailed": "Failed to load job config",
+    "loadingJobs": "Loading jobs…",
+    "jobsLoadFailed": "Could not load the jobs of this project",
+    "autoRefreshing": "Updating automatically while a job runs",
+    "deleteLiveHint": "Cancel the job before deleting it",
+    "jobCancelled": "Job cancelled",
+    "showLiveConsole": "Show live console",
+    "sectionsLabel": "Result sections",
+    "pheromone": "Pheromone",
+    "exploration": "Exploration",
+    "exporting": "Exporting…",
+    "loadingResultsSlow": "Still loading… large result files can take a while.",
+    "resultsLoadFailed": "Could not load the results of this job",
+    "goToParameters": "Set up and launch an analysis",
+    "partialResults": "Only the summary of this job could be loaded; the detailed charts are unavailable. Reload the page to try again.",
+    "contributionFailed": "Could not load the contribution data: {error}",
+    "shapFailed": "Could not compute the SHAP values: {error}",
+    "ordinationFailed": "Could not compute the ordination: {error}",
+    "logUnavailable": "The console log could not be loaded: {error}",
+    "noDuplicates": "No duplicate jobs found.",
+    "duplicatesFailed": "Could not look for duplicates: {error}",
+    "deleteDuplicatesConfirm": "Delete 1 duplicate job? This cannot be undone. | Delete {n} duplicate jobs? This cannot be undone.",
+    "duplicatesDeleted": "1 duplicate job deleted. | {n} duplicate jobs deleted.",
+    "duplicatesDeletedSome": "{n} of {total} duplicate jobs deleted; the others are still running.",
+    "exportFailed": "Export failed: {error}",
+    "deleteJobConfirm": "Delete job “{name}”? Its results will be lost. This cannot be undone.",
+    "deleteFailed": "Delete failed: {error}",
+    "jobNotFound": "That job no longer exists.",
+    "enrichmentFailed": "Could not compute the enrichment",
+    "status": "Status",
+    "parameter": "Parameter",
+    "explorationTitle": "Search space exploration — k × fit density",
+    "generationLabel": "Generation:",
+    "allGenerations": "All",
+    "animate": "Animate",
+    "annotButyrate": "Butyrate",
+    "annotFamily": "Family",
+    "annotInflammation": "Inflammation",
+    "annotOralisation": "Oralisation",
+    "annotPhylum": "Phylum",
+    "annotTransit": "Transit",
+    "enrichmentPctBackground": "% of background",
+    "enrichmentPctSignature": "% of signature",
+    "explorationDesc": "Each dot is a model explored by the algorithm. Density shows where the search concentrates over the iterations. Use the slider to step through generations, or view them all at once.",
+    "generationsCount": "Generations:",
+    "insLower": "lower",
+    "insMean": "mean",
+    "insRange": "range",
+    "insRejection": "rejection",
+    "insStd": "std",
+    "insThreshold": "threshold",
+    "insUpper": "upper",
+    "nJobs": "{n} jobs",
+    "pheromone1Title": "1. Final pheromone — feature importance",
+    "pheromone1Desc": "Bars to the right are pheromone for a positive coefficient; bars to the left, for a negative one. Longer means the feature was consistently used in good models.",
+    "pheromone2Title": "2. Pheromone evolution timeline",
+    "pheromone2Desc": "How pheromone values evolve over the iterations. Rows are the top features, columns the iterations. Shows when features are discovered and which ones persist.",
+    "pheromone3Title": "3. Colony convergence (entropy)",
+    "pheromone3Desc": "Shannon entropy of the pheromone distribution. High means diverse exploration (early); low means the colony has converged (late).",
+    "pheromone4Title": "4. Feature co-selection network",
+    "pheromone4Desc": "Which features tend to appear together in models. Thicker edges mean more frequent co-occurrence. Clusters reveal feature modules.",
+    "pheromone5Title": "5. Feature discovery — first appearance in top models",
+    "pheromone5Desc": "When each feature first appears in the top-ranked models. Earlier discovery means more consistently important.",
+    "populationSize": "Population size",
+    "topFeaturesLabel": "Top features:",
+    "totalModels": "Total models:",
+    "uniqueSampled": "Unique (sampled):",
+    "fbmMethodLabel": "Confidence interval method",
+    "summaryConvergence": "Over {n} generations, the best model's train {metric} went from {from} to {to}.",
+    "summaryConvergenceTest": "Test {metric} at the last generation: {value}.",
+    "summaryComplexity": "The best model's size went from {from} to {to} features (between {min} and {max} along the way).",
+    "summaryCoefficients": "{n} features: {pos} with a positive coefficient, {neg} with a negative one.",
+    "copresenceTop": "Show top",
+    "copresenceTopOf": "of {n} features",
+    "copresenceTopHint": "Number of most prevalent features drawn in the charts (0 = all). Statistics and the pairs table always use all features.",
+    "foldAll": "Fold all",
+    "unfoldAll": "Unfold all"
   },
   "meta": {
     "title": "Multi-Cohort Meta-Analysis",
@@ -502,101 +634,24 @@
     "delete": "Delete",
     "close": "Close",
     "loading": "Loading...",
-    "error": "Error",
-    "success": "Success",
     "confirm": "Confirm",
-    "search": "Search",
-    "export": "Export",
-    "download": "Download",
-    "copy": "Copy",
-    "copied": "Copied!",
     "noData": "No data available",
     "running": "running",
     "pending": "pending",
     "completed": "completed",
     "failed": "failed",
-    "yes": "Yes",
-    "no": "No",
     "prev": "Prev",
     "next": "Next",
-    "page": "Page",
-    "of": "of",
-    "back": "Back",
-    "edit": "Edit",
-    "create": "Create",
-    "upload": "Upload",
     "remove": "Remove",
-    "revoke": "Revoke",
-    "test": "Test",
-    "saving": "Saving...",
     "creating": "Creating...",
-    "none": "None"
-  },
-  "settings": {
-    "datasets": "Datasets",
-    "pickFromLibrary": "Pick from library...",
-    "upload": "Upload",
-    "general": "General",
-    "algorithm": "Algorithm",
-    "geneticAlgorithm": "Genetic Algorithm",
-    "beamSearch": "Beam Search",
-    "mcmc": "MCMC",
-    "fitFunction": "Fit function",
-    "auc": "AUC",
-    "mcc": "MCC",
-    "f1Score": "F1 Score",
-    "sensitivity": "Sensitivity",
-    "specificity": "Specificity",
-    "language": "Language",
-    "languagePlaceholder": "bin,ter,ratio",
-    "dataType": "Data type",
-    "dataTypePlaceholder": "raw,prev",
-    "seed": "Seed",
-    "threads": "Threads",
-    "crossValidation": "Cross-Validation",
-    "outerFolds": "Outer folds",
-    "innerFolds": "Inner folds",
-    "overfitPenalty": "Overfit penalty",
-    "dataOptions": "Data Options",
-    "featuresInRows": "Features in rows",
-    "holdoutRatio": "Holdout ratio",
-    "featureSelection": "Feature selection",
-    "wilcoxon": "Wilcoxon",
-    "tTest": "t-test",
-    "bayesianFisher": "Bayesian Fisher",
-    "none": "None",
-    "minPrevalence": "Min prevalence %",
-    "maxPValue": "Max adj. p-value",
-    "minFeatureValue": "Min feature value",
-    "populationSize": "Population size",
-    "maxEpochs": "Max epochs",
-    "minEpochs": "Min epochs",
-    "maxAgeBestModel": "Max age best model",
-    "kMin": "k min",
-    "kMax": "k max",
-    "selectionMutation": "Selection & Mutation",
-    "elitePercent": "Elite %",
-    "nichePercent": "Niche %",
-    "randomPercent": "Random %",
-    "mutatedChildrenPercent": "Mutated children %",
-    "bestModelsCriterion": "Best models criterion",
-    "maxModels": "Max models",
-    "iterations": "Iterations",
-    "burnIn": "Burn-in",
-    "lambda": "Lambda",
-    "nmin": "nmin",
-    "advanced": "Advanced",
-    "kPenalty": "k penalty",
-    "gpuAcceleration": "GPU acceleration",
-    "featureImportance": "Feature importance",
-    "computeImportance": "Compute importance",
-    "voting": "Voting",
-    "enableJuryVoting": "Enable jury voting",
-    "launching": "Launching...",
-    "launchAnalysis": "Launch Analysis",
-    "uploadFirst": "Upload X and y training datasets first",
-    "inverseClasses": "Inverse classes",
-    "classLabels": "Class labels"
+    "notifications": "Notifications",
+    "dismiss": "Dismiss",
+    "confirmTitle": "Please confirm",
+    "retry": "Retry",
+    "loadFailed": "Could not load this content",
+    "stillWorking": "Still working… large datasets can take a while.",
+    "undo": "Undo",
+    "cancelled": "cancelled"
   },
   "data": {
     "features": "Features",
@@ -605,8 +660,6 @@
     "selected": "Selected",
     "datasets": "Datasets",
     "pickFromLibrary": "Pick from library...",
-    "upload": "Upload",
-    "remove": "Remove",
     "dataOptions": "Data Options",
     "featuresInRows": "Features in rows",
     "inverseClasses": "Inverse classes",
@@ -650,60 +703,76 @@
     "metadata": "Metadata (optional)",
     "selectYVariable": "Select y variable",
     "regressionMode": "Regression mode",
-    "metadataUpload": "Upload metadata"
-  },
-  "dataExplore": {
-    "summary": "Summary",
-    "features": "Features",
-    "visualizations": "Visualizations",
-    "totalFeatures": "Total Features",
-    "samples": "Samples",
-    "classes": "Classes",
-    "selectedFeatures": "Selected Features",
-    "classDistribution": "Class Distribution",
-    "noTrainingData": "No training data found. Upload datasets in the Data tab.",
-    "method": "Method",
-    "wilcoxon": "Wilcoxon",
-    "studentTTest": "Student t-test",
-    "bayesianFisher": "Bayesian Fisher",
-    "minPrevalence": "Min prevalence (%)",
-    "maxPValue": "Max adj. p-value",
-    "minFeatureValue": "Min feature value",
-    "featuresSelected": "features selected",
-    "name": "Name",
-    "class": "Class",
-    "significance": "Significance",
-    "prev0": "Prev(0) %",
-    "prev1": "Prev(1) %",
-    "mean0": "Mean(0)",
-    "mean1": "Mean(1)",
-    "prev": "Prev",
-    "page": "Page",
-    "next": "Next",
-    "featureAbundance": "Feature Abundance",
-    "clear": "Clear",
-    "loadingStats": "Loading feature statistics...",
-    "prevalenceDistribution": "Prevalence Distribution",
-    "stdDevDistribution": "Standard Deviation Distribution",
-    "volcanoPlot": "Volcano Plot",
-    "loadingExplore": "Loading data exploration...",
-    "pcoa": "PCoA",
-    "pcoaTitle": "Principal Coordinates Analysis (PCoA)",
-    "pcoaMetric": "Distance metric",
-    "transform": "Transform",
-    "pcoaDimensions": "Dimensions",
-    "ordinationMethod": "Method",
-    "perplexity": "Perplexity",
-    "nNeighbors": "Neighbors",
-    "minDist": "Min distance",
-    "euclidean": "Euclidean",
-    "cosine": "Cosine",
-    "loadingPcoa": "Computing ordination...",
-    "aberrantCorrelations": "Aberrant Correlation Diagnostic",
-    "aberrantDesc": "Scatter plot of per-class correlations to detect prevalence filtering artifacts",
-    "loadAberrant": "Compute",
-    "class0Corr": "Class 0 correlation (\u03c1)",
-    "class1Corr": "Class 1 correlation (\u03c1)"
+    "metadataUpload": "Upload metadata",
+    "slot": {
+      "xtrain": "X train",
+      "ytrain": "y train",
+      "xtest": "X test",
+      "ytest": "y test",
+      "clinical": "Clinical variables"
+    },
+    "slotHint": {
+      "xtrain": "Abundance table: one row per feature, one column per sample.",
+      "ytrain": "One row per sample: sample name, then its class (0/1) or value.",
+      "xtest": "Same features as X train, for an independent test.",
+      "ytest": "Classes or values of the test samples.",
+      "clinical": "One row per sample, numeric columns (age, BMI…).",
+      "metadata": "One row per sample; a numeric column can become the y variable."
+    },
+    "slotProvided": "provided",
+    "slotRequired": "required",
+    "slotOptional": "optional",
+    "removeFromProject": "Remove from this project (the file stays in your library)",
+    "removeNamed": "Remove {name} from this project",
+    "removedFromProject": "“{name}” removed from this project.",
+    "pickFromLibraryFor": "Pick a dataset from your library for {slot}",
+    "uploadFor": "Upload {slot}",
+    "uploadingPct": "Uploading… {pct}%",
+    "uploadDone": "Uploaded.",
+    "uploadFailed": "Upload failed: {error}",
+    "uploadNotAssigned": "“{name}” was uploaded but the server did not attach it to this slot. Open the Datasets page to set its role.",
+    "libraryNoRole": "This dataset has no file with the role “{slot}”. Set file roles on the Datasets page.",
+    "assignFailed": "Could not add the dataset: {error}",
+    "unassignFailed": "Could not remove the dataset: {error}",
+    "yVariableFailed": "Could not set the y variable: {error}",
+    "classNamesFailed": "Could not save the class names: {error}",
+    "fbmFailed": "Could not load that job's models: {error}",
+    "formatHelp": {
+      "title": "Expected file formats",
+      "x": "tab- or comma-separated table. First column: feature names; first row: sample names; cells: abundances. If your samples are in rows, untick “Features in rows”.",
+      "y": "two columns: sample name and class. Classes are coded 0 and 1 (1 is the class to predict); a numeric value switches to regression.",
+      "test": "Test files are optional: without them, a share of the training samples is held out (see “Holdout ratio”).",
+      "sep": "Sample names must match between X and y. Accepted: .tsv, .csv, .txt.",
+      "example": "Example"
+    },
+    "featuresInRowsHelp": "Ticked: each row of X is a feature and each column a sample. Untick if each row is a sample.",
+    "inverseClassesHelp": "Swap which class is predicted (the “target”). By default the target is class 1.",
+    "holdoutRatioHelp": "Share of training samples set aside to test the models when no test files are given (0.2 = 20%).",
+    "classNameFor": "Display name for class {label}",
+    "classN": "Class {label}",
+    "updating": "Updating…",
+    "chartsRegion": "Charts",
+    "loadFailed": "Could not load the data of this project",
+    "chartFailed": "Could not load this chart",
+    "noDataTitle": "No data yet",
+    "noDataMsg": "Add the X train and y train files on the left to explore the data and enable the analysis.",
+    "noChartYet": "Nothing to plot yet: no feature passed the filters.",
+    "logScale": "Log scale",
+    "transformRaw": "Raw",
+    "transformLog": "Log",
+    "transformZscore": "Z-score",
+    "pcoaSlow": "Still computing… ordination on many samples can take a minute or more.",
+    "jobNamed": "Job {id}",
+    "chartSummary": "{chart} chart of the top {n} features; {selected} of {total} features pass the filters.",
+    "axis": {
+      "prevalencePct": "Prevalence (%)",
+      "meanDifference": "Mean difference ({a} − {b})",
+      "negLogSignificance": "−log10(significance)",
+      "class": "Class",
+      "feature": "Feature"
+    },
+    "ci95For": "95% CI – {name}",
+    "classHeatmapTitle": "Class mean heatmap ({transform}, row-centered, p95 scale)"
   },
   "parameters": {
     "loadTemplate": "Load Template:",
@@ -716,13 +785,6 @@
     "editInDataTab": "Edit in Data tab",
     "batchMode": "Batch Mode",
     "batchDesc": "Sweep parameters across multiple runs",
-    "seeds": "Seeds",
-    "algorithms": "Algorithms",
-    "languages": "Languages",
-    "dataTypes": "Data types",
-    "populationSizes": "Population sizes",
-    "maxEpochs": "Max epochs",
-    "kMaxValues": "k_max values",
     "values": "values",
     "willLaunch": "Will launch",
     "jobsCount": "job(s)",
@@ -735,7 +797,54 @@
     "resetDefaults": "Reset defaults",
     "uploadFirst": "Upload X and y training datasets in the Data tab first",
     "regressionMode": "Regression mode",
-    "votingDisabledRegression": "Voting is not applicable for regression"
+    "votingDisabledRegression": "Voting is not applicable for regression",
+    "helpFor": "Help: {name}",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "automatic": "automatic",
+    "paramCount": "{n} settings",
+    "advanced": "Advanced ({n})",
+    "presets": {
+      "title": "How thorough should the search be?",
+      "quick": {
+        "name": "Quick",
+        "desc": "A first look in a fraction of the time. Scores are indicative."
+      },
+      "standard": {
+        "name": "Standard",
+        "desc": "The recommended defaults."
+      },
+      "thorough": {
+        "name": "Thorough",
+        "desc": "Larger search, cross-validation, feature importance and voting. Slower; for results you will report."
+      },
+      "hintActive": "A preset only changes how hard the search works. Algorithm, fit function, languages and seed stay as you set them.",
+      "hintCustom": "Custom settings. Pick a preset to start from a known configuration.",
+      "applied": "“{name}” preset applied."
+    },
+    "templateLoaded": "Loaded “{name}”",
+    "dataFilteringNote": "These filters are applied before the search. They are set in the Data tab, where you can see their effect.",
+    "sweep": {
+      "seed": "Seeds",
+      "algo": "Algorithms",
+      "language": "Languages",
+      "dataType": "Data types",
+      "populationSize": "Population sizes",
+      "maxEpochs": "Max epochs",
+      "kMax": "k_max values",
+      "helpComma": "Comma-separated values",
+      "helpSemicolon": "Semicolon-separated combinations"
+    },
+    "batchLaunched": "Batch {id} launched: {n} jobs queued.",
+    "viewInResults": "View in the Results tab",
+    "fixErrors": "Fix 1 value before launching | Fix {n} values before launching",
+    "autoTitle": "Generate a name from the settings",
+    "goToData": "Go to the Data tab",
+    "launchSummary": "{algo}, optimising {fit}",
+    "resetConfirm": "Reset every setting on this page to its default?",
+    "resetDone": "Settings reset to defaults.",
+    "launchFailed": "Could not launch the analysis: {error}",
+    "batchFailed": "Could not launch the batch: {error}"
   },
   "projectDashboard": {
     "datasets": "datasets",
@@ -750,8 +859,15 @@
     "gen": "Gen",
     "loadingProject": "Loading project...",
     "jobCompleted": "Job completed",
-    "jobCompletedAuc": "Job completed — AUC {auc}",
-    "jobFailed": "Job failed — check console for details"
+    "jobFailed": "Job failed — check console for details",
+    "sectionsNav": "Project sections",
+    "expandConsole": "Expand the job console",
+    "loadFailed": "Could not open this project",
+    "backToProjects": "Back to projects",
+    "viewResults": "View results",
+    "viewDetails": "View details",
+    "jobCancelled": "Job cancelled",
+    "projectFallback": "Project"
   },
   "profile": {
     "title": "Profile",
@@ -768,7 +884,7 @@
     "notifDesc": "Get notified when jobs complete or fail",
     "onboardingTour": "Onboarding Tour",
     "tourDesc": "Show the welcome tour again on next visit",
-    "resetTour": "Reset Tour",
+    "resetTour": "Show project checklists again",
     "debugMode": "Debug Mode",
     "debugModeDesc": "Show timing flamegraph and advanced diagnostics in job results",
     "enabled": "Enabled",
@@ -797,15 +913,27 @@
     "newPassword": "New Password",
     "changePasswordBtn": "Change Password",
     "notSupported": "Not supported",
-    "disabled": "Disabled",
-    "enabled": "Enabled",
     "blocked": "Blocked",
     "enable": "Enable",
     "notifReEnabled": "Notifications re-enabled",
     "notifDisabled": "Notifications disabled",
     "notifEnabled": "Notifications enabled",
     "notifDenied": "Permission denied by browser",
-    "tourReset": "Tour will show on next page load"
+    "tourReset": "The next-step checklists will show again on unfinished projects.",
+    "err": {
+      "createKey": "Could not create the key: {error}",
+      "revokeKey": "Could not revoke the key: {error}",
+      "createWebhook": "Could not create the webhook: {error}",
+      "deleteWebhook": "Could not delete the webhook: {error}"
+    },
+    "revokeKeyConfirm": "Revoke API key “{name}”? This cannot be undone.",
+    "deleteWebhookConfirm": "Delete webhook “{name}”?",
+    "storage": "Storage",
+    "storageUsedOf": "{used} of {quota} used",
+    "storageUsedNoQuota": "{used} used (no limit)",
+    "storageAlmostFull": "Almost full: delete datasets or jobs you no longer need.",
+    "nameUpdated": "Name updated",
+    "passwordChanged": "Password changed"
   },
   "admin": {
     "userAdmin": "User Administration",
@@ -869,10 +997,8 @@
     "saveFailed": "Failed to save defaults: {error}",
     "scitqTitle": "Distributed Task Queue (scitq)",
     "scitqDesc": "Configure scitq to dispatch analysis jobs to a distributed worker cluster instead of running locally.",
-    "scitqStatus": "Distributed Task Queue (scitq)",
     "scitqEnabled": "Enabled",
     "scitqDisabled": "Not configured",
-    "scitqServer": "Server: {server}",
     "scitqNotInstalled": "scitq package not installed",
     "scitqServerLabel": "Server URL",
     "scitqTokenLabel": "Auth Token",
@@ -882,7 +1008,51 @@
     "scitqTesting": "Testing...",
     "scitqConnected": "Connected successfully",
     "scitqWorkers": "worker(s) available",
-    "scitqConnectionFailed": "Connection failed"
+    "scitqConnectionFailed": "Connection failed",
+    "err": {
+      "updateUser": "Could not update the user: {error}",
+      "deleteUser": "Could not delete the user: {error}",
+      "saveScitq": "Could not save the scitq configuration: {error}",
+      "createTemplate": "Could not create the template: {error}",
+      "deleteTemplate": "Could not delete the template: {error}"
+    },
+    "deleteBackupConfirm": "Delete backup “{name}”? This cannot be undone.",
+    "deleteTemplateConfirm": "Delete template “{name}”?",
+    "restoreConfirmReplace": "Restore from “{name}”?\n\nThis will REPLACE all existing data: every project, dataset, job and account currently on this server is erased first.",
+    "restoreConfirmMerge": "Restore from “{name}”?\n\nThis will MERGE the backup with the existing data; items that already exist are skipped.",
+    "restoreAction": "Restore",
+    "scitqTokenKeepPlaceholder": "Leave blank to keep the stored token",
+    "scitqTokenStored": "A token is stored. Leave the field blank to keep it.",
+    "scitqTokenNone": "No token is stored.",
+    "scitqTokenRemove": "Remove token",
+    "scitqTokenRemoveConfirm": "Remove the stored scitq token?",
+    "backupCreated": "Backup created: {name} ({size})",
+    "backupDeleted": "Backup deleted",
+    "backupDownloadFailed": "Download failed",
+    "restoreDone": "Restored successfully ({mode} mode). {counts}",
+    "restoring": "Restoring… This may take a while.",
+    "defaultField": {
+      "data_holdout_ratio": "Holdout ratio",
+      "data_feature_minimal_prevalence_pct": "Minimum prevalence (%)"
+    },
+    "filterByAction": "Filter by action",
+    "restoreModeLabel": "Restore mode",
+    "colVerified": "Email verified",
+    "colStorage": "Storage",
+    "verifiedToggle": "Email verified for {email}",
+    "createUserTitle": "Create an account",
+    "newUserPassword": "Initial password",
+    "newUserAdmin": "Administrator",
+    "createUser": "Create user",
+    "userCreated": "Account created for {email}",
+    "retentionTitle": "Data retention",
+    "retentionDesc": "Remove what the retention policy marks as expired. Preview first: nothing is deleted until you run it.",
+    "retentionPreview": "Preview clean-up",
+    "retentionRun": "Run clean-up",
+    "retentionPreviewResult": "Would be removed:",
+    "retentionDone": "Removed:",
+    "retentionNothing": "Nothing to remove.",
+    "retentionConfirm": "Delete the expired data shown in the preview? This cannot be undone."
   },
   "datasets": {
     "title": "Dataset Library",
@@ -941,7 +1111,9 @@
     "scanComplete": "Scanned metadata for \"{name}\"",
     "scanFailed": "Scan failed",
     "classNames": "Classes",
-    "classPlaceholder": "Name..."
+    "classPlaceholder": "Name...",
+    "filterByTag": "Filter by tag",
+    "nameLabel": "Dataset name"
   },
   "publicShare": {
     "appTitle": "PredomicsApp",
@@ -967,7 +1139,7 @@
     "resetPassword": "Reset Password",
     "resetDesc": "Enter your email to receive a password reset link.",
     "email": "Email",
-    "emailPlaceholder": "email@example.com",
+    "emailPlaceholder": "email{'@'}example.com",
     "sending": "Sending...",
     "sendResetLink": "Send Reset Link",
     "emailSentMsg": "If an account exists for this email, a reset link has been sent.",
@@ -983,7 +1155,10 @@
     "resetBtn": "Reset Password",
     "resetSuccess": "Password reset successfully!",
     "goToLogin": "Go to Login",
-    "passwordsMismatch": "Passwords do not match"
+    "passwordsMismatch": "Passwords do not match",
+    "contactAdminMsg": "No email after a few minutes? Email may not be set up on this server — ask your administrator to reset your password.",
+    "newPasswordPlaceholder": "Enter new password",
+    "resetFailed": "Reset failed. The link may have expired."
   },
   "modals": {
     "shareProject": "Share Project",
@@ -1031,7 +1206,15 @@
     "colSample": "Sample",
     "colScore": "Score",
     "colPredicted": "Predicted",
-    "missingFeatures": "{n} missing features (not in uploaded data)"
+    "missingFeatures": "{n} missing features (not in uploaded data)",
+    "createLinkFailed": "Could not create the link: {error}",
+    "revokeFailed": "Could not revoke: {error}",
+    "revokeAccessConfirm": "Revoke access for {email}?",
+    "previewRows": "{n} rows",
+    "previewCols": "{n} columns",
+    "previewLoading": "Loading preview…",
+    "roleFor": "Role of {email}",
+    "revokedFor": "Access revoked for {email}"
   },
   "comments": {
     "notes": "Notes",
@@ -1044,42 +1227,27 @@
     "deleteBtn": "Delete",
     "placeholder": "Add a note...",
     "add": "Add",
-    "justNow": "just now",
-    "minutesAgo": "{n}m ago",
-    "hoursAgo": "{n}h ago",
-    "daysAgo": "{n}d ago",
-    "deleteConfirm": "Delete this note?"
+    "deleteConfirm": "Delete this note?",
+    "addFailed": "Could not add the note: {error}",
+    "updateFailed": "Could not update the note: {error}",
+    "deleteFailed": "Could not delete the note: {error}",
+    "editLabel": "Edit note"
   },
   "components": {
-    "tourWelcomeTitle": "Welcome to PredomicsApp",
-    "tourWelcomeDesc": "This quick tour will walk you through the main workflow: from uploading your data to viewing analysis results. It only takes a moment!",
-    "tourStep1Title": "Step 1: Create a Project",
-    "tourStep1Desc": "Start by clicking the \"+\" button in the Projects page to create a new project. Projects organize your datasets, parameters, and analysis results together.",
-    "tourStep2Title": "Step 2: Upload Your Data",
-    "tourStep2Desc": "In the Data tab, upload your training and test files (Xtrain, Ytrain, Xtest, Ytest). Supported formats: TSV, CSV. You can also manage datasets in the Dataset Library.",
-    "tourStep3Title": "Step 3: Configure Parameters",
-    "tourStep3Desc": "Switch to the \"Parameters & Run\" tab to configure the analysis. Adjust algorithm settings (GA, BEAM, MCMC), cross-validation, and feature importance options — or use the defaults.",
-    "tourStep4Title": "Step 4: Launch Analysis",
-    "tourStep4Desc": "Click \"Launch Job\" to start the analysis. A live console shows real-time progress. You'll be notified when it completes — feel free to navigate away.",
-    "tourStep5Title": "Step 5: Explore Results",
-    "tourStep5Desc": "View detailed results in the Results tab: model summaries, feature importance charts, performance metrics, and prediction plots. Export as CSV, HTML report, or a reproducible notebook.",
-    "back": "Back",
-    "next": "Next",
-    "getStarted": "Get Started",
-    "dontShowAgain": "Don't show this again",
     "dataset": "dataset | datasets",
     "job": "job | jobs",
     "shared": "shared",
-    "justNow": "just now",
-    "minutesAgo": "{n}m ago",
-    "hoursAgo": "{n}h ago",
-    "daysAgo": "{n}d ago"
+    "filePreview": "File preview",
+    "showingFirstRows": "Showing the first {shown} of {total} rows",
+    "statMax": "max",
+    "statMean": "mean",
+    "statMin": "min"
   },
   "credits": {
     "title": "Credits & Citations",
     "subtitle": "The people, publications, and funding behind PredomicsApp and the Predomics method.",
     "citationTitle": "Citation",
-    "citationText": "Prifti, E., Chevaleyre, Y., Hanczar, B., Belda, E., Danchin, A., Cl\u00e9ment, K., & Zucker, J.-D. (2020). Interpretable and accurate prediction models for metagenomics data. GigaScience, 9(3), giaa010.",
+    "citationText": "Prifti, E., Chevaleyre, Y., Hanczar, B., Belda, E., Danchin, A., Clément, K., & Zucker, J.-D. (2020). Interpretable and accurate prediction models for metagenomics data. GigaScience, 9(3), giaa010.",
     "citationDoi": "DOI: 10.1093/gigascience/giaa010",
     "citationPublisher": "Published by Oxford University Press. Open Access.",
     "downloadPdf": "Download PDF",
@@ -1090,7 +1258,7 @@
     "anrProject": "ANR DeepIntegrOmics",
     "anrFullTitle": "End-to-End Deep Learning for Precision Medicine through Metagenomics and Cost-Sensitive Data Integration",
     "anrReference": "ANR-21-CE45-0030",
-    "anrAmount": "\u20ac621K",
+    "anrAmount": "€621K",
     "anrDuration": "48 months",
     "anrPi": "PI: Jean-Daniel Zucker (UMMISCO)",
     "anrPartners": "Partners",
@@ -1098,13 +1266,12 @@
     "partnerTitle": "Industry Partner",
     "gmtName": "GMT Science",
     "gmtLocation": "Paris, France",
-    "gmtDescription": "GMT Science specializes in providing robust and reproducible microbiome analysis to medical laboratories. They developed the CE-marked BiomScope\u00ae pipeline for clinical microbiome diagnostics and implemented the high-performance gpredomics Rust engine powering PredomicsApp.",
+    "gmtDescription": "GMT Science specializes in providing robust and reproducible microbiome analysis to medical laboratories. They developed the CE-marked BiomScope® pipeline for clinical microbiome diagnostics and implemented the high-performance gpredomics Rust engine powering PredomicsApp.",
     "gmtWebsite": "gmt.bio",
     "coreTeamTitle": "Core Team",
     "gpredomicsTeamTitle": "Gpredomics (Rust) Development",
     "contributorsTitle": "Contributors",
     "correspondingAuthor": "Corresponding Author",
-    "leadDeveloper": "Lead Developer",
     "roleCreator": "Creator & Lead Developer",
     "roleCreatorDesc": "Creator and maintainer of the Predomics approach since 2015. Proposed the genetic algorithm approaches (TerGa1, TerGa2) and the Family of Best Models concept.",
     "roleCoCreator": "Co-Creator",
@@ -1163,6 +1330,844 @@
     "commonFeatures": "Common Features",
     "noCommonFeatures": "No features are shared across all selected signatures.",
     "featurePresence": "Feature Presence Across Signatures",
-    "signaturesCount": "Signatures (out of {n})"
+    "signaturesCount": "Signatures (out of {n})",
+    "filterDisease": "Filter by disease",
+    "filterMethod": "Filter by method"
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "tooManyRequests": "Too many requests — please slow down.",
+    "timeout": "The server took too long to answer. Please try again.",
+    "network": "Cannot reach the server. Check your connection and try again.",
+    "tooLarge": "The file is too large.",
+    "forbidden": "You are not allowed to do this.",
+    "notFound": "Not found.",
+    "server": "The server ran into a problem. Please try again.",
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "tooManyRequestsRetry": "Too many attempts. Try again in {s} seconds.",
+    "requestRef": "(reference: {id})"
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesAgo": "{n} min ago",
+    "hoursAgo": "{n} h ago",
+    "daysAgo": "{n} d ago"
+  },
+  "console": {
+    "title": "Console output",
+    "progress": "Job progress",
+    "cancelJob": "Cancel job",
+    "cancelling": "Cancelling…",
+    "cancelConfirm": "Stop this job? Its partial results will be lost.",
+    "keepRunning": "Keep running",
+    "cancelRequested": "Cancellation requested.",
+    "cancelFailed": "Could not cancel the job: {error}",
+    "hideChart": "Hide live chart",
+    "showChart": "Show live chart",
+    "minimize": "Minimize console",
+    "chartLabel": "Live progress: generation {gen}, {k} features in the best model",
+    "legendGeneration": "Generation",
+    "legendK": "k (features)",
+    "etaLeft": "~{d} left",
+    "waiting": "Waiting for output…",
+    "lostConnection": "[error] Lost contact with this job ({error}). Reload the page; if the job is gone, launch the analysis again.",
+    "legendMax": "max = {n}"
+  },
+  "paramErrors": {
+    "required": "A value is required.",
+    "number": "Enter a number.",
+    "min": "Must be at least {min}.",
+    "max": "Must be at most {max}.",
+    "integer": "Must be a whole number.",
+    "pickOne": "Select at least one.",
+    "option": "Not one of the available choices.",
+    "atLeast": "Must be at least “{other}” ({value}).",
+    "greaterThan": "Must be greater than “{other}” ({value})."
+  },
+  "paramCategories": {
+    "general": "General",
+    "ga": "Genetic Algorithm",
+    "beam": "Beam Search",
+    "mcmc": "MCMC",
+    "sa": "Simulated Annealing",
+    "lasso": "LASSO/Elastic Net",
+    "ils": "Iterated Local Search",
+    "aco": "Ant Colony Optimization",
+    "rf": "Random Forest",
+    "svm": "SVM",
+    "logistic": "Logistic Regression",
+    "xgboost": "XGBoost",
+    "lightgbm": "LightGBM",
+    "extra_trees": "Extra Trees",
+    "adaboost": "AdaBoost",
+    "knn": "KNN",
+    "cv": "Cross-Validation",
+    "clinical": "Clinical Integration",
+    "importance": "Feature Importance",
+    "voting": "Voting Ensemble",
+    "gpu": "GPU Settings"
+  },
+  "params": {
+    "general": {
+      "algo": {
+        "label": "Algorithm",
+        "desc": "Search or learning method. The first seven (GA, Beam, MCMC, ACO, SA, LASSO, ILS) are gpredomics methods that produce small interpretable models; the others (Random Forest, SVM, Logistic Regression, XGBoost, LightGBM, Extra Trees, AdaBoost, KNN) are standard machine-learning baselines for comparison.",
+        "opt": {
+          "ga": "Genetic Algorithm",
+          "beam": "Beam Search",
+          "mcmc": "MCMC",
+          "aco": "Ant Colony Optimization",
+          "sa": "Simulated Annealing",
+          "lasso": "LASSO/Elastic Net",
+          "ils": "Iterated Local Search",
+          "rf": "Random Forest",
+          "svm": "SVM",
+          "logistic": "Logistic Regression",
+          "xgboost": "XGBoost",
+          "lightgbm": "LightGBM",
+          "extra_trees": "Extra Trees",
+          "adaboost": "AdaBoost",
+          "knn": "KNN"
+        }
+      },
+      "fit": {
+        "label": "Fit function",
+        "desc": "Objective metric for model evaluation. AUC is recommended for balanced classification.",
+        "opt": {
+          "auc": "AUC",
+          "mcc": "MCC",
+          "f1_score": "F1 Score",
+          "sensitivity": "Sensitivity",
+          "specificity": "Specificity",
+          "g_mean": "Geometric Mean",
+          "npv": "NPV",
+          "ppv": "PPV",
+          "spearman": "Spearman correlation",
+          "pearson": "Pearson correlation",
+          "rmse": "RMSE",
+          "mutual_information": "Mutual Information"
+        }
+      },
+      "language": {
+        "label": "Language",
+        "desc": "Model languages to explore. Initial population is split among selected languages.",
+        "opt": {
+          "bin": "Binary",
+          "ter": "Ternary",
+          "ratio": "Ratio",
+          "pow2": "Power of 2"
+        }
+      },
+      "data_type": {
+        "label": "Data type",
+        "desc": "Data transformations to apply. Multiple selections create separate model populations. Raw uses feature values directly. Prevalence binarizes features at threshold epsilon (presence/absence). Log applies natural log after epsilon flooring. Z-score standardizes each feature to mean=0, std=1 using training statistics (propagated to test to avoid data leakage).",
+        "opt": {
+          "raw": "Raw",
+          "prev": "Prevalence",
+          "log": "Log",
+          "zscore": "Z-score (standardized)"
+        }
+      },
+      "seed": {
+        "label": "Random seed",
+        "desc": "Seed for reproducibility. Used in parent selection, crossover and mutation."
+      },
+      "thread_number": {
+        "label": "Threads",
+        "desc": "Number of CPU threads for feature selection and fit computation."
+      },
+      "cv": {
+        "label": "Cross-validation",
+        "desc": "Enable k-fold cross-validation. The dataset is split into outer folds; the algorithm trains on k-1 folds and validates on the held-out fold. This is a primary defense against overfitting and provides honest performance estimates. Combine with overfit_penalty for inner-fold regularization."
+      },
+      "gpu": {
+        "label": "GPU acceleration",
+        "desc": "Use GPU for fitness computation (GA and Beam only). Uses f32 precision."
+      },
+      "epsilon": {
+        "label": "Epsilon",
+        "desc": "Threshold for prevalence data type, or replacement value below threshold for log data type."
+      },
+      "k_penalty": {
+        "label": "k penalty",
+        "desc": "Penalty multiplied by k (number of variables). Encourages parsimonious models."
+      },
+      "fr_penalty": {
+        "label": "FR penalty",
+        "desc": "Used when fit is specificity or sensitivity. Subtracts (1 - symmetrical_metric) * fr_penalty."
+      },
+      "bias_penalty": {
+        "label": "Bias penalty",
+        "desc": "Penalizes model fit when specificity or sensitivity falls below 0.5."
+      },
+      "threshold_ci_n_bootstrap": {
+        "label": "Bootstrap samples (CI)",
+        "desc": "Number of bootstrap resamples for threshold confidence interval estimation. Since microbiome features are compositional (relative abundances), thresholds can be fragile and may not generalize across cohorts. Bootstrap CI quantifies this uncertainty by computing lower/upper bounds; samples falling in the uncertainty zone are rejected. Recommended: 200-1000. 0 = disabled."
+      },
+      "threshold_ci_penalty": {
+        "label": "CI penalty",
+        "desc": "During evolution, models with wide threshold CI (many rejected samples) are penalized: fitness -= rejection_rate × penalty. This steers evolution toward models with stable, generalizable thresholds. Higher values (e.g. 0.8) strongly favor narrow CI; lower values (e.g. 0.2) allow more tolerance. Default 0.5 provides a balanced trade-off."
+      },
+      "threshold_ci_alpha": {
+        "label": "CI alpha",
+        "desc": "Significance level for the bootstrap threshold confidence interval. Alpha=0.05 gives a 95% CI; alpha=0.10 gives a 90% CI (narrower, fewer rejections but less conservative). Smaller alpha = wider CI = more samples rejected in the uncertainty zone."
+      },
+      "threshold_ci_frac_bootstrap": {
+        "label": "Bootstrap fraction",
+        "desc": "Fraction of samples drawn per bootstrap replicate. 1.0 = classical Efron bootstrap (n samples drawn with replacement). Values < 1.0 use the Politis & Romano subsampling method (drawn without replacement), which can provide better coverage for dependent or heavy-tailed data. Try 0.632 for a common alternative."
+      },
+      "user_feature_penalties_weight": {
+        "label": "User penalty weight",
+        "desc": "Weight applied to user-defined feature penalties from feature_annotations file."
+      },
+      "n_model_to_display": {
+        "label": "Models to display",
+        "desc": "Number of models shown in the last generation. 0 = show all models."
+      },
+      "display_colorful": {
+        "label": "Colorful output",
+        "desc": "Enable ANSI color codes in the console output for easier reading."
+      }
+    },
+    "ga": {
+      "population_size": {
+        "label": "Population size",
+        "desc": "Target number of models per generation. Actual count may be lower due to clone removal."
+      },
+      "max_epochs": {
+        "label": "Max epochs",
+        "desc": "Maximum number of generations before the algorithm stops."
+      },
+      "min_epochs": {
+        "label": "Min epochs",
+        "desc": "Minimum number of generations before early stopping is allowed."
+      },
+      "max_age_best_model": {
+        "label": "Max age best model",
+        "desc": "Early stop (after min_epochs) if the best model reaches this age without improvement."
+      },
+      "k_min": {
+        "label": "k min",
+        "desc": "Minimum number of variables (features) in initial population models."
+      },
+      "k_max": {
+        "label": "k max",
+        "desc": "Maximum number of variables in initial population. 0 = no maximum."
+      },
+      "select_elite_pct": {
+        "label": "Elite %",
+        "desc": "Percentage of best models from previous generation retained. Lower = more elitist."
+      },
+      "select_niche_pct": {
+        "label": "Niche %",
+        "desc": "Percentage of best models retained per language/data type to maintain diversity."
+      },
+      "select_random_pct": {
+        "label": "Random %",
+        "desc": "Percentage of opportunistic models retained from previous generation."
+      },
+      "mutated_children_pct": {
+        "label": "Mutated children %",
+        "desc": "Percentage of children subjected to mutation."
+      },
+      "mutated_features_pct": {
+        "label": "Mutated features %",
+        "desc": "Percentage of mutation per gene (potential variable). Most mutations are nonsensical."
+      },
+      "mutation_non_null_chance_pct": {
+        "label": "Non-null mutation %",
+        "desc": "Likelihood that a mutation adds a new variable rather than just removing one."
+      },
+      "forced_diversity_pct": {
+        "label": "Forced diversity %",
+        "desc": "If > 0%, population is filtered every N epochs to enforce diversity."
+      },
+      "forced_diversity_epochs": {
+        "label": "Diversity epoch gap",
+        "desc": "Epochs between two diversity filters (when forced_diversity_pct > 0)."
+      },
+      "random_sampling_pct": {
+        "label": "Random sampling %",
+        "desc": "Stochastic subsampling: each generation is evaluated on a random subset of this percentage of training samples. Acts as implicit regularization by preventing models from overfitting to the full training set. Recommended: 70-90% for datasets with > 100 samples. 0 = use all samples (no subsampling)."
+      },
+      "random_sampling_epochs": {
+        "label": "Sampling epoch gap",
+        "desc": "Number of consecutive epochs using the same random subsample before redrawing. 1 = fresh subsample every generation (maximum stochasticity). Higher values (e.g. 5) give more stable fitness estimates per epoch but less regularization effect."
+      },
+      "n_epochs_before_global": {
+        "label": "Epochs before global",
+        "desc": "Epochs of per-language competition before merging into a global population."
+      }
+    },
+    "beam": {
+      "method": {
+        "label": "Method",
+        "desc": "LimitedExhaustive: all k-combinations. ParallelForward: extend each model by one feature.",
+        "opt": {
+          "LimitedExhaustive": "Limited Exhaustive",
+          "ParallelForward": "Parallel Forward"
+        }
+      },
+      "k_start": {
+        "label": "k start",
+        "desc": "Number of variables in the initial population for beam search."
+      },
+      "k_stop": {
+        "label": "k stop",
+        "desc": "Maximum number of variables in a single model."
+      },
+      "best_models_criterion": {
+        "label": "Best models criterion",
+        "desc": "If <= 1: alpha for FBM CI (smaller = larger range). If > 1: top X% of best models to keep."
+      },
+      "max_nb_of_models": {
+        "label": "Max models",
+        "desc": "Limits features to keep at each epoch based on model count possibilities."
+      }
+    },
+    "mcmc": {
+      "n_iter": {
+        "label": "Iterations",
+        "desc": "Total number of MCMC iterations."
+      },
+      "n_burn": {
+        "label": "Burn-in",
+        "desc": "Number of initial MCMC iterations to discard (typically the first half)."
+      },
+      "lambda": {
+        "label": "Lambda",
+        "desc": "Bayesian prior parameter for coefficients a, b, c."
+      },
+      "nmin": {
+        "label": "nmin",
+        "desc": "Minimum features in a model after feature elimination. 0 = keep all features (disable SBS)."
+      }
+    },
+    "lasso": {
+      "alpha_min": {
+        "label": "Alpha min",
+        "desc": "Minimum regularization (least regularization = most features)."
+      },
+      "alpha_max": {
+        "label": "Alpha max",
+        "desc": "Maximum regularization (most regularization = fewest features)."
+      },
+      "n_alphas": {
+        "label": "Number of alphas",
+        "desc": "Steps along the regularization path."
+      }
+    },
+    "ils": {
+      "max_iterations": {
+        "label": "Max iterations",
+        "desc": "Number of perturbate-and-local-search cycles."
+      },
+      "perturbation_size": {
+        "label": "Perturbation size",
+        "desc": "Number of random moves per perturbation (larger = more exploration)."
+      },
+      "k_min": {
+        "label": "k min",
+        "desc": "Minimum features per model."
+      },
+      "k_max": {
+        "label": "k max",
+        "desc": "Maximum features per model."
+      }
+    },
+    "sa": {
+      "initial_temperature": {
+        "label": "Initial temperature",
+        "desc": "Starting temperature. Higher = more initial exploration (accepts worse solutions more freely)."
+      },
+      "cooling_rate": {
+        "label": "Cooling rate",
+        "desc": "Temperature multiplier per iteration. Closer to 1.0 = slower cooling, more thorough search. 0.999 ≈ 7000 iterations to reach 0.001."
+      },
+      "max_iterations": {
+        "label": "Max iterations",
+        "desc": "Maximum number of propose-accept/reject iterations."
+      },
+      "k_min": {
+        "label": "k min",
+        "desc": "Minimum number of features per model."
+      },
+      "k_max": {
+        "label": "k max",
+        "desc": "Maximum number of features per model."
+      }
+    },
+    "aco": {
+      "n_ants": {
+        "label": "Number of ants",
+        "desc": "Number of models constructed per iteration. More ants = better exploration but slower."
+      },
+      "max_iterations": {
+        "label": "Max iterations",
+        "desc": "Maximum number of ACO iterations."
+      },
+      "min_iterations": {
+        "label": "Min iterations",
+        "desc": "Minimum iterations before early stopping is allowed."
+      },
+      "max_age_best_model": {
+        "label": "Max age best model",
+        "desc": "Early stop if best model hasn't improved for this many iterations."
+      },
+      "k_min": {
+        "label": "k min",
+        "desc": "Minimum number of features per model."
+      },
+      "k_max": {
+        "label": "k max",
+        "desc": "Maximum number of features per model."
+      },
+      "alpha": {
+        "label": "Alpha (pheromone weight)",
+        "desc": "Pheromone importance exponent. Higher = more exploitation (follow collective memory)."
+      },
+      "beta": {
+        "label": "Beta (heuristic weight)",
+        "desc": "Heuristic (feature significance) importance exponent. Higher = more bias toward statistically significant features."
+      },
+      "rho": {
+        "label": "Evaporation rate (ρ)",
+        "desc": "Pheromone evaporation rate. Higher = faster forgetting, more exploration. Lower = longer memory, more exploitation."
+      },
+      "elite_weight": {
+        "label": "Elite weight",
+        "desc": "Extra pheromone deposit weight for the global-best ant. Controls how strongly the best-ever solution guides future ants."
+      }
+    },
+    "rf": {
+      "n_estimators": {
+        "label": "Number of trees",
+        "desc": "Number of decision trees in the forest. More trees = better performance but slower."
+      },
+      "max_depth": {
+        "label": "Max depth",
+        "desc": "Maximum tree depth. null = unlimited (trees grow until pure leaves)."
+      },
+      "min_samples_split": {
+        "label": "Min samples split",
+        "desc": "Minimum samples required to split an internal node."
+      }
+    },
+    "svm": {
+      "kernel": {
+        "label": "Kernel",
+        "desc": "Kernel function. Linear is interpretable; RBF captures non-linearities.",
+        "opt": {
+          "linear": "Linear",
+          "rbf": "RBF",
+          "poly": "Polynomial"
+        }
+      },
+      "C": {
+        "label": "Regularization (C)",
+        "desc": "Inverse regularization strength. Smaller = more regularization."
+      }
+    },
+    "logistic": {
+      "penalty": {
+        "label": "Penalty",
+        "desc": "Regularization type. L1 produces sparse models (feature selection), L2 shrinks coefficients.",
+        "opt": {
+          "l1": "L1 (Lasso)",
+          "l2": "L2 (Ridge)",
+          "elasticnet": "Elastic Net"
+        }
+      },
+      "C": {
+        "label": "Regularization (C)",
+        "desc": "Inverse regularization strength. Smaller = more regularization."
+      },
+      "l1_ratio": {
+        "label": "L1 ratio",
+        "desc": "Elastic Net mixing (0=L2, 1=L1). Only used with Elastic Net penalty."
+      }
+    },
+    "xgboost": {
+      "n_estimators": {
+        "label": "Number of trees",
+        "desc": "Number of boosting rounds."
+      },
+      "max_depth": {
+        "label": "Max depth",
+        "desc": "Maximum tree depth. Controls model complexity."
+      },
+      "learning_rate": {
+        "label": "Learning rate",
+        "desc": "Step size shrinkage to prevent overfitting."
+      }
+    },
+    "lightgbm": {
+      "n_estimators": {
+        "label": "Number of trees",
+        "desc": "Number of boosting iterations."
+      },
+      "max_depth": {
+        "label": "Max depth",
+        "desc": "Maximum tree depth. -1 = no limit."
+      },
+      "learning_rate": {
+        "label": "Learning rate",
+        "desc": "Shrinkage rate."
+      }
+    },
+    "extra_trees": {
+      "n_estimators": {
+        "label": "Number of trees",
+        "desc": "Number of extremely randomized trees."
+      },
+      "max_depth": {
+        "label": "Max depth",
+        "desc": "Maximum tree depth. null = unlimited."
+      }
+    },
+    "adaboost": {
+      "n_estimators": {
+        "label": "Number of estimators",
+        "desc": "Number of weak learners (decision stumps)."
+      },
+      "learning_rate": {
+        "label": "Learning rate",
+        "desc": "Weight applied to each classifier at each boosting iteration."
+      }
+    },
+    "knn": {
+      "n_neighbors": {
+        "label": "Number of neighbors",
+        "desc": "Number of nearest neighbors for classification."
+      },
+      "weights": {
+        "label": "Weight function",
+        "desc": "How to weight neighbor votes.",
+        "opt": {
+          "uniform": "Uniform",
+          "distance": "Distance-weighted"
+        }
+      }
+    },
+    "cv": {
+      "outer_folds": {
+        "label": "Outer folds",
+        "desc": "Number of outer cross-validation folds. The algorithm trains independently on each combination of k-1 folds, producing separate FBMs that are then merged. More folds = better variance estimate but longer runtime. 5 or 10 folds are standard choices."
+      },
+      "inner_folds": {
+        "label": "Inner folds",
+        "desc": "Number of inner folds for overfitting penalty estimation. Within each outer fold, the training set is further split into inner folds. The penalty is computed as the gap between training and held-out inner fold performance. Only active when overfit_penalty > 0."
+      },
+      "overfit_penalty": {
+        "label": "Overfit penalty",
+        "desc": "Inner-fold overfitting penalty. During evolution, each model is evaluated on inner folds; the gap between training and validation performance is penalized: fitness -= mean_gap × penalty. This discourages models that memorize training data. Recommended: 0.1-0.5 for moderate regularization. 0 = disabled (no inner-fold penalty)."
+      },
+      "resampling_inner_folds_epochs": {
+        "label": "Resample inner folds",
+        "desc": "Reshuffle inner fold assignments every N epochs. Prevents the evolutionary algorithm from implicitly learning which samples are in which fold (a subtle form of information leakage). Recommended: 5-20 epochs when using overfit_penalty. 0 = never reshuffle (static folds)."
+      },
+      "fit_on_valid": {
+        "label": "Fit on validation",
+        "desc": "FBM based on validation fold fit (favoring generalization). Requires external test data."
+      },
+      "cv_best_models_ci_alpha": {
+        "label": "FBM CI alpha",
+        "desc": "Alpha for Family of Best Models CI on best validation fit. Smaller = larger range."
+      },
+      "stratify_by": {
+        "label": "Stratify by",
+        "desc": "Stratify folds by classes AND this annotation column (from sample annotations file)."
+      }
+    },
+    "importance": {
+      "compute_importance": {
+        "label": "Compute importance",
+        "desc": "Compute feature importance via Mean Decrease Accuracy (MDA)."
+      },
+      "n_permutations_mda": {
+        "label": "MDA permutations",
+        "desc": "Number of permutations per feature for MDA importance calculation."
+      },
+      "scaled_importance": {
+        "label": "Scaled importance",
+        "desc": "Scale importance values by feature prevalence within folds."
+      },
+      "importance_aggregation": {
+        "label": "Aggregation",
+        "desc": "Method to aggregate importance scores across folds.",
+        "opt": {
+          "mean": "Mean",
+          "median": "Median"
+        }
+      }
+    },
+    "voting": {
+      "vote": {
+        "label": "Enable voting",
+        "desc": "Activate voting ensemble where multiple models vote on sample classification."
+      },
+      "fbm_ci_alpha": {
+        "label": "FBM CI alpha",
+        "desc": "Alpha for Family of Best Models confidence interval. Smaller = larger best_model range."
+      },
+      "fbm_ci_method": {
+        "label": "FBM CI method",
+        "desc": "Binomial CI method for Family of Best Models (FBM) selection. Wilson (recommended) provides near-nominal coverage for all sample sizes. Clopper-Pearson is conservative (widest CI, more models). Wald is simplest but has poor coverage near p=0 or p=1.",
+        "opt": {
+          "wald": "Wald (standard)",
+          "wald_continuity": "Wald + continuity (Blaise)",
+          "wilson": "Wilson score",
+          "agresti_coull": "Agresti-Coull",
+          "clopper_pearson": "Clopper-Pearson (exact)"
+        }
+      },
+      "prune_before_voting": {
+        "label": "Prune before voting",
+        "desc": "Prune models based on feature importances (remove models with MDA < 0)."
+      },
+      "min_experts": {
+        "label": "Min experts",
+        "desc": "Minimum number of jury experts. 0 = no minimum (use all that pass filters). Warns if fewer experts remain."
+      },
+      "max_experts": {
+        "label": "Max experts",
+        "desc": "Maximum number of jury experts. 0 = no limit. Top models by fitness are kept when the limit is reached."
+      },
+      "min_perf": {
+        "label": "Min performance",
+        "desc": "Required sensitivity AND specificity for a judge model. >= 0.5 avoids single-choice bias."
+      },
+      "min_diversity": {
+        "label": "Min diversity",
+        "desc": "Required diversity (feature difference count) between judge models."
+      },
+      "method": {
+        "label": "Voting method",
+        "desc": "Majority: class 1 if votes > threshold. Consensus: no classification if threshold not reached.",
+        "opt": {
+          "Majority": "Majority",
+          "Consensus": "Consensus"
+        }
+      },
+      "method_threshold": {
+        "label": "Voting threshold",
+        "desc": "Typically 0.5 for Majority, 1 for Consensus. If 0, optimize via Youden maximum."
+      },
+      "threshold_windows_pct": {
+        "label": "Threshold window %",
+        "desc": "Samples with votes within threshold +/- this percentage are not classified."
+      },
+      "complete_display": {
+        "label": "Complete display",
+        "desc": "Display full voting results including all individual judge contributions."
+      }
+    },
+    "gpu": {
+      "fallback_to_cpu": {
+        "label": "Fallback to CPU",
+        "desc": "Execute on CPU (integrated graphics) if no discrete GPU available. Recommended."
+      },
+      "memory_policy": {
+        "label": "Memory policy",
+        "desc": "Strict: panic on limit exceeded. Adaptive: adjust if unavailable. Performance: use all GPU memory.",
+        "opt": {
+          "Strict": "Strict",
+          "Adaptive": "Adaptive",
+          "Performance": "Performance"
+        }
+      },
+      "max_total_memory_mb": {
+        "label": "Max GPU memory",
+        "desc": "Maximum total GPU memory in MB for all buffers."
+      },
+      "max_buffer_size_mb": {
+        "label": "Max buffer size",
+        "desc": "Maximum GPU memory in MB for a single buffer."
+      }
+    },
+    "clinical": {
+      "enabled": {
+        "label": "Enable clinical integration",
+        "desc": "Combine gpredomics omics scores with clinical variables (age, BMI, lab values, etc.) to improve predictions. Requires a clinical metadata file uploaded in the Data tab."
+      },
+      "method": {
+        "label": "Integration method",
+        "desc": "How to combine omics and clinical data.",
+        "opt": {
+          "stacking": "Stacking (logistic regression)",
+          "stacking_l1": "Stacking (L1 sparse)",
+          "calibrated": "Calibrated combination"
+        }
+      },
+      "interactions": {
+        "label": "Interaction terms",
+        "desc": "Add interaction terms (omics_score × each clinical variable). Captures effect modification, e.g., omics score is more predictive in younger patients."
+      },
+      "columns": {
+        "label": "Clinical columns",
+        "desc": "Comma-separated column names to use from the clinical file. Leave empty to use all numeric columns."
+      }
+    }
+  },
+  "charts": {
+    "annotationValueMinus10Plus1": "Annotation value (-1, 0, +1)",
+    "bestIndividualTrain": "Best Individual (Train)",
+    "bestModel": "Best Model",
+    "bestModelTrajectory": "Best model trajectory",
+    "coeff": "Coeff",
+    "coefficient": "Coefficient",
+    "consistency": "Consistency (%)",
+    "correct": "Correct",
+    "countModels": "Count (models)",
+    "count": "Count",
+    "cumulativeContribution": "Cumulative Contribution",
+    "cumulativeShapValue": "Cumulative SHAP value",
+    "density": "Density",
+    "entropy": "Entropy",
+    "error": "Error",
+    "experts": "Experts",
+    "featureDiscoveryFirstAppearanceInTopModels": "Feature Discovery — First Appearance in Top Models",
+    "featureValue": "Feature value",
+    "firstAppearsInModelRank": "First appears in model rank #",
+    "fit": "Fit",
+    "generation": "Generation",
+    "importanceMda": "Importance (MDA)",
+    "iteration": "Iteration",
+    "job": "Job",
+    "juryTest": "Jury (Test)",
+    "juryTrain": "Jury (Train)",
+    "language": "Language",
+    "meanAuc": "Mean AUC",
+    "modelRank": "Model Rank",
+    "modelsContainingFeature": "Models containing feature",
+    "models": "Models",
+    "negativeMinus": "Negative (-)",
+    "negativeMinus1": "Negative (-1)",
+    "negativeTauMinus": "Negative (τ−)",
+    "negative": "Negative",
+    "notSignificant": "Not significant",
+    "obsExp": "Obs/Exp",
+    "penalizedFitness": "Penalized fitness",
+    "pheromoneTau": "Pheromone (τ)",
+    "pheromoneEntropy1Uniform0Converged": "Pheromone Entropy (1=uniform, 0=converged)",
+    "pheromoneEvolutionTop30Features": "Pheromone Evolution (top 30 features)",
+    "positivePlus": "Positive (+)",
+    "positivePlus1": "Positive (+1)",
+    "positiveTauPlus": "Positive (τ+)",
+    "positive": "Positive",
+    "prevalence": "Prevalence",
+    "rejected": "Rejected",
+    "shapValueImpactOnPrediction": "SHAP value (impact on prediction)",
+    "shapValue": "SHAP value",
+    "samples": "Samples",
+    "tanimotoDistance": "Tanimoto distance",
+    "value": "Value",
+    "abundance": "Abundance",
+    "abundanceLog": "Abundance (log)",
+    "accuracy": "Accuracy",
+    "allGenerations": "All generations",
+    "best": "Best",
+    "betweenness": "Betweenness",
+    "butyrate": "Butyrate",
+    "class": "Class",
+    "cohorts": "cohorts",
+    "contribution": "Contribution",
+    "cutoff": "cutoff",
+    "dataType": "Data type",
+    "degree": "Degree",
+    "depleted": "Depleted",
+    "dim": "Dim",
+    "enriched": "Enriched",
+    "epoch": "Epoch",
+    "expert": "Expert",
+    "fast": "Fast",
+    "fbmPrevalence": "FBM prevalence",
+    "feature": "Feature",
+    "firstInModelRank": "first in model rank",
+    "fromRowMean": "Δ from row mean",
+    "inFbmSignature": "In FBM signature",
+    "inflammation": "Inflammation",
+    "kFeatures": "k (features)",
+    "kModelComplexity": "k (model complexity)",
+    "logAbundance": "log(abundance)",
+    "max": "Max",
+    "mean": "Mean",
+    "meanAccuracy": "Mean accuracy",
+    "median": "Median",
+    "min": "Min",
+    "model": "Model",
+    "module": "Module",
+    "observedExpected": "Observed / expected",
+    "oral": "Oral",
+    "oralOrigin": "Oral origin",
+    "presentIn": "Present in",
+    "producer": "Producer",
+    "sample": "Sample",
+    "score": "Score",
+    "sensitivity": "Sensitivity",
+    "signatures": "signatures",
+    "slow": "Slow",
+    "specificity": "Specificity",
+    "threshold": "Threshold",
+    "total": "Total",
+    "transit": "Transit",
+    "vote": "Vote",
+    "zMinusScore": "z-score",
+    "bestMetric": "Best {metric}",
+    "ciForClass": "95% CI – {name}",
+    "coSelectionTitle": "Feature co-selection network ({features} features, {edges} edges)",
+    "correctFor": "Correct ({name})",
+    "explorationTitle": "Search space exploration — {gen} ({n} models)",
+    "testMetric": "Test {metric}",
+    "trainMetric": "Train {metric}",
+    "topPheromone": "Top {n} features by pheromone",
+    "predictedClass": "Predicted: {name}",
+    "actualClass": "Actual: {name}"
+  },
+  "notify": {
+    "jobCompletedTitle": "Job completed",
+    "jobCompletedBody": "Analysis finished for “{project}”.",
+    "bestAuc": "Best AUC: {auc}",
+    "jobFailedTitle": "Job failed",
+    "jobFailedBody": "Analysis failed for “{project}”. Open the job to see the error."
+  },
+  "verify": {
+    "title": "Email confirmation",
+    "checking": "Confirming your email address…",
+    "done": "Your email address is confirmed. You can now sign in.",
+    "goToLogin": "Go to sign in",
+    "missingToken": "This confirmation link is incomplete. Request a new one below.",
+    "failed": "This confirmation link is invalid or has expired.",
+    "resend": "Send the confirmation email again",
+    "resent": "If this address has an unconfirmed account, a new confirmation email is on its way.",
+    "resendFailed": "The confirmation email could not be sent. Try again later.",
+    "checkInbox": "Confirm your email address",
+    "checkInboxDesc": "We sent a confirmation link to {email}. Open it, then sign in here."
+  },
+  "checklist": {
+    "title": "Next steps for this project",
+    "progress": "{done} of {total} done",
+    "dismiss": "Hide for this project",
+    "stateDone": "Done:",
+    "stateNext": "Next:",
+    "stateTodo": "To do:",
+    "steps": {
+      "data": {
+        "label": "Attach data",
+        "hint": "Upload a training matrix (X) and its labels (y), or pick a dataset from your library."
+      },
+      "parameters": {
+        "label": "Review the parameters",
+        "hint": "Pick a preset or adjust the essentials; the defaults are ready to run."
+      },
+      "launch": {
+        "label": "Launch an analysis",
+        "hint": "Use the Launch button at the bottom of the Parameters tab."
+      },
+      "results": {
+        "label": "Look at the results",
+        "hint": "Open the Results tab once the job has completed."
+      }
+    }
   }
 }

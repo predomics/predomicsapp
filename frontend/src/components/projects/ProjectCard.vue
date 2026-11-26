@@ -2,30 +2,40 @@
   <div
     class="project-card"
     :class="{ selected, shared: isShared, archived: project.archived }"
-    @click="$emit('select')"
-    @dblclick.stop="$emit('open')"
   >
-    <div class="card-top">
-      <h4 class="card-name">{{ project.name }}</h4>
-      <span v-if="project.latest_job_status" class="status-dot" :class="project.latest_job_status" :title="project.latest_job_status" />
-    </div>
-    <div class="card-meta">
-      <span class="time">{{ relativeDate(project.updated_at || project.created_at) }}</span>
-    </div>
-    <div class="card-badges">
-      <span class="badge badge-dataset" v-if="datasetCount > 0">{{ datasetCount }} {{ $t('components.dataset', datasetCount) }}</span>
-      <span class="badge badge-job" v-if="jobCount > 0">{{ jobCount }} {{ $t('components.job', jobCount) }}</span>
-      <span class="badge badge-share" v-if="shareCount > 0">{{ shareCount }} {{ $t('components.shared') }}</span>
-      <span v-if="isShared" class="badge badge-role">{{ project.role }}</span>
-    </div>
+    <button type="button" class="card-main" :aria-label="$t('projects.openNamed', { name: project.name })" @click="$emit('open')">
+      <span class="card-top">
+        <span class="card-name">{{ project.name }}</span>
+        <span v-if="project.latest_job_status" class="status-dot" :class="project.latest_job_status" :title="statusLabel(project.latest_job_status)">
+          <span class="sr-only">{{ statusLabel(project.latest_job_status) }}</span>
+        </span>
+      </span>
+      <span class="card-meta">
+        <span class="time">{{ timeAgo(project.updated_at || project.created_at) }}</span>
+        <span v-if="project.archived" class="archived-tag">{{ $t('projects.archivedTag') }}</span>
+      </span>
+      <span class="card-badges">
+        <span class="badge badge-dataset" v-if="datasetCount > 0">{{ datasetCount }} {{ $t('components.dataset', datasetCount) }}</span>
+        <span class="badge badge-job" v-if="jobCount > 0">{{ jobCount }} {{ $t('components.job', jobCount) }}</span>
+        <span class="badge badge-share" v-if="shareCount > 0">{{ shareCount }} {{ $t('components.shared') }}</span>
+        <span v-if="isShared" class="badge badge-role">{{ project.role }}</span>
+      </span>
+    </button>
+    <button
+      type="button"
+      class="card-details"
+      :aria-pressed="selected ? 'true' : 'false'"
+      :title="$t('projects.detailsNamed', { name: project.name })"
+      :aria-label="$t('projects.detailsNamed', { name: project.name })"
+      @click="$emit('select')"
+    ><span aria-hidden="true">&#8943;</span></button>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-
-const { t } = useI18n()
+import { timeAgo } from '../../utils/time'
+import { statusLabel } from '../../utils/jobStatus'
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -38,19 +48,6 @@ defineEmits(['select', 'open'])
 const datasetCount = computed(() => props.project.datasets?.length || 0)
 const jobCount = computed(() => props.project.job_count || props.project.jobs?.length || 0)
 const shareCount = computed(() => props.project.share_count || 0)
-
-function relativeDate(iso) {
-  if (!iso) return ''
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return t('components.justNow')
-  if (mins < 60) return t('components.minutesAgo', { n: mins })
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return t('components.hoursAgo', { n: hrs })
-  const days = Math.floor(hrs / 24)
-  if (days < 30) return t('components.daysAgo', { n: days })
-  return new Date(iso).toLocaleDateString()
-}
 </script>
 
 <style scoped>
@@ -116,7 +113,7 @@ function relativeDate(iso) {
 }
 
 .badge {
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   padding: 0.1rem 0.45rem;
   border-radius: 10px;
   font-weight: 600;
@@ -148,4 +145,22 @@ function relativeDate(iso) {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+.project-card { display: flex; align-items: stretch; gap: 0.25rem; }
+.card-main {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 0.2rem;
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.card-main .card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.card-main .card-name { font-weight: 600; font-size: 0.95rem; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-main .card-meta, .card-main .card-badges { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.archived-tag { font-size: 0.75rem; padding: 0 0.35rem; border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); }
+.card-details {
+  align-self: center;
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  color: var(--text-secondary); font-size: 1.1rem; line-height: 1;
+  padding: 0.3rem 0.45rem; cursor: pointer;
+}
+.card-details:hover, .card-details[aria-pressed="true"] { border-color: var(--border); background: var(--bg-card-hover); color: var(--text-primary); }
 </style>

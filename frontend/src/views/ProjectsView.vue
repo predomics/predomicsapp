@@ -1,25 +1,26 @@
 <template>
   <div class="projects-page">
     <!-- Left Panel: Project List -->
-    <aside class="list-panel">
+    <aside class="list-panel" :aria-label="$t('projects.title')">
       <div class="list-header">
-        <h2>Projects</h2>
-        <button class="btn-new" @click="showCreate = !showCreate" title="New project">+</button>
+        <h2>{{ $t('projects.title') }}</h2>
+        <button type="button" class="btn-new" :aria-expanded="showCreate ? 'true' : 'false'" :title="$t('projects.newProject')" :aria-label="$t('projects.newProject')" @click="toggleCreate"><span aria-hidden="true">+</span></button>
       </div>
 
       <!-- Create form (collapsible) -->
-      <div v-if="showCreate" class="create-form">
+      <form v-if="showCreate" class="create-form" @submit.prevent="createProject">
         <input
+          ref="createInput"
           v-model="newName"
-          placeholder="Project name..."
-          @keyup.enter="createProject"
+          :placeholder="$t('projects.projectNamePlaceholder')"
+          :aria-label="$t('projects.projectName')"
         />
-        <button @click="createProject" :disabled="!newName.trim()">Create</button>
-      </div>
+        <button type="submit" :disabled="!newName.trim() || creating">{{ creating ? $t('common.creating') : $t('projects.create') }}</button>
+      </form>
 
       <!-- Search + Archive filter -->
       <div class="filter-row">
-        <input v-model="search" placeholder="Search projects..." class="search-input" />
+        <input v-model="search" type="search" :placeholder="$t('projects.searchPlaceholder')" :aria-label="$t('projects.searchPlaceholder')" class="search-input" />
         <label class="archive-toggle" :title="$t('projects.showArchived')">
           <input type="checkbox" v-model="showArchived" @change="refetchProjects" />
           <span class="archive-label">{{ $t('projects.showArchived') }}</span>
@@ -28,92 +29,128 @@
 
       <!-- Demo datasets -->
       <div v-if="availableSamples.length > 0" class="section-label">
-        Demo Datasets
+        {{ $t('projects.demoDatasets') }}
       </div>
       <div v-for="s in availableSamples" :key="s.id" class="sample-row">
-        <span class="sample-name">{{ s.name }}</span>
-        <span v-if="s.loaded" class="sample-check">&#10003;</span>
-        <button v-else class="sample-btn" @click="loadSample(s.id)" :disabled="loadingSample">
-          Load
+        <div class="sample-text">
+          <span class="sample-name">{{ s.name }}</span>
+          <span v-if="s.description" class="sample-desc">{{ s.description }}</span>
+        </div>
+        <span v-if="s.loaded" class="sample-check" :title="$t('projects.sampleLoaded')"><span aria-hidden="true">&#10003;</span><span class="sr-only">{{ $t('projects.sampleLoaded') }}</span></span>
+        <button v-else type="button" class="sample-btn" :title="$t('projects.loadHint')" @click="loadSample(s.id)" :disabled="!!loadingSample">
+          {{ loadingSample === s.id ? $t('projects.loadingSample') : $t('projects.load') }}
         </button>
       </div>
 
       <!-- Own projects -->
-      <div v-if="filteredProjects.length > 0" class="section-label">My Projects</div>
+      <div v-if="filteredProjects.length > 0" class="section-label">{{ $t('projects.myProjects') }}</div>
       <ProjectCard
         v-for="p in filteredProjects"
         :key="p.project_id"
         :project="p"
         :selected="store.selectedId === p.project_id"
-        @select="openProject(p.project_id)"
+        @select="store.selectedId = p.project_id"
         @open="openProject(p.project_id)"
       />
 
       <!-- Shared projects -->
-      <div v-if="filteredShared.length > 0" class="section-label">Shared with me</div>
+      <div v-if="filteredShared.length > 0" class="section-label">{{ $t('projects.sharedWithMe') }}</div>
       <ProjectCard
         v-for="sp in filteredShared"
         :key="sp.project_id"
         :project="sp"
         :selected="store.selectedId === sp.project_id"
         :is-shared="true"
-        @select="openProject(sp.project_id)"
+        @select="store.selectedId = sp.project_id"
         @open="openProject(sp.project_id)"
       />
 
-      <div v-if="loading" class="list-status">Loading...</div>
-      <div v-else-if="filteredProjects.length === 0 && filteredShared.length === 0 && !search" class="list-status">
-        No projects yet
+      <AsyncState
+        v-if="loading || loadError"
+        :loading="loading"
+        :error="loadError"
+        :retry="fetchData"
+        :loading-text="$t('projects.loading')"
+      />
+      <div v-else-if="noProjects && search" class="list-status">
+        {{ $t('projects.noMatch', { query: search }) }}
+      </div>
+      <div v-else-if="noProjects" class="list-status">
+        {{ $t('projects.noProjects') }}
       </div>
     </aside>
 
     <!-- Right Panel: Detail or Empty State -->
-    <main class="detail-area">
+    <section class="detail-area" :aria-label="$t('projects.detailsRegion')">
       <ProjectDetailPanel
         v-if="selectedProject"
         :project="selectedProject"
         @open="openProject"
-        @share="openProject"
+        @share="shareProject"
         @archive="handleArchive"
         @delete="handleDelete"
       />
       <EmptyState
+        v-else-if="!loading && !hasAnyProject"
+        :title="$t('projects.welcomeTitle')"
+        :message="$t('projects.welcomeMsg')"
+      >
+        <div class="empty-actions">
+          <button v-if="firstSample" type="button" class="btn-cta" :disabled="!!loadingSample" @click="loadSample(firstSample.id)">
+            {{ loadingSample ? $t('projects.loadingSample') : $t('projects.tryDemo') }}
+          </button>
+          <button type="button" class="btn-cta secondary" @click="toggleCreate(true)">{{ $t('projects.createProject') }}</button>
+        </div>
+        <p v-if="firstSample" class="empty-sample-desc">{{ firstSample.name }} — {{ firstSample.description }}</p>
+      </EmptyState>
+      <EmptyState
         v-else
-        title="Select a project"
-        message="Choose a project from the list or create a new one to get started."
+        :title="$t('projects.selectProject')"
+        :message="$t('projects.selectProjectMsg')"
       />
-    </main>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
 import { useProjectStore } from '../stores/project'
 import ProjectCard from '../components/projects/ProjectCard.vue'
 import ProjectDetailPanel from '../components/projects/ProjectDetailPanel.vue'
 import EmptyState from '../components/projects/EmptyState.vue'
+import AsyncState from '../components/AsyncState.vue'
+import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+import { apiError, ignoreError } from '../utils/apiError'
 
 const { t } = useI18n()
 const router = useRouter()
 const store = useProjectStore()
+const { toast, addToast } = useToast()
+const { confirmDialog } = useConfirm()
 
 const newName = ref('')
 const showCreate = ref(false)
+const creating = ref(false)
+const createInput = ref(null)
 const search = ref('')
 const showArchived = ref(false)
 const loading = ref(true)
+const loadError = ref('')
 const samples = ref([])
-const loadingSample = ref(false)
+const loadingSample = ref('')
 
 const projectNames = computed(() => new Set(store.projects.map(p => p.name)))
 const availableSamples = computed(() =>
   samples.value.map(s => ({ ...s, loaded: projectNames.value.has(s.name) }))
 )
+const firstSample = computed(() => availableSamples.value.find(s => !s.loaded) || null)
 
 const allProjects = computed(() => [...store.projects, ...store.sharedProjects])
+const hasAnyProject = computed(() => allProjects.value.length > 0)
 
 const selectedProject = computed(() =>
   allProjects.value.find(p => p.project_id === store.selectedId) || null
@@ -134,18 +171,32 @@ const filteredShared = computed(() => {
   return store.sharedProjects.filter(p => p.name.toLowerCase().includes(q))
 })
 
+const noProjects = computed(() => filteredProjects.value.length === 0 && filteredShared.value.length === 0)
+
+function toggleCreate(force) {
+  showCreate.value = force === true ? true : !showCreate.value
+  if (showCreate.value) nextTick(() => createInput.value?.focus())
+}
+
 async function refetchProjects() {
-  await store.fetchAll(showArchived.value)
+  try {
+    await store.fetchAll(showArchived.value)
+  } catch (e) {
+    toast.error(apiError(e))
+  }
 }
 
 async function fetchData() {
   loading.value = true
+  loadError.value = ''
   try {
     await Promise.all([
       store.fetchAll(showArchived.value),
       store.fetchSharedProjects(),
       fetchSamples(),
     ])
+  } catch (e) {
+    loadError.value = apiError(e)
   } finally {
     loading.value = false
   }
@@ -153,34 +204,40 @@ async function fetchData() {
 
 async function fetchSamples() {
   try {
-    const { data } = await axios.get('/api/samples/')
+    const { data } = await api.samples.list({ silentError: true })
     samples.value = data.filter(s => s.available)
-  } catch { /* ignore */ }
+  } catch (e) { ignoreError(e) /* demo datasets are optional */ }
 }
 
 async function loadSample(sampleId) {
-  loadingSample.value = true
+  loadingSample.value = sampleId
   try {
-    const { data } = await axios.post(`/api/samples/${sampleId}/load`)
+    const { data } = await api.samples.load(sampleId)
     await store.fetchAll(showArchived.value)
     store.selectedId = data.project_id
     openProject(data.project_id)
   } catch (e) {
-    console.error('Failed to load sample:', e)
+    toast.error(t('projects.sampleFailed', { error: apiError(e) }))
   } finally {
-    loadingSample.value = false
+    loadingSample.value = ''
   }
 }
 
 async function createProject() {
-  if (!newName.value.trim()) return
+  const name = newName.value.trim()
+  if (!name || creating.value) return
+  creating.value = true
   try {
-    const data = await store.create(newName.value.trim())
+    const data = await store.create(name)
     newName.value = ''
     showCreate.value = false
     store.selectedId = data.project_id
+    // Straight into the project: the next thing to do is add data.
+    openProject(data.project_id)
   } catch (e) {
-    console.error('Failed to create project:', e)
+    toast.error(t('projects.createFailed', { error: apiError(e) }))
+  } finally {
+    creating.value = false
   }
 }
 
@@ -188,7 +245,12 @@ function openProject(id) {
   router.push(`/project/${id}`)
 }
 
+function shareProject(id) {
+  router.push({ path: `/project/${id}/data`, query: { share: '1' } })
+}
+
 async function handleArchive(project) {
+  const wasArchived = !!project.archived
   try {
     const result = await store.archiveProject(project.project_id)
     if (!showArchived.value && result.archived) {
@@ -196,17 +258,32 @@ async function handleArchive(project) {
       store.projects = store.projects.filter(p => p.project_id !== project.project_id)
       if (store.selectedId === project.project_id) store.selectedId = null
     }
+    addToast(
+      t(result.archived ? 'projects.archivedToast' : 'projects.unarchivedToast', { name: project.name }),
+      'info',
+      8000,
+      wasArchived ? {} : { action: { label: t('common.undo'), onClick: () => undoArchive(project) } },
+    )
   } catch (e) {
-    alert(t('projects.archiveFailed', { error: e.response?.data?.detail || e.message }))
+    toast.error(t('projects.archiveFailed', { error: apiError(e) }))
+  }
+}
+
+async function undoArchive(project) {
+  try {
+    await store.archiveProject(project.project_id)
+    await store.fetchAll(showArchived.value)
+  } catch (e) {
+    toast.error(t('projects.archiveFailed', { error: apiError(e) }))
   }
 }
 
 async function handleDelete(project) {
-  if (!confirm(t('projects.deleteConfirm', { name: project.name }))) return
+  if (!(await confirmDialog({ message: t('projects.deleteConfirm', { name: project.name }), confirmLabel: t('common.delete'), danger: true }))) return
   try {
     await store.remove(project.project_id)
   } catch (e) {
-    alert(t('projects.deleteFailed', { error: e.response?.data?.detail || e.message }))
+    toast.error(t('projects.deleteFailed', { error: apiError(e) }))
   }
 }
 
@@ -216,7 +293,7 @@ onMounted(fetchData)
 <style scoped>
 .projects-page {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: minmax(260px, 340px) 1fr;
   height: calc(100vh - 60px);
   margin: -1.5rem -1rem;
   overflow: hidden;
@@ -332,7 +409,7 @@ onMounted(fetchData)
 }
 
 .section-label {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
@@ -357,7 +434,7 @@ onMounted(fetchData)
 }
 
 .sample-check {
-  color: var(--success);
+  color: var(--success-dark);
   font-weight: 700;
 }
 
@@ -401,4 +478,15 @@ onMounted(fetchData)
     max-height: 50vh;
   }
 }
+.sample-row { align-items: flex-start; }
+.sample-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.sample-desc { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.3; }
+.empty-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; margin-top: 1rem; }
+.btn-cta {
+  padding: 0.6rem 1.2rem; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: var(--accent-text); border: 1px solid var(--accent);
+}
+.btn-cta.secondary { background: var(--bg-card); color: var(--text-primary); border-color: var(--border); }
+.btn-cta:disabled { opacity: 0.6; cursor: default; }
+.empty-sample-desc { margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-secondary); max-width: 520px; }
 </style>

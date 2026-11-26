@@ -10,15 +10,16 @@
 
       <form v-else-if="!done" @submit.prevent="submit">
         <div class="field">
-          <label>{{ $t('auth.newPassword') }}</label>
-          <input v-model="password" type="password" placeholder="Enter new password" required minlength="6" />
+          <label for="reset-password">{{ $t('auth.newPassword') }}</label>
+          <input id="reset-password" v-model="password" type="password" autocomplete="new-password" :placeholder="$t('auth.newPasswordPlaceholder')" required :minlength="MIN_PASSWORD" aria-describedby="reset-password-hint" />
+          <p id="reset-password-hint" class="hint">{{ $t('login.passwordHint', { n: MIN_PASSWORD }) }}</p>
         </div>
         <div class="field">
-          <label>{{ $t('auth.confirmPassword') }}</label>
-          <input v-model="confirm" type="password" placeholder="Confirm password" required />
+          <label for="reset-password2">{{ $t('auth.confirmPassword') }}</label>
+          <input id="reset-password2" v-model="confirm" type="password" autocomplete="new-password" :placeholder="$t('login.confirmPasswordPlaceholder')" required />
         </div>
-        <p v-if="error" class="error">{{ error }}</p>
-        <button type="submit" class="btn-primary" :disabled="loading || !password || password !== confirm">
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <button type="submit" class="btn-primary" :disabled="loading">
           {{ loading ? $t('auth.resetting') : $t('auth.resetBtn') }}
         </button>
       </form>
@@ -37,7 +38,10 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
+import { api } from '../api'
+import { apiError } from '../utils/apiError'
+
+const MIN_PASSWORD = 8
 
 const { t } = useI18n()
 
@@ -50,6 +54,10 @@ const error = ref('')
 const done = ref(false)
 
 async function submit() {
+  if (password.value.length < MIN_PASSWORD) {
+    error.value = t('login.passwordTooShort', { n: MIN_PASSWORD })
+    return
+  }
   if (password.value !== confirm.value) {
     error.value = t('auth.passwordsMismatch')
     return
@@ -57,13 +65,13 @@ async function submit() {
   error.value = ''
   loading.value = true
   try {
-    await axios.post('/api/auth/reset-password', {
+    await api.auth.resetPassword({
       token: token.value,
       new_password: password.value,
     })
     done.value = true
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Reset failed. The link may have expired.'
+    error.value = apiError(e, t('auth.resetFailed'))
   } finally {
     loading.value = false
   }
@@ -142,5 +150,10 @@ async function submit() {
   margin-top: 1rem;
   color: var(--accent);
   font-size: 0.85rem;
+}
+.hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
 }
 </style>

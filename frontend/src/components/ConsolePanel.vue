@@ -1,28 +1,41 @@
 <template>
   <div class="console-panel">
     <div class="console-header">
-      <h4>Console Output</h4>
-      <span class="status-badge" :class="jobStatus">{{ jobStatus }}</span>
+      <h4>{{ $t('console.title') }}</h4>
+      <span class="status-badge" :class="jobStatus" role="status"><span aria-hidden="true">{{ statusGlyph(jobStatus) }}</span> {{ statusLabel(jobStatus) }}</span>
       <template v-if="progress.generation > 0 && jobStatus === 'running'">
         <div class="progress-info">
-          <span class="progress-gen">Gen {{ progress.generation }}<template v-if="progress.maxGen"> / {{ progress.maxGen }}</template></span>
+          <span class="progress-gen">{{ $t('projectDashboard.gen') }} {{ progress.generation }}<template v-if="progress.maxGen"> / {{ progress.maxGen }}</template></span>
           <span class="progress-k" v-if="progress.k">k={{ progress.k }}</span>
           <span class="progress-lang" v-if="progress.language">{{ progress.language }}</span>
           <span class="progress-eta" v-if="etaDisplay">{{ etaDisplay }}</span>
         </div>
-        <div class="progress-bar-wrap" v-if="progress.maxGen">
+        <div class="progress-bar-wrap" v-if="progress.maxGen" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.round(progressPct)" :aria-label="$t('console.progress')">
           <div class="progress-bar" :style="{ width: progressPct + '%' }"></div>
         </div>
       </template>
-      <button class="btn-toggle-chart" v-if="progressPoints.length >= 2" @click="showChart = !showChart" :title="showChart ? 'Hide chart' : 'Show live chart'">
-        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 12 L4 7 L7 9 L10 3 L13 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <button
+        v-if="canCancel"
+        type="button"
+        class="btn-cancel-job"
+        :disabled="cancelling"
+        @click="cancelJob"
+      >{{ cancelling ? $t('console.cancelling') : $t('console.cancelJob') }}</button>
+      <button
+        v-if="jobStatus === 'completed'"
+        type="button"
+        class="btn-view-results"
+        @click="$emit('view-results', jobId)"
+      >{{ $t('projectDashboard.viewResults') }}</button>
+      <button type="button" class="btn-toggle-chart" v-if="progressPoints.length >= 2" @click="showChart = !showChart" :aria-pressed="showChart ? 'true' : 'false'" :title="showChart ? $t('console.hideChart') : $t('console.showChart')" :aria-label="showChart ? $t('console.hideChart') : $t('console.showChart')">
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M1 12 L4 7 L7 9 L10 3 L13 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button class="close-btn" @click="$emit('close')" title="Minimize console">&#9660;</button>
+      <button type="button" class="close-btn" @click="$emit('close')" :title="$t('console.minimize')" :aria-label="$t('console.minimize')"><span aria-hidden="true">&#9660;</span></button>
     </div>
 
     <!-- Live sparkline charts -->
     <div v-if="showChart && progressPoints.length >= 2" class="chart-strip">
-      <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="sparkline-svg" preserveAspectRatio="none">
+      <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="sparkline-svg" preserveAspectRatio="none" role="img" :aria-label="$t('console.chartLabel', { gen: progress.generation, k: progress.k })">
         <!-- Grid lines -->
         <line x1="0" :y1="chartH * 0.25" :x2="chartW" :y2="chartH * 0.25" stroke="rgba(255,255,255,0.06)" stroke-width="0.5" />
         <line x1="0" :y1="chartH * 0.5" :x2="chartW" :y2="chartH * 0.5" stroke="rgba(255,255,255,0.06)" stroke-width="0.5" />
@@ -33,13 +46,13 @@
         <polyline :points="kPath" fill="none" stroke="#98c379" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="3,2" />
       </svg>
       <div class="chart-legend">
-        <span class="legend-gen">&#9644; Generation</span>
-        <span class="legend-k">&#9644; k (features)</span>
-        <span class="legend-max" v-if="progress.maxGen">max={{ progress.maxGen }}</span>
+        <span class="legend-gen">&#9644; {{ $t('console.legendGeneration') }}</span>
+        <span class="legend-k">&#9476; {{ $t('console.legendK') }}</span>
+        <span class="legend-max" v-if="progress.maxGen">{{ $t('console.legendMax', { n: progress.maxGen }) }}</span>
       </div>
     </div>
 
-    <div class="console" ref="consoleEl">
+    <div class="console" ref="consoleEl" tabindex="0" role="log" :aria-label="$t('console.title')">
       <pre v-html="renderedLog"></pre>
     </div>
   </div>
@@ -47,17 +60,25 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import axios from 'axios'
+import { api } from '../api'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+import { apiError, ignoreError } from '../utils/apiError'
+import { statusLabel, statusGlyph, isLive, isCancelled } from '../utils/jobStatus'
 
 const auth = useAuthStore()
+const { t } = useI18n()
+const { toast } = useToast()
+const { confirmDialog } = useConfirm()
 
 const props = defineProps({
   projectId: { type: String, required: true },
   jobId: { type: String, required: true },
 })
 
-const emit = defineEmits(['close', 'completed', 'failed', 'progress'])
+const emit = defineEmits(['close', 'completed', 'failed', 'cancelled', 'progress', 'view-results'])
 
 const logContent = ref('')
 const jobStatus = ref('pending')
@@ -68,6 +89,47 @@ const showChart = ref(true)
 let pollTimer = null
 let ws = null
 let wsConnected = false
+
+const cancelling = ref(false)
+const canCancel = computed(() => isLive(jobStatus.value))
+
+async function cancelJob() {
+  if (!(await confirmDialog({ message: t('console.cancelConfirm'), confirmLabel: t('console.cancelJob'), cancelLabel: t('console.keepRunning'), danger: true }))) return
+  cancelling.value = true
+  cancelRequested = true
+  try {
+    await api.analysis.cancelJob(props.projectId, props.jobId)
+    toast.info(t('console.cancelRequested'))
+  } catch (e) {
+    toast.error(t('console.cancelFailed', { error: apiError(e) }))
+  } finally {
+    cancelling.value = false
+  }
+}
+
+// The server reports a cancelled job as `failed` with the message "Cancelled by
+// user.": tell the two apart so a deliberate stop is not announced as an error.
+let cancelRequested = false
+
+async function finish(status) {
+  if (status === 'completed') { emit('completed', props.jobId); return }
+  if (status === 'cancelled') { jobStatus.value = 'cancelled'; emit('cancelled', props.jobId); return }
+  if (status !== 'failed') return
+  let cancelled = cancelRequested
+  if (!cancelled) {
+    try {
+      const { data } = await api.analysis.job(props.projectId, props.jobId, { silentError: true })
+      cancelled = isCancelled(data)
+    } catch (e) { ignoreError(e) }
+  }
+  if (cancelled) {
+    jobStatus.value = 'cancelled'
+    emitProgress()
+    emit('cancelled', props.jobId)
+  } else {
+    emit('failed', props.jobId)
+  }
+}
 
 let errorCount = 0
 let startTime = null  // When we first see generation > 0
@@ -109,6 +171,7 @@ function parseProgress(text) {
   const lines = text.split('\n')
   let lastGen = 0, lastK = 0, lastLang = ''
   for (let i = lines.length - 1; i >= 0; i--) {
+    // eslint-disable-next-line no-control-regex -- ESC is what starts an ANSI colour code
     const clean = lines[i].replace(/\x1b\[[0-9;]*m/g, '')
     const gm = clean.match(GEN_RE)
     if (gm) {
@@ -129,6 +192,7 @@ function parseProgress(text) {
   // Try to extract maxGen from early lines (config echo)
   if (!progress.value.maxGen) {
     for (const line of lines.slice(0, 50)) {
+      // eslint-disable-next-line no-control-regex -- ESC is what starts an ANSI colour code
       const clean = line.replace(/\x1b\[[0-9;]*m/g, '')
       // Look for max_epochs in config output
       const em = clean.match(/max_epochs[:\s]+(\d+)/i)
@@ -170,15 +234,11 @@ const etaDisplay = computed(() => {
 })
 
 function formatEta(seconds) {
-  if (seconds < 60) return `~${Math.ceil(seconds)}s left`
-  if (seconds < 3600) {
-    const m = Math.floor(seconds / 60)
-    const s = Math.ceil(seconds % 60)
-    return `~${m}m ${s}s left`
-  }
-  const h = Math.floor(seconds / 3600)
-  const m = Math.ceil((seconds % 3600) / 60)
-  return `~${h}h ${m}m left`
+  let d
+  if (seconds < 60) d = `${Math.ceil(seconds)}s`
+  else if (seconds < 3600) d = `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`
+  else d = `${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m`
+  return t('console.etaLeft', { d })
 }
 
 function emitProgress() {
@@ -201,11 +261,16 @@ const ANSI_COLORS = {
   94: '#61afef', 95: '#c678dd', 96: '#56b6c2', 97: '#ffffff',
 }
 
+function escapeHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 function ansiToHtml(text) {
-  if (!text) return 'Waiting for output...'
+  if (!text) return escapeHtml(t('console.waiting'))
   // Escape HTML first
   let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   // Replace ANSI escape sequences
+  // eslint-disable-next-line no-control-regex -- ESC is what starts an ANSI colour code
   html = html.replace(/\x1b\[([0-9;]*)m/g, (_, codes) => {
     if (!codes || codes === '0') return '</span>'
     const parts = codes.split(';')
@@ -227,32 +292,46 @@ const renderedLog = computed(() => ansiToHtml(logContent.value))
 /* ── Fetch max epochs from job config ─────────────────── */
 async function fetchMaxEpochs() {
   try {
-    const { data } = await axios.get(`/api/analysis/${props.projectId}/jobs/${props.jobId}`)
+    const { data } = await api.analysis.job(props.projectId, props.jobId, { silentError: true })
     const epMatch = data.config_summary?.match(/ep=(\d+)/)
     if (epMatch) {
       progress.value.maxGen = parseInt(epMatch[1])
     }
-  } catch { /* ignore */ }
+  } catch (e) { ignoreError(e) }
 }
 
 /* ── WebSocket ───────────────────────────────────────── */
-function getWsUrl() {
+// The socket is opened with a one-time ticket, never with the access token:
+// URLs end up in proxy and access logs. A server without the ticket endpoint
+// gets no socket at all and the console polls over HTTP instead.
+function getWsUrl(ticket) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/ws/jobs/${props.projectId}/${props.jobId}?token=${auth.token}`
+  return `${proto}//${location.host}/ws/jobs/${encodeURIComponent(props.projectId)}/${encodeURIComponent(props.jobId)}?ticket=${encodeURIComponent(ticket)}`
 }
 
-function connectWebSocket() {
-  if (!auth.token) { startPolling(); return }
+let consoleSeq = 0
+
+async function connectWebSocket() {
+  if (!auth.token || typeof WebSocket === 'undefined') return
+  const seq = consoleSeq
+  const ticket = await auth.wsTicket()
+  // Unmounted, or switched to another job, while the ticket was being fetched.
+  if (!ticket || seq !== consoleSeq) return
   try {
-    ws = new WebSocket(getWsUrl())
+    ws = new WebSocket(getWsUrl(ticket))
 
     ws.onopen = () => {
       wsConnected = true
       stopPolling()  // WS is live, stop HTTP polling
+      // The socket streams the log from its beginning: drop what polling fetched
+      // so far, or it would appear twice.
+      logContent.value = ''
+      logOffset = 0
     }
 
     ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data)
+      let msg
+      try { msg = JSON.parse(event.data) } catch { return }
       if (msg.type === 'log') {
         logContent.value += msg.content
         parseProgress(logContent.value)
@@ -265,8 +344,8 @@ function connectWebSocket() {
         handleProgressData(msg.data)
       } else if (msg.type === 'done') {
         jobStatus.value = msg.status
-        if (msg.status === 'completed') emit('completed', props.jobId)
-        else if (msg.status === 'failed') emit('failed', props.jobId)
+        emitProgress()
+        finish(msg.status)
         closeWebSocket()
       }
     }
@@ -293,42 +372,64 @@ function closeWebSocket() {
 }
 
 /* ── HTTP Polling (fallback) ─────────────────────────── */
+// Incremental: each poll asks only for what was written since the last one
+// (`?offset=`). Servers that do not report `next_offset` send the whole log
+// every time, which we then simply replace.
+let logOffset = 0
+let pollBusy = false
+
 async function pollLogs() {
+  if (pollBusy) return
+  pollBusy = true
+  const seq = consoleSeq
   try {
-    const { data } = await axios.get(`/api/analysis/${props.projectId}/jobs/${props.jobId}/logs`)
+    const config = { silentError: true }
+    if (logOffset > 0) config.params = { offset: logOffset }
+    const { data } = await api.analysis.jobLogs(props.projectId, props.jobId, config)
+    if (seq !== consoleSeq) return
     errorCount = 0
-    logContent.value = data.log
+    const chunk = data.log || ''
+    if (typeof data.next_offset === 'number') {
+      const from = typeof data.offset === 'number' ? data.offset : logOffset
+      // offset 0 (first poll, or the server restarted the log) replaces; otherwise append.
+      logContent.value = from > 0 && from === logOffset ? logContent.value + chunk : chunk
+      logOffset = data.next_offset
+    } else {
+      logContent.value = chunk
+    }
     jobStatus.value = data.status
-    parseProgress(data.log)
+    if (chunk) parseProgress(logContent.value)
 
     await nextTick()
-    if (consoleEl.value) {
+    if (chunk && consoleEl.value) {
       consoleEl.value.scrollTop = consoleEl.value.scrollHeight
     }
 
-    if (data.status === 'completed') {
+    if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
       stopPolling()
-      emit('completed', props.jobId)
-    } else if (data.status === 'failed') {
-      stopPolling()
-      emit('failed', props.jobId)
+      emitProgress()
+      finish(data.status)
     }
   } catch (e) {
+    ignoreError(e)
+    if (seq !== consoleSeq) return
     errorCount++
     if (errorCount >= 10) {
-      logContent.value = '[error] Job not found. Close the console and re-launch the analysis.'
+      logContent.value = t('console.lostConnection', { error: apiError(e) })
       jobStatus.value = 'failed'
       stopPolling()
       emit('failed', props.jobId)
     }
+  } finally {
+    pollBusy = false
   }
 }
 
 async function pollProgress() {
   try {
-    const { data } = await axios.get(`/api/analysis/${props.projectId}/jobs/${props.jobId}/progress`)
+    const { data } = await api.analysis.jobProgress(props.projectId, props.jobId, { silentError: true })
     if (data.points?.length > 0) handleProgressData(data)
-  } catch { /* ignore */ }
+  } catch (e) { ignoreError(e) }
 }
 
 function startPolling() {
@@ -355,9 +456,12 @@ function startConsole() {
 }
 
 function stopConsole() {
+  consoleSeq++
   stopPolling()
   closeWebSocket()
   wsConnected = false
+  logOffset = 0
+  cancelRequested = false
 }
 
 watch(() => props.jobId, (newId) => {
@@ -404,7 +508,7 @@ onUnmounted(stopConsole)
 .status-badge {
   padding: 0.1rem 0.4rem;
   border-radius: 8px;
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -413,6 +517,7 @@ onUnmounted(stopConsole)
 .status-badge.running { background: var(--info-bg); color: var(--info); }
 .status-badge.completed { background: var(--success-bg); color: var(--success-dark); }
 .status-badge.failed { background: var(--danger-bg); color: var(--danger-dark); }
+.status-badge.cancelled { background: var(--bg-badge); color: var(--text-secondary); }
 
 .close-btn {
   background: none;
@@ -447,7 +552,7 @@ onUnmounted(stopConsole)
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-nav-link);
 }
 .progress-gen {
@@ -460,11 +565,11 @@ onUnmounted(stopConsole)
 }
 .progress-lang {
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 .progress-eta {
   color: #e5c07b;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-style: italic;
 }
 .progress-bar-wrap {
@@ -497,7 +602,7 @@ onUnmounted(stopConsole)
 .chart-legend {
   display: flex;
   gap: 0.75rem;
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   padding-top: 0.15rem;
 }
 .legend-gen { color: #00BFFF; }
@@ -509,7 +614,7 @@ onUnmounted(stopConsole)
   overflow-y: auto;
   padding: 0.5rem 1rem;
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   line-height: 1.4;
 }
 
@@ -518,4 +623,15 @@ onUnmounted(stopConsole)
   white-space: pre-wrap;
   word-break: break-all;
 }
+.btn-cancel-job, .btn-view-results {
+  border-radius: 4px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+}
+.btn-cancel-job { border: 1px solid #e06c75; color: #e06c75; }
+.btn-cancel-job:disabled { opacity: 0.6; cursor: default; }
+.btn-view-results { border: 1px solid #98c379; color: #98c379; }
 </style>

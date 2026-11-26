@@ -6,15 +6,15 @@
     <!-- Filters bar -->
     <section class="section filters-bar">
       <div class="filters-row">
-        <select v-model="filterDisease" class="filter-select">
+        <select :aria-label="$t('signatureZoo.filterDisease')" v-model="filterDisease" class="filter-select">
           <option value="">{{ $t('signatureZoo.allDiseases') }}</option>
           <option v-for="d in diseaseOptions" :key="d" :value="d">{{ d }}</option>
         </select>
-        <select v-model="filterMethod" class="filter-select">
+        <select :aria-label="$t('signatureZoo.filterMethod')" v-model="filterMethod" class="filter-select">
           <option value="">{{ $t('signatureZoo.allMethods') }}</option>
           <option v-for="m in methodOptions" :key="m" :value="m">{{ m }}</option>
         </select>
-        <input
+        <input :aria-label="$t('signatureZoo.searchPlaceholder')"
           type="text"
           v-model="searchQuery"
           class="search-input"
@@ -86,7 +86,7 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2>{{ detailSig.name }}</h2>
-          <button class="modal-close" @click="detailSig = null">&times;</button>
+          <button :aria-label="$t('common.close')" class="modal-close" @click="detailSig = null">&times;</button>
         </div>
 
         <div class="modal-body">
@@ -184,7 +184,7 @@
                 </thead>
                 <tbody>
                   <tr v-for="feat in sortedFeatures" :key="feat.name">
-                    <td class="feature-name">{{ feat.name }}</td>
+                    <td class="feature-name"><span :title="feat.name">{{ shortName(feat.name) }}</span></td>
                     <td :class="feat.coefficient > 0 ? 'coef-positive' : 'coef-negative'">
                       {{ feat.coefficient > 0 ? '+' : '' }}{{ feat.coefficient.toFixed(2) }}
                     </td>
@@ -215,7 +215,7 @@
       <div class="modal-content modal-wide">
         <div class="modal-header">
           <h2>{{ $t('signatureZoo.comparisonResults') }}</h2>
-          <button class="modal-close" @click="compareResults = null">&times;</button>
+          <button :aria-label="$t('common.close')" class="modal-close" @click="compareResults = null">&times;</button>
         </div>
 
         <div class="modal-body">
@@ -274,18 +274,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { shortFeatureName as shortName } from '../utils/chartLabels'
+import { useChartTheme, withAlpha } from '../composables/useChartTheme'
+import { ct } from '../utils/chartText'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
+import { loadPlotlyLib, usePlotlyCleanup } from '../utils/plotly'
+import { apiError } from '../utils/apiError'
 
 const { t } = useI18n()
+const { chartColors } = useChartTheme()
 
 // Plotly lazy-load
 let Plotly = null
+usePlotlyCleanup()
 async function ensurePlotly() {
   if (!Plotly) {
-    const mod = await import('plotly.js-dist-min')
-    Plotly = mod.default
+    Plotly = await loadPlotlyLib()
   }
 }
 
@@ -358,10 +364,10 @@ async function fetchSignatures() {
   loading.value = true
   error.value = ''
   try {
-    const { data } = await axios.get('/api/signature-zoo/')
+    const { data } = await api.signatureZoo.list()
     signatures.value = data
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Failed to load signatures'
+    error.value = apiError(e)
   } finally {
     loading.value = false
   }
@@ -387,7 +393,7 @@ async function runCompare() {
   error.value = ''
   compareResults.value = null
   try {
-    const { data } = await axios.get('/api/signature-zoo/compare', {
+    const { data } = await api.signatureZoo.compare({
       params: { ids: compareSelection.value.join(',') }
     })
     compareResults.value = data
@@ -396,7 +402,7 @@ async function runCompare() {
     renderPerfChart()
     renderOverlapChart()
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Comparison failed'
+    error.value = apiError(e)
   } finally {
     compareLoading.value = false
   }
@@ -408,23 +414,26 @@ function renderPerfChart() {
   const names = perf.map(p => p.name.length > 25 ? p.name.slice(0, 25) + '...' : p.name)
 
   const metrics = ['auc', 'accuracy', 'sensitivity', 'specificity']
-  const colors = ['#4fc3f7', '#66bb6a', '#ffa726', '#ef5350']
+  const c = chartColors()
+  const colors = c.series
+  // A hatch per metric as well as a colour, so grouped bars read without colour.
+  const patterns = ['', '/', 'x', '.']
 
   const traces = metrics.map((metric, i) => ({
     name: metric.toUpperCase(),
     type: 'bar',
     x: names,
     y: perf.map(p => p[metric]),
-    marker: { color: colors[i] },
+    marker: { color: colors[i], pattern: { shape: patterns[i % patterns.length], fgcolor: c.paper, fgopacity: 0.5, size: 6 } },
   }))
 
   Plotly.newPlot(perfChartEl.value, traces, {
     barmode: 'group',
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
-    font: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-body').trim() || '#2c3e50' },
+    font: { color: c.text },
     margin: { t: 20, b: 80, l: 50, r: 20 },
-    yaxis: { range: [0, 1], gridcolor: 'rgba(128,128,128,0.2)' },
+    yaxis: { range: [0, 1], gridcolor: c.grid },
     xaxis: { tickangle: -20 },
     legend: { orientation: 'h', y: 1.1 },
     height: 320,
@@ -446,7 +455,7 @@ function renderOverlapChart() {
   const counts = entries.map(e => e.count)
   const barColors = counts.map(c => {
     const frac = c / sigCount
-    return `rgba(79, 195, 247, ${0.3 + 0.7 * frac})`
+    return withAlpha(chartColors().class0, 0.3 + 0.7 * frac)
   })
 
   // Reverse for bottom-to-top
@@ -454,7 +463,7 @@ function renderOverlapChart() {
   counts.reverse()
   barColors.reverse()
 
-  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-body').trim() || '#2c3e50'
+  const textColor = chartColors().text
 
   Plotly.newPlot(overlapChartEl.value, [{
     type: 'bar',
@@ -462,7 +471,7 @@ function renderOverlapChart() {
     y: featureNames,
     x: counts,
     marker: { color: barColors },
-    hovertemplate: '%{y}<br>Present in %{x} / ' + sigCount + ' signatures<extra></extra>',
+    hovertemplate: `%{y}<br>${ct('Present in')} %{x} / ${sigCount} ${ct('signatures')}<extra></extra>`,
   }], {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
@@ -471,7 +480,7 @@ function renderOverlapChart() {
       title: t('signatureZoo.signaturesCount', { n: sigCount }),
       dtick: 1,
       range: [0, sigCount + 0.5],
-      gridcolor: 'rgba(128,128,128,0.2)',
+      gridcolor: chartColors().grid,
     },
     yaxis: { automargin: true },
     height: Math.max(300, featureNames.length * 22 + 80),
@@ -584,7 +593,7 @@ h2 {
   display: inline-block;
   padding: 0.15rem 0.5rem;
   border-radius: 10px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -627,12 +636,12 @@ h2 {
   background: var(--bg-badge);
   border: 1px solid var(--border-light);
   border-radius: 10px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
 }
 .tag-common {
   background: var(--success-bg);
-  color: var(--success);
+  color: var(--success-dark);
   border-color: var(--success);
 }
 .sig-actions {
@@ -761,7 +770,7 @@ h2 {
   padding: 0.5rem 0.75rem;
 }
 .cohort-label {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -837,7 +846,7 @@ h2 {
   font-style: italic;
 }
 .coef-positive {
-  color: var(--success);
+  color: var(--success-dark);
   font-weight: 600;
 }
 .coef-negative {
@@ -848,12 +857,12 @@ h2 {
   display: inline-block;
   padding: 0.1rem 0.4rem;
   border-radius: 8px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 .direction-badge.enriched {
   background: rgba(100, 200, 100, 0.15);
-  color: var(--success);
+  color: var(--success-dark);
 }
 .direction-badge.depleted {
   background: rgba(200, 80, 80, 0.15);

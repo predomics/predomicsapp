@@ -10,14 +10,17 @@
             ref="nameInput"
             v-model="editName"
             class="name-edit"
+            :aria-label="$t('projects.projectName')"
             @keyup.enter="saveEdit"
             @keyup.escape="cancelEdit"
             @blur="saveEdit"
           />
-          <button v-if="!editing" class="btn-icon-sm" @click="startEdit" title="Rename"><SvgIcon name="pencil" :size="14" /></button>
+          <button v-if="!editing" type="button" class="btn-icon-sm" @click="startEdit" :title="$t('projects.rename')" :aria-label="$t('projects.rename')"><SvgIcon name="pencil" :size="14" /></button>
         </div>
         <p v-if="!editingDesc && project.description" class="desc" @dblclick="startDescEdit">{{ project.description }}</p>
-        <p v-if="!editingDesc && !project.description" class="desc desc-placeholder" @dblclick="startDescEdit">Add a description...</p>
+        <p v-if="!editingDesc && !project.description" class="desc desc-placeholder">
+          <button type="button" class="link-btn" @click="startDescEdit">{{ $t('projects.addDescription') }}</button>
+        </p>
         <textarea
           v-if="editingDesc"
           v-model="editDesc"
@@ -25,20 +28,21 @@
           rows="2"
           @keyup.escape="cancelDescEdit"
           @blur="saveDescEdit"
-          placeholder="Project description..."
+:placeholder="$t('projects.descriptionPlaceholder')"
+          :aria-label="$t('projects.descriptionPlaceholder')"
         ></textarea>
         <div class="dates">
-          <span>Created {{ formatDate(project.created_at) }}</span>
-          <span v-if="project.updated_at"> &middot; Modified {{ relativeDate(project.updated_at) }}</span>
+          <span>{{ $t('projects.createdOn', { date: formatDate(project.created_at) }) }}</span>
+          <span v-if="project.updated_at"> &middot; {{ $t('projects.modified', { when: timeAgo(project.updated_at) }) }}</span>
         </div>
       </div>
       <div class="header-actions">
-        <button class="btn btn-primary" @click="$emit('open', project.project_id)">Open Project</button>
-        <button class="btn btn-outline" @click="$emit('share', project.project_id)">Share</button>
-        <button class="btn btn-outline" @click="$emit('archive', project)" :title="project.archived ? 'Unarchive' : 'Archive'">
-          {{ project.archived ? 'Unarchive' : 'Archive' }}
+        <button type="button" class="btn btn-primary" @click="$emit('open', project.project_id)">{{ $t('projects.openProject') }}</button>
+        <button type="button" class="btn btn-outline" @click="$emit('share', project.project_id)">{{ $t('projectDashboard.share') }}</button>
+        <button type="button" class="btn btn-outline" @click="$emit('archive', project)">
+          {{ project.archived ? $t('projects.unarchive') : $t('projects.archive') }}
         </button>
-        <button class="btn btn-danger-outline" @click="$emit('delete', project)">Delete</button>
+        <button type="button" class="btn btn-danger-outline" @click="$emit('delete', project)">{{ $t('common.delete') }}</button>
       </div>
     </div>
 
@@ -46,21 +50,21 @@
     <div class="stat-row">
       <div class="stat badge-dataset">
         <span class="stat-num">{{ project.datasets?.length || 0 }}</span>
-        <span class="stat-label">Datasets</span>
+        <span class="stat-label">{{ $t('dashboard.datasets') }}</span>
       </div>
       <div class="stat badge-job">
         <span class="stat-num">{{ project.job_count || project.jobs?.length || 0 }}</span>
-        <span class="stat-label">Jobs</span>
+        <span class="stat-label">{{ $t('projects.jobs') }}</span>
       </div>
       <div class="stat badge-share">
         <span class="stat-num">{{ project.share_count || 0 }}</span>
-        <span class="stat-label">Shared</span>
+        <span class="stat-label">{{ $t('projects.shared') }}</span>
       </div>
     </div>
 
     <!-- Datasets section -->
     <section v-if="project.datasets?.length > 0" class="detail-section">
-      <h3>Datasets</h3>
+      <h3>{{ $t('dashboard.datasets') }}</h3>
       <div v-for="ds in project.datasets" :key="ds.id" class="ds-group-card">
         <div class="ds-group-name">{{ ds.name }}</div>
         <div class="ds-files">
@@ -74,12 +78,13 @@
 
     <!-- Recent Jobs section -->
     <section v-if="project.jobs?.length > 0" class="detail-section">
-      <h3>Recent Jobs</h3>
-      <div class="job-list">
-        <div v-for="jobId in recentJobs" :key="jobId" class="job-row">
-          <span class="job-id">{{ jobId.slice(0, 8) }}</span>
-        </div>
-      </div>
+      <h3>{{ $t('projects.recentJobs') }}</h3>
+      <ul class="job-list">
+        <li v-for="job in recentJobs" :key="job.id" class="job-row">
+          <span class="job-id">{{ job.label }}</span>
+          <span v-if="job.status" class="job-status">{{ statusLabel(job.status) }}</span>
+        </li>
+      </ul>
     </section>
   </div>
 </template>
@@ -88,6 +93,14 @@
 import { ref, computed, nextTick } from 'vue'
 import { useProjectStore } from '../../stores/project'
 import SvgIcon from '../SvgIcon.vue'
+import { useI18n } from 'vue-i18n'
+import { useToast } from '../../composables/useToast'
+import { apiError } from '../../utils/apiError'
+import { timeAgo } from '../../utils/time'
+import { statusLabel } from '../../utils/jobStatus'
+
+const { t, locale } = useI18n()
+const { toast } = useToast()
 
 const props = defineProps({
   project: { type: Object, default: null },
@@ -105,7 +118,16 @@ const editDesc = ref('')
 
 const recentJobs = computed(() => {
   const jobs = props.project?.jobs || []
-  return jobs.slice(0, 5).map(j => typeof j === 'string' ? j : j.job_id || j.id || '')
+  return jobs.slice(0, 5).map((j, i) => {
+    const id = typeof j === 'string' ? j : j.job_id || j.id || ''
+    const name = typeof j === 'object' && j ? j.name : ''
+    return {
+      id: id || String(i),
+      // A short id means nothing to a reader: prefer the job's name, else number it.
+      label: name || t('projects.jobNumbered', { n: jobs.length - i, id: id.slice(0, 8) }),
+      status: typeof j === 'object' && j ? j.status : '',
+    }
+  })
 })
 
 function startEdit() {
@@ -126,7 +148,7 @@ async function saveEdit() {
   try {
     await store.updateProject(props.project.project_id, { name: newName })
   } catch (e) {
-    alert('Rename failed: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('projects.renameFailed', { error: apiError(e) }))
   }
 }
 
@@ -147,27 +169,15 @@ async function saveDescEdit() {
   try {
     await store.updateProject(props.project.project_id, { description: newDesc })
   } catch (e) {
-    alert('Update failed: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('projects.updateFailed', { error: apiError(e) }))
   }
 }
 
 function formatDate(iso) {
   if (!iso) return ''
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+  return new Date(iso).toLocaleDateString(locale.value, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-function relativeDate(iso) {
-  if (!iso) return ''
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  if (days < 30) return `${days}d ago`
-  return formatDate(iso)
-}
 </script>
 
 <style scoped>
@@ -206,7 +216,6 @@ function relativeDate(iso) {
   border-radius: 4px;
   padding: 0.1rem 0.4rem;
   background: var(--bg-input);
-  outline: none;
   width: 100%;
 }
 
@@ -249,7 +258,6 @@ function relativeDate(iso) {
   background: var(--bg-input);
   width: 100%;
   resize: vertical;
-  outline: none;
   margin-bottom: 0.25rem;
 }
 
@@ -334,7 +342,7 @@ function relativeDate(iso) {
 .stat.badge-share .stat-num { color: var(--badge-share-text, #2e7d32); }
 
 .stat-label {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: 0.2rem;
   text-transform: uppercase;
@@ -376,7 +384,7 @@ function relativeDate(iso) {
 }
 
 .file-chip {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
   background: var(--bg-badge);
@@ -387,7 +395,7 @@ function relativeDate(iso) {
 }
 
 .file-role {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   padding: 0 0.25rem;
   border-radius: 3px;
   background: var(--badge-dataset, #e3f2fd);
@@ -411,4 +419,8 @@ function relativeDate(iso) {
   font-size: 0.78rem;
   color: var(--text-muted);
 }
+.link-btn { background: none; border: none; padding: 0; font: inherit; color: var(--text-secondary); cursor: pointer; text-decoration: underline; }
+.job-list { list-style: none; padding: 0; }
+.job-status { margin-left: 0.5rem; font-size: 0.75rem; color: var(--text-secondary); }
+@media (max-width: 700px) { .detail-header { flex-direction: column; gap: 0.75rem; } .header-actions { flex-wrap: wrap; } }
 </style>

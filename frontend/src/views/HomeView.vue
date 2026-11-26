@@ -88,22 +88,22 @@
     <section class="section use-cases reveal">
       <h2 class="section-title">{{ $t('home.useCases') }}</h2>
       <div class="case-grid">
-        <div class="case-card" v-for="uc in useCases" :key="uc.title">
+        <div class="case-card" v-for="uc in useCases" :key="uc.id">
           <div class="case-header">
             <span class="case-icon">{{ uc.icon }}</span>
-            <h3>{{ uc.title }}</h3>
+            <h3>{{ $t(`home.uc.${uc.id}.title`) }}</h3>
           </div>
-          <p class="case-desc">{{ uc.description }}</p>
+          <p class="case-desc">{{ $t(`home.uc.${uc.id}.desc`) }}</p>
           <div class="case-stats">
             <span v-for="(val, label) in uc.stats" :key="label" class="case-stat">
               <strong>{{ val }}</strong>
-              <span>{{ label }}</span>
+              <span>{{ $t(`home.ucStat.${label}`) }}</span>
             </span>
           </div>
           <div class="case-ref" v-if="uc.reference">
             <a v-if="uc.doi" :href="uc.doi" target="_blank" rel="noopener">{{ uc.reference }}</a>
             <span v-else>{{ uc.reference }}</span>
-            <span v-if="uc.demo" class="demo-badge">Demo</span>
+            <span v-if="uc.demo" class="demo-badge">{{ $t('home.demoBadge') }}</span>
           </div>
         </div>
       </div>
@@ -165,7 +165,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
 
 const { t } = useI18n()
 const health = ref(null)
@@ -221,35 +221,31 @@ const capabilities = computed(() => [
 const useCases = [
   {
     icon: '\u{2695}',
-    title: 'Cirrhosis Prediction',
-    description: 'Predict liver cirrhosis from gut microbiome composition using 1,980 metagenomic species profiles in a Chinese cohort of 210 subjects.',
-    stats: { AUC: '0.94', features: 'k=8', samples: '210' },
+    id: 'cirrhosis',
+    stats: { auc: '0.94', features: 'k=8', samples: '210' },
     reference: 'Qin N, Yang F, Li A, Prifti E, et al. Nature 2014;513:59-64',
     doi: 'https://doi.org/10.1038/nature13568',
     demo: true,
   },
   {
     icon: '\u{2684}',
-    title: 'Cancer Classification',
-    description: 'Classify colorectal cancer status from stool metagenomic data using sparse ternary models.',
-    stats: { AUC: '0.92', features: 'k=12', samples: '156' },
+    id: 'cancer',
+    stats: { auc: '0.92', features: 'k=12', samples: '156' },
     reference: 'Zeller G, et al. Mol. Syst. Biol. 2014;10(11):766',
     doi: 'https://doi.org/10.15252/msb.20145645',
   },
   {
     icon: '\u{2318}',
-    title: 'ICI Response Prediction',
-    description: 'Predict immune checkpoint inhibitor response (OS12) from baseline gut microbiome in the NSAT multi-cancer cohort of 417 patients.',
-    stats: { AUC: '0.87', features: 'k=71', samples: '417' },
+    id: 'ici',
+    stats: { auc: '0.87', features: 'k=71', samples: '417' },
     reference: 'Derosa L, Iebba V, et al. Cell 2024;187(13):3373-3389',
     doi: 'https://doi.org/10.1016/j.cell.2024.05.029',
     demo: true,
   },
   {
     icon: '\u{2623}',
-    title: 'Metabolic Disease',
-    description: 'Identify type 2 diabetes biomarkers from metagenome-wide association studies of European and Chinese cohorts.',
-    stats: { AUC: '0.89', features: 'k=10', samples: '345' },
+    id: 'metabolic',
+    stats: { auc: '0.89', features: 'k=10', samples: '345' },
     reference: 'Karlsson FH, et al. Nature 2013;498:99-103',
     doi: 'https://doi.org/10.1038/nature12198',
   },
@@ -297,7 +293,7 @@ const stackGroups = computed(() => [
 
 onMounted(async () => {
   try {
-    const { data } = await axios.get('/health')
+    const { data } = await api.system.health()
     health.value = data
   } catch (e) {
     console.error('Health check failed:', e)
@@ -564,7 +560,7 @@ onMounted(async () => {
   border-radius: 50%;
   background: var(--brand);
   color: #fff;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -853,7 +849,7 @@ onMounted(async () => {
 }
 
 .case-ref {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
   font-style: italic;
   display: flex;
@@ -871,7 +867,7 @@ onMounted(async () => {
 }
 .demo-badge {
   font-style: normal;
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -942,7 +938,7 @@ onMounted(async () => {
 }
 
 .stack-group h4 {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1030,7 +1026,7 @@ onMounted(async () => {
 }
 
 .footer-copy {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
 }
 

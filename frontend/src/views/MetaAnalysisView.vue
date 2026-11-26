@@ -8,7 +8,7 @@
       <h3>{{ $t('meta.selectJobs') }}</h3>
       <div class="picker">
         <div class="search-row">
-          <input
+          <input :aria-label="$t('meta.searchPlaceholder')"
             type="text"
             v-model="searchQuery"
             class="search-input"
@@ -20,7 +20,7 @@
 
         <!-- Search results dropdown -->
         <div class="search-results" v-if="searchResults.length > 0 && searchQuery.length > 0">
-          <div
+          <div tabindex="0" role="button" @keydown.enter.prevent="addJob(job)" @keydown.space.prevent="addJob(job)"
             v-for="job in searchResults"
             :key="job.job_id"
             class="search-item"
@@ -45,7 +45,7 @@
           <div class="chip" v-for="job in selectedJobs" :key="job.job_id">
             <span class="chip-project">{{ job.project_name }}</span>
             <span class="chip-job">{{ job.job_name || job.job_id.slice(0, 8) }}</span>
-            <button class="chip-remove" @click="removeJob(job.job_id)">&times;</button>
+            <button :aria-label="$t('common.remove')" class="chip-remove" @click="removeJob(job.job_id)">&times;</button>
           </div>
         </div>
 
@@ -154,20 +154,23 @@
 </template>
 
 <script setup>
+import { ct } from '../utils/chartText'
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useChartTheme } from '../composables/useChartTheme'
-import axios from 'axios'
+import { useChartTheme, withAlpha } from '../composables/useChartTheme'
+import { api } from '../api'
+import { loadPlotlyLib, usePlotlyCleanup } from '../utils/plotly'
+import { apiError } from '../utils/apiError'
 
 const { t } = useI18n()
 const { chartColors, chartLayout, featureLabel } = useChartTheme()
 
 // Plotly lazy-load
 let Plotly = null
+usePlotlyCleanup()
 async function ensurePlotly() {
   if (!Plotly) {
-    const mod = await import('plotly.js-dist-min')
-    Plotly = mod.default
+    Plotly = await loadPlotlyLib()
   }
 }
 
@@ -205,7 +208,7 @@ async function doSearch() {
   }
   searchLoading.value = true
   try {
-    const { data } = await axios.get('/api/meta-analysis/searchable-jobs', {
+    const { data } = await api.metaAnalysis.searchableJobs({
       params: { q: searchQuery.value.trim() }
     })
     searchResults.value = data
@@ -238,7 +241,7 @@ async function runAnalysis() {
   error.value = ''
   results.value = null
   try {
-    const { data } = await axios.post('/api/meta-analysis/compare', {
+    const { data } = await api.metaAnalysis.compare({
       job_ids: selectedJobs.value.map(j => j.job_id)
     })
     results.value = data
@@ -246,14 +249,14 @@ async function runAnalysis() {
     await ensurePlotly()
     renderOverlapChart()
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Meta-analysis failed'
+    error.value = apiError(e)
   } finally {
     analysisLoading.value = false
   }
 }
 
 // Metrics helpers
-function formatMetric(value, key) {
+function formatMetric(value) {
   if (value == null) return '—'
   if (typeof value === 'number') return value.toFixed(4)
   return value
@@ -337,7 +340,7 @@ function renderOverlapChart() {
       allCounts.push(n)
       // Color intensity by overlap count
       const frac = n / jobCount
-      allColors.push(`rgba(79, 195, 247, ${0.3 + 0.7 * frac})`)
+      allColors.push(withAlpha(chartColors().class0, 0.3 + 0.7 * frac))
     }
   }
 
@@ -352,7 +355,7 @@ function renderOverlapChart() {
     y: allFeatures,
     x: allCounts,
     marker: { color: allColors },
-    hovertemplate: '%{y}<br>Present in %{x} / ' + jobCount + ' cohorts<extra></extra>',
+    hovertemplate: `%{y}<br>${ct('Present in')} %{x} / ${jobCount} ${ct('cohorts')}<extra></extra>`,
   }], chartLayout({
     xaxis: {
       title: t('meta.cohorts', { n: jobCount }),
@@ -371,7 +374,7 @@ function renderOverlapChart() {
 onMounted(async () => {
   searchLoading.value = true
   try {
-    const { data } = await axios.get('/api/meta-analysis/searchable-jobs')
+    const { data } = await api.metaAnalysis.searchableJobs()
     searchResults.value = data
   } catch { /* ignore */ }
   finally { searchLoading.value = false }
@@ -605,7 +608,7 @@ h2 {
 
 /* Concordance cells */
 .coef-cell.positive {
-  color: var(--success);
+  color: var(--success-dark);
   font-weight: 600;
 }
 .coef-cell.negative {
@@ -619,12 +622,12 @@ h2 {
   display: inline-block;
   padding: 0.15rem 0.5rem;
   border-radius: 10px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 .concordance-badge.concordant {
   background: rgba(100, 200, 100, 0.15);
-  color: var(--success);
+  color: var(--success-dark);
 }
 .concordance-badge.discordant {
   background: rgba(200, 80, 80, 0.15);

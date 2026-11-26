@@ -1,9 +1,9 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal">
+    <div class="modal" v-dialog="() => $emit('close')" aria-labelledby="validate-modal-title">
       <div class="modal-header">
-        <h3>{{ $t('modals.validateTitle') }}</h3>
-        <button class="close-btn" @click="$emit('close')">&times;</button>
+        <h3 id="validate-modal-title">{{ $t('modals.validateTitle') }}</h3>
+        <button type="button" class="close-btn" :aria-label="$t('common.close')" @click="$emit('close')"><span aria-hidden="true">&times;</span></button>
       </div>
 
       <div class="modal-body">
@@ -122,16 +122,16 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
+import { apiError } from '../utils/apiError'
+import { vDialog } from '../directives/dialog'
 
-const { t } = useI18n()
 
 const props = defineProps({
-  projectId: String,
-  jobId: String,
+  projectId: { type: String, required: true },
+  jobId: { type: String, required: true },
 })
-const emit = defineEmits(['close'])
+defineEmits(['close'])
 
 const xFile = ref(null)
 const yFile = ref(null)
@@ -162,13 +162,12 @@ async function runValidation() {
   form.append('features_in_rows', featuresInRows.value)
 
   try {
-    const { data } = await axios.post(
-      `/api/analysis/${props.projectId}/jobs/${props.jobId}/validate`,
+    const { data } = await api.analysis.validateJob(props.projectId, props.jobId,
       form,
     )
     result.value = data
   } catch (e) {
-    error.value = e.response?.data?.detail || e.message
+    error.value = apiError(e)
   } finally {
     running.value = false
   }
@@ -249,7 +248,7 @@ async function runValidation() {
   border-radius: 8px; padding: 0.6rem; text-align: center;
 }
 .metric-value { font-size: 1.2rem; font-weight: 700; color: var(--accent, #00BFFF); }
-.metric-label { font-size: 0.7rem; color: var(--text-secondary, #8888a0); text-transform: uppercase; letter-spacing: 0.05em; }
+.metric-label { font-size: 0.75rem; color: var(--text-secondary, #8888a0); text-transform: uppercase; letter-spacing: 0.05em; }
 
 .confusion-table {
   border-collapse: collapse; font-size: 0.85rem; margin-bottom: 0.5rem;
@@ -271,7 +270,7 @@ async function runValidation() {
 }
 .predictions-table th {
   position: sticky; top: 0; background: var(--bg-card, #1a1f2e);
-  font-size: 0.7rem; text-transform: uppercase; color: var(--text-secondary, #8888a0);
+  font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary, #8888a0);
 }
 .class-1 { color: #00BFFF; }
 .class-0 { color: #FF3030; }

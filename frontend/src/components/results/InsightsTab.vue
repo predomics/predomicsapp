@@ -12,10 +12,10 @@
     <template v-if="data && !loading">
       <!-- Severity summary row -->
       <div class="severity-summary">
-        <span v-if="data.summary.success" class="sev-chip success">{{ data.summary.success }} {{ $t('results.insightsSuccess') }}</span>
-        <span v-if="data.summary.info" class="sev-chip info">{{ data.summary.info }} {{ $t('results.insightsInfo') }}</span>
-        <span v-if="data.summary.warning" class="sev-chip warning">{{ data.summary.warning }} {{ $t('results.insightsWarning') }}</span>
-        <span v-if="data.summary.critical" class="sev-chip critical">{{ data.summary.critical }} {{ $t('results.insightsCritical') }}</span>
+        <span v-if="data.summary?.success" class="sev-chip success">{{ data.summary?.success }} {{ $t('results.insightsSuccess') }}</span>
+        <span v-if="data.summary?.info" class="sev-chip info">{{ data.summary?.info }} {{ $t('results.insightsInfo') }}</span>
+        <span v-if="data.summary?.warning" class="sev-chip warning">{{ data.summary?.warning }} {{ $t('results.insightsWarning') }}</span>
+        <span v-if="data.summary?.critical" class="sev-chip critical">{{ data.summary?.critical }} {{ $t('results.insightsCritical') }}</span>
       </div>
 
       <!-- Radar chart -->
@@ -23,7 +23,7 @@
 
       <!-- Category sections -->
       <div v-for="cat in visibleCategories" :key="cat.key" class="insight-category">
-        <button class="cat-header" @click="toggleCategory(cat.key)">
+        <button type="button" class="cat-header" :aria-expanded="expandedCats[cat.key] ? 'true' : 'false'" @click="toggleCategory(cat.key)">
           <span class="cat-arrow">{{ expandedCats[cat.key] ? '\u25BC' : '\u25B6' }}</span>
           <span class="cat-title">{{ cat.label }}</span>
           <span class="cat-count">{{ cat.insights.length }}</span>
@@ -54,39 +54,42 @@
             </div>
             <!-- Threshold stats -->
             <div v-if="ins.details && ins.details.mean != null && ins.details.std != null" class="insight-details threshold-stats">
-              <span class="feature-tag">mean: {{ ins.details.mean }}</span>
-              <span class="feature-tag">std: {{ ins.details.std }}</span>
-              <span class="feature-tag">range: [{{ ins.details.min }}, {{ ins.details.max }}]</span>
+              <span class="feature-tag">{{ $t('results.insMean') }}: {{ ins.details.mean }}</span>
+              <span class="feature-tag">{{ $t('results.insStd') }}: {{ ins.details.std }}</span>
+              <span class="feature-tag">{{ $t('results.insRange') }}: [{{ ins.details.min }}, {{ ins.details.max }}]</span>
               <span class="feature-tag">n={{ ins.details.count }}</span>
             </div>
             <!-- Threshold CI details -->
             <div v-if="ins.details && ins.details.lower != null && ins.details.upper != null && ins.details.width != null" class="insight-details threshold-stats">
-              <span class="feature-tag">lower: {{ ins.details.lower }}</span>
-              <span class="feature-tag">threshold: {{ ins.details.threshold }}</span>
-              <span class="feature-tag">upper: {{ ins.details.upper }}</span>
-              <span v-if="ins.details.rejection_rate" class="feature-tag">rejection: {{ (ins.details.rejection_rate * 100).toFixed(1) }}%</span>
+              <span class="feature-tag">{{ $t('results.insLower') }}: {{ ins.details.lower }}</span>
+              <span class="feature-tag">{{ $t('results.insThreshold') }}: {{ ins.details.threshold }}</span>
+              <span class="feature-tag">{{ $t('results.insUpper') }}: {{ ins.details.upper }}</span>
+              <span v-if="ins.details.rejection_rate" class="feature-tag">{{ $t('results.insRejection') }}: {{ (ins.details.rejection_rate * 100).toFixed(1) }}%</span>
             </div>
           </div>
         </div>
       </div>
 
       <!-- No insights -->
-      <p v-if="data.insights.length === 0" class="no-results">{{ $t('results.insightsNoData') }}</p>
+      <p v-if="!data.insights || data.insights.length === 0" class="no-results">{{ $t('results.insightsNoData') }}</p>
     </template>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { isSectionOpen, setSectionOpen } from '../../composables/useSections'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
-import { useChartTheme } from '../../composables/useChartTheme'
+import { api } from '../../api'
+import { loadPlotlyLib, usePlotlyCleanup } from '../../utils/plotly'
+import { useChartTheme, withAlpha } from '../../composables/useChartTheme'
+import { apiError } from '../../utils/apiError'
 
 let Plotly = null
+usePlotlyCleanup()
 async function loadPlotly() {
   if (Plotly) return Plotly
-  const mod = await import('plotly.js-dist-min')
-  Plotly = mod.default
+  Plotly = await loadPlotlyLib()
   return Plotly
 }
 
@@ -107,16 +110,6 @@ const loading = ref(false)
 const error = ref(null)
 const data = ref(null)
 const radarEl = ref(null)
-const expandedCats = ref({
-  performance: true,
-  overfitting: true,
-  threshold: true,
-  robustness: true,
-  biology: true,
-  jury: true,
-  recommendation: true,
-})
-
 const categoryMeta = [
   { key: 'performance', labelKey: 'results.insightsPerformance' },
   { key: 'overfitting', labelKey: 'results.insightsOverfitting' },
@@ -133,13 +126,26 @@ const visibleCategories = computed(() => {
     .map(cat => ({
       key: cat.key,
       label: t(cat.labelKey),
-      insights: data.value.insights.filter(i => i.category === cat.key),
+      insights: (data.value.insights || []).filter(i => i.category === cat.key),
     }))
     .filter(cat => cat.insights.length > 0)
 })
 
+/**
+ * Category open/closed state. Categories that need attention (a warning or a
+ * critical finding) and the recommendations start open; the others start folded
+ * so the page stays short. What the user opens or closes is remembered.
+ */
+const OPEN_SEVERITIES = new Set(['warning', 'critical'])
+function defaultOpen(cat) {
+  return cat.key === 'recommendation' || cat.insights.some(i => OPEN_SEVERITIES.has(i.severity))
+}
+const expandedCats = computed(() => Object.fromEntries(
+  visibleCategories.value.map(cat => [cat.key, isSectionOpen(`insights.${cat.key}`, defaultOpen(cat))]),
+))
+
 function toggleCategory(key) {
-  expandedCats.value[key] = !expandedCats.value[key]
+  setSectionOpen(`insights.${key}`, !expandedCats.value[key])
 }
 
 function scoreClass(score) {
@@ -153,15 +159,13 @@ async function fetchInsights() {
   loading.value = true
   error.value = null
   try {
-    const { data: resp } = await axios.get(
-      `/api/data-explore/${props.projectId}/insights/${props.jobId}`
-    )
+    const { data: resp } = await api.dataExplore.insights(props.projectId, props.jobId)
     data.value = resp
     await nextTick()
     renderRadar()
   } catch (e) {
     console.error('Insights fetch failed:', e)
-    error.value = e.response?.data?.detail || e.message
+    error.value = apiError(e)
   } finally {
     loading.value = false
   }
@@ -192,9 +196,9 @@ async function renderRadar() {
     r: vals,
     theta: cats,
     fill: 'toself',
-    fillcolor: c.isDark ? 'rgba(0, 191, 255, 0.15)' : 'rgba(25, 118, 210, 0.12)',
-    line: { color: c.isDark ? '#00BFFF' : '#1976D2', width: 2 },
-    marker: { size: 6, color: c.isDark ? '#00BFFF' : '#1976D2' },
+    fillcolor: withAlpha(c.class0, 0.15),
+    line: { color: c.class0, width: 2 },
+    marker: { size: 6, color: c.class0 },
     hovertemplate: '%{theta}: %{r}/100<extra></extra>',
   }
 
@@ -310,7 +314,7 @@ watch(() => props.jobId, () => {
   background: var(--bg-hover, #eeeeee);
 }
 .cat-arrow {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   width: 1rem;
   color: var(--text-secondary, #666);
 }
@@ -318,7 +322,7 @@ watch(() => props.jobId, () => {
   flex: 1;
 }
 .cat-count {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   background: var(--bg-badge, #e0e0e0);
   color: var(--text-secondary, #666);
   padding: 0.1rem 0.5rem;
@@ -392,7 +396,7 @@ watch(() => props.jobId, () => {
   gap: 0.3rem;
 }
 .feature-tag {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: 10px;
   background: var(--bg-badge, #e8eaf6);

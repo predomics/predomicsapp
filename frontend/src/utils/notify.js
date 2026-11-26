@@ -3,6 +3,8 @@
  * Uses the Notification API with localStorage permission tracking.
  */
 
+import i18n from '../i18n'
+
 const PERM_KEY = 'predomics_notifications'
 
 /** Check if browser notifications are supported and enabled. */
@@ -52,12 +54,13 @@ export function notify(title, body, { tag = 'predomics', onClick } = {}) {
 
 /** Notify that a job completed. */
 export function notifyJobCompleted(projectName, { auc, k, jobId } = {}) {
-  let body = `Analysis finished for "${projectName}".`
+  const { t } = i18n.global
+  let body = t('notify.jobCompletedBody', { project: projectName })
   if (auc != null) {
-    body += ` Best AUC: ${Number(auc).toFixed(4)}`
+    body += ' ' + t('notify.bestAuc', { auc: Number(auc).toFixed(4) })
     if (k != null) body += ` (k=${k})`
   }
-  return notify('Job Completed', body, {
+  return notify(t('notify.jobCompletedTitle'), body, {
     tag: `job-${jobId || 'done'}`,
     onClick: () => window.focus(),
   })
@@ -65,7 +68,8 @@ export function notifyJobCompleted(projectName, { auc, k, jobId } = {}) {
 
 /** Notify that a job failed. */
 export function notifyJobFailed(projectName, { jobId } = {}) {
-  return notify('Job Failed', `Analysis failed for "${projectName}". Check the console for details.`, {
+  const { t } = i18n.global
+  return notify(t('notify.jobFailedTitle'), t('notify.jobFailedBody', { project: projectName }), {
     tag: `job-${jobId || 'fail'}`,
     onClick: () => window.focus(),
   })

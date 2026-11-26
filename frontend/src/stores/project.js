@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import axios from 'axios'
+import { api } from '../api'
 
 export const useProjectStore = defineStore('project', () => {
   const projects = ref([])
@@ -17,7 +17,7 @@ export const useProjectStore = defineStore('project', () => {
   })
 
   async function fetchAll(includeArchived = false) {
-    const { data } = await axios.get('/api/projects/', {
+    const { data } = await api.projects.list({
       params: { include_archived: includeArchived },
     })
     projects.value = data
@@ -25,19 +25,19 @@ export const useProjectStore = defineStore('project', () => {
 
   async function fetchSharedProjects() {
     try {
-      const { data } = await axios.get('/api/projects/shared-with-me')
+      const { data } = await api.projects.sharedWithMe({ silentError: true })
       sharedProjects.value = data
-    } catch { /* ignore */ }
+    } catch { /* optional list: the page still works without it */ }
   }
 
   async function fetchOne(id) {
-    const { data } = await axios.get(`/api/projects/${id}`)
+    const { data } = await api.projects.get(id)
     current.value = data
     return data
   }
 
   async function create(name, description = '') {
-    const { data } = await axios.post('/api/projects/', null, { params: { name, description } })
+    const { data } = await api.projects.create(null, { params: { name, description } })
     await fetchAll()
     return data
   }
@@ -47,7 +47,7 @@ export const useProjectStore = defineStore('project', () => {
     if (name !== undefined) body.name = name
     if (description !== undefined) body.description = description
     if (class_names !== undefined) body.class_names = class_names
-    const { data } = await axios.patch(`/api/projects/${id}`, body)
+    const { data } = await api.projects.update(id, body)
     const idx = projects.value.findIndex(p => p.project_id === id)
     if (idx >= 0) projects.value[idx] = data
     if (current.value?.project_id === id) current.value = data
@@ -55,13 +55,13 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function remove(id) {
-    await axios.delete(`/api/projects/${id}`)
+    await api.projects.remove(id)
     if (selectedId.value === id) selectedId.value = null
     await fetchAll()
   }
 
   async function archiveProject(id) {
-    const { data } = await axios.post(`/api/projects/${id}/archive`)
+    const { data } = await api.projects.toggleArchive(id)
     const idx = projects.value.findIndex(p => p.project_id === id)
     if (idx >= 0) projects.value[idx] = data
     return data

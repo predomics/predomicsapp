@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import axios from 'axios'
+import { api } from '../api'
 
 export const useDatasetStore = defineStore('dataset', () => {
   const datasets = ref([])
@@ -16,7 +16,7 @@ export const useDatasetStore = defineStore('dataset', () => {
       if (tag) params.tag = tag
       if (search) params.search = search
       if (includeArchived) params.include_archived = true
-      const { data } = await axios.get('/api/datasets/', { params })
+      const { data } = await api.datasets.list({ params })
       datasets.value = data
     } finally {
       loading.value = false
@@ -25,13 +25,13 @@ export const useDatasetStore = defineStore('dataset', () => {
 
   async function fetchTagSuggestions() {
     try {
-      const { data } = await axios.get('/api/datasets/tags/suggestions')
+      const { data } = await api.datasets.tagSuggestions()
       tagSuggestions.value = data.suggestions || []
     } catch { /* ignore */ }
   }
 
   async function createGroup(name, description = '', tags = '') {
-    const { data } = await axios.post('/api/datasets/', null, {
+    const { data } = await api.datasets.create(null, {
       params: { name, description, tags },
     })
     datasets.value.unshift(data)
@@ -39,7 +39,7 @@ export const useDatasetStore = defineStore('dataset', () => {
   }
 
   async function updateTags(datasetId, tags) {
-    const { data } = await axios.patch(`/api/datasets/${datasetId}/tags`, { tags })
+    const { data } = await api.datasets.setTags(datasetId, { tags })
     const idx = datasets.value.findIndex(d => d.id === datasetId)
     if (idx >= 0) {
       datasets.value[idx].tags = data.tags
@@ -52,7 +52,7 @@ export const useDatasetStore = defineStore('dataset', () => {
     form.append('file', file)
     const params = {}
     if (role) params.role = role
-    const { data } = await axios.post(`/api/datasets/${datasetId}/files`, form, { params })
+    const { data } = await api.datasets.uploadFile(datasetId, form, { params })
     // Refresh full dataset to pick up auto-scanned metadata
     await refreshDataset(datasetId)
     return data
@@ -60,14 +60,14 @@ export const useDatasetStore = defineStore('dataset', () => {
 
   async function refreshDataset(datasetId) {
     try {
-      const { data } = await axios.get(`/api/datasets/${datasetId}`)
+      const { data } = await api.datasets.get(datasetId)
       const idx = datasets.value.findIndex(d => d.id === datasetId)
       if (idx >= 0) datasets.value[idx] = data
     } catch { /* ignore */ }
   }
 
   async function scanDataset(datasetId) {
-    const { data } = await axios.post(`/api/datasets/${datasetId}/scan`)
+    const { data } = await api.datasets.scan(datasetId)
     const idx = datasets.value.findIndex(d => d.id === datasetId)
     if (idx >= 0) {
       datasets.value[idx].metadata = data
@@ -76,7 +76,7 @@ export const useDatasetStore = defineStore('dataset', () => {
   }
 
   async function deleteFile(datasetId, fileId) {
-    await axios.delete(`/api/datasets/${datasetId}/files/${fileId}`)
+    await api.datasets.deleteFile(datasetId, fileId)
     const idx = datasets.value.findIndex(d => d.id === datasetId)
     if (idx >= 0) {
       datasets.value[idx].files = datasets.value[idx].files.filter(f => f.id !== fileId)
@@ -84,7 +84,7 @@ export const useDatasetStore = defineStore('dataset', () => {
   }
 
   async function deleteDataset(id) {
-    await axios.delete(`/api/datasets/${id}`)
+    await api.datasets.remove(id)
     datasets.value = datasets.value.filter(d => d.id !== id)
   }
 
@@ -92,21 +92,21 @@ export const useDatasetStore = defineStore('dataset', () => {
     const body = {}
     if (name !== undefined) body.name = name
     if (description !== undefined) body.description = description
-    const { data } = await axios.patch(`/api/datasets/${id}`, body)
+    const { data } = await api.datasets.update(id, body)
     const idx = datasets.value.findIndex(d => d.id === id)
     if (idx >= 0) datasets.value[idx] = data
     return data
   }
 
   async function archiveDataset(id) {
-    const { data } = await axios.post(`/api/datasets/${id}/archive`)
+    const { data } = await api.datasets.toggleArchive(id)
     const idx = datasets.value.findIndex(d => d.id === id)
     if (idx >= 0) datasets.value[idx] = data
     return data
   }
 
   async function updateClassNames(datasetId, classNames) {
-    const { data } = await axios.patch(`/api/datasets/${datasetId}/class-names`, { class_names: classNames })
+    const { data } = await api.datasets.setClassNames(datasetId, { class_names: classNames })
     const idx = datasets.value.findIndex(d => d.id === datasetId)
     if (idx >= 0 && datasets.value[idx].metadata) {
       datasets.value[idx].metadata.class_names = data.class_names
@@ -115,18 +115,16 @@ export const useDatasetStore = defineStore('dataset', () => {
   }
 
   async function assignDataset(datasetId, projectId) {
-    await axios.post(`/api/datasets/${datasetId}/assign/${projectId}`)
+    await api.datasets.assign(datasetId, projectId)
   }
 
   async function unassignDataset(datasetId, projectId) {
-    await axios.delete(`/api/datasets/${datasetId}/assign/${projectId}`)
+    await api.datasets.unassign(datasetId, projectId)
   }
 
   async function fetchMetadataColumns(projectId, datasetId, fileId) {
     try {
-      const { data } = await axios.get(
-        `/api/projects/${projectId}/datasets/${datasetId}/files/${fileId}/columns`
-      )
+      const { data } = await api.projects.fileColumns(projectId, datasetId, fileId)
       metadata_columns.value = data.numeric_columns || []
     } catch {
       metadata_columns.value = []

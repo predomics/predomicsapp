@@ -20,6 +20,13 @@ const routes = [
     meta: { guest: true },
   },
   {
+    path: '/verify-email',
+    name: 'VerifyEmail',
+    component: () => import('./views/VerifyEmailView.vue'),
+    // Reachable whether or not a session exists: the link is opened from an email.
+    meta: { guest: true, public: true },
+  },
+  {
     path: '/',
     name: 'Home',
     component: () => import('./views/HomeView.vue'),
@@ -96,7 +103,7 @@ router.beforeEach(async (to) => {
   const token = localStorage.getItem('token')
   // Redirect to login if not authenticated (except guest pages)
   if (!to.meta.guest && to.name !== 'Home' && !token) {
-    return { name: 'Login' }
+    return { name: 'Login', query: to.fullPath && to.fullPath !== '/' ? { redirect: to.fullPath } : undefined }
   }
   // Redirect away from login if already authenticated (but allow public pages)
   if (to.meta.guest && !to.meta.public && token) {

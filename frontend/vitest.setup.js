@@ -12,3 +12,20 @@ if (typeof globalThis.localStorage === 'undefined' || typeof globalThis.localSto
     key: (i) => Object.keys(store)[i] ?? null,
   }
 }
+
+// jsdom has no matchMedia (used by the theme store) and no scrollIntoView.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent() { return false },
+  })
+}
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = function () {}
+}

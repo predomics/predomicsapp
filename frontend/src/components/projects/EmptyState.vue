@@ -1,16 +1,16 @@
 <template>
   <div class="empty-state">
-    <div class="empty-icon">&#128202;</div>
-    <h3>{{ title }}</h3>
-    <p>{{ message }}</p>
+    <div class="empty-icon" aria-hidden="true">&#128202;</div>
+    <h3>{{ title || $t('projects.noProjectSelected') }}</h3>
+    <p>{{ message || $t('projects.selectOrCreate') }}</p>
     <slot />
   </div>
 </template>
 
 <script setup>
 defineProps({
-  title: { type: String, default: 'No project selected' },
-  message: { type: String, default: 'Select a project from the list or create a new one.' },
+  title: { type: String, default: '' },
+  message: { type: String, default: '' },
 })
 </script>
 

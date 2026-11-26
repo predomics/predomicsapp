@@ -12,8 +12,10 @@
           <th>{{ $t('admin.colName') }}</th>
           <th>{{ $t('admin.colActive') }}</th>
           <th>{{ $t('admin.colAdmin') }}</th>
+          <th v-if="hasVerifiedFlag">{{ $t('admin.colVerified') }}</th>
           <th>{{ $t('admin.colProjects') }}</th>
           <th>{{ $t('admin.colDatasets') }}</th>
+          <th v-if="hasUsage">{{ $t('admin.colStorage') }}</th>
           <th>{{ $t('admin.colCreated') }}</th>
           <th>{{ $t('admin.colActions') }}</th>
         </tr>
@@ -42,8 +44,20 @@
               {{ u.is_admin ? $t('admin.yes') : $t('admin.no') }}
             </button>
           </td>
+          <td v-if="hasVerifiedFlag">
+            <button
+              class="toggle-btn"
+              :class="u.email_verified ? 'on' : 'off'"
+              :aria-label="$t('admin.verifiedToggle', { email: u.email })"
+              :aria-pressed="u.email_verified ? 'true' : 'false'"
+              @click="toggleVerified(u)"
+            >
+              {{ u.email_verified ? $t('admin.yes') : $t('admin.no') }}
+            </button>
+          </td>
           <td class="count">{{ u.project_count }}</td>
           <td class="count">{{ u.dataset_count }}</td>
+          <td v-if="hasUsage" class="count">{{ formatBytes(u.used_bytes) }}</td>
           <td class="date">{{ new Date(u.created_at).toLocaleDateString() }}</td>
           <td>
             <button
@@ -57,6 +71,54 @@
         </tr>
       </tbody>
     </table>
+
+    <!-- Create an account (the only way in when self-registration is off) -->
+    <form class="create-user" @submit.prevent="createUser" novalidate>
+      <h3>{{ $t('admin.createUserTitle') }}</h3>
+      <div class="create-user-grid">
+        <div class="create-user-field">
+          <label for="new-user-email">{{ $t('admin.colEmail') }}</label>
+          <input id="new-user-email" v-model.trim="newUser.email" type="email" autocomplete="off" required />
+        </div>
+        <div class="create-user-field">
+          <label for="new-user-name">{{ $t('admin.colName') }}</label>
+          <input id="new-user-name" v-model.trim="newUser.full_name" type="text" autocomplete="off" />
+        </div>
+        <div class="create-user-field">
+          <label for="new-user-password">{{ $t('admin.newUserPassword') }}</label>
+          <input id="new-user-password" v-model="newUser.password" type="password" autocomplete="new-password" required aria-describedby="new-user-password-hint" />
+          <span id="new-user-password-hint" class="scitq-hint">{{ $t('login.passwordHint', { n: 8 }) }}</span>
+        </div>
+        <label class="create-user-check">
+          <input type="checkbox" v-model="newUser.is_admin" />
+          {{ $t('admin.newUserAdmin') }}
+        </label>
+      </div>
+      <p v-if="newUserError" class="error-msg" role="alert">{{ newUserError }}</p>
+      <button type="submit" class="btn-save" :disabled="creatingUser || !newUser.email || !newUser.password">
+        {{ creatingUser ? $t('admin.creating') : $t('admin.createUser') }}
+      </button>
+    </form>
+
+    <!-- Data retention -->
+    <h2 class="section-title">{{ $t('admin.retentionTitle') }}</h2>
+    <p class="section-desc">{{ $t('admin.retentionDesc') }}</p>
+    <div class="retention">
+      <button type="button" class="btn-test" :disabled="retentionBusy" @click="runRetention(true)">
+        {{ retentionBusy === 'preview' ? $t('common.loading') : $t('admin.retentionPreview') }}
+      </button>
+      <button type="button" class="btn-delete" :disabled="retentionBusy || !retentionResult || !retentionResult.dry_run" @click="runRetention(false)">
+        {{ retentionBusy === 'run' ? $t('common.loading') : $t('admin.retentionRun') }}
+      </button>
+      <p v-if="retentionError" class="error-msg" role="alert">{{ retentionError }}</p>
+      <div v-if="retentionResult" class="retention-result" role="status">
+        <strong>{{ retentionResult.dry_run ? $t('admin.retentionPreviewResult') : $t('admin.retentionDone') }}</strong>
+        <ul v-if="retentionLines.length">
+          <li v-for="line in retentionLines" :key="line.key">{{ line.key }}: {{ line.value }}</li>
+        </ul>
+        <p v-else>{{ $t('admin.retentionNothing') }}</p>
+      </div>
+    </div>
 
     <!-- scitq Distributed Task Queue Section -->
     <h2 class="section-title">{{ $t('admin.scitqTitle') }}</h2>
@@ -89,8 +151,17 @@
             id="scitq-token"
             type="password"
             v-model="scitqForm.token"
-            :placeholder="$t('admin.scitqTokenPlaceholder')"
+            autocomplete="off"
+            :placeholder="scitqTokenSet ? $t('admin.scitqTokenKeepPlaceholder') : $t('admin.scitqTokenPlaceholder')"
+            aria-describedby="scitq-token-hint"
           />
+          <p id="scitq-token-hint" class="scitq-hint">
+            <template v-if="scitqTokenSet">
+              {{ $t('admin.scitqTokenStored') }}
+              <button type="button" class="btn-inline-danger" :disabled="scitqSaving" @click="clearScitqToken">{{ $t('admin.scitqTokenRemove') }}</button>
+            </template>
+            <template v-else>{{ $t('admin.scitqTokenNone') }}</template>
+          </p>
         </div>
         <div class="scitq-field">
           <label for="scitq-container">{{ $t('admin.scitqContainerLabel') }}</label>
@@ -104,7 +175,7 @@
       </div>
 
       <div class="scitq-actions">
-        <button class="btn-save" @click="saveScitq" :disabled="scitqSaving">
+        <button class="btn-save" @click="saveScitq()" :disabled="scitqSaving">
           {{ scitqSaving ? $t('admin.saving') : $t('common.save') }}
         </button>
         <button class="btn-test" @click="testScitq" :disabled="scitqTesting || !scitqForm.server">
@@ -133,7 +204,7 @@
     <div v-if="defaultsLoading" class="loading">{{ $t('admin.loadingDefaults') }}</div>
     <div v-else class="defaults-grid">
       <div v-for="(field, idx) in defaultFields" :key="idx" class="default-field">
-        <label :for="'df-' + idx">{{ field.label }}</label>
+        <label :for="'df-' + idx">{{ fieldLabel(field) }}</label>
         <select v-if="field.options" :id="'df-' + idx" v-model="defaults[field.key]">
           <option :value="undefined">{{ $t('admin.useHardcoded') }}</option>
           <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
@@ -172,8 +243,8 @@
     <p class="section-desc">{{ $t('admin.templatesDesc') }}</p>
 
     <div class="template-create">
-      <input v-model="tplName" :placeholder="$t('admin.templateName')" class="tpl-input" />
-      <input v-model="tplDesc" :placeholder="$t('admin.templateDesc')" class="tpl-input tpl-desc" />
+      <input :aria-label="$t('admin.templateName')" v-model="tplName" :placeholder="$t('admin.templateName')" class="tpl-input" />
+      <input :aria-label="$t('admin.templateDesc')" v-model="tplDesc" :placeholder="$t('admin.templateDesc')" class="tpl-input tpl-desc" />
       <button class="btn-save" @click="createTemplate" :disabled="!tplName.trim() || tplSaving">
         {{ tplSaving ? $t('admin.saving') : $t('admin.createTemplate') }}
       </button>
@@ -181,12 +252,12 @@
     <p class="section-desc">{{ $t('admin.templateConfigHint') }}</p>
 
     <div v-if="tplTemplates.length > 0" class="tpl-list">
-      <div v-for="t in tplTemplates" :key="t.id" class="tpl-card">
+      <div v-for="tpl in tplTemplates" :key="tpl.id" class="tpl-card">
         <div class="tpl-info">
-          <strong>{{ t.name }}</strong>
-          <span v-if="t.description" class="tpl-desc-text">{{ t.description }}</span>
+          <strong>{{ tpl.name }}</strong>
+          <span v-if="tpl.description" class="tpl-desc-text">{{ tpl.description }}</span>
         </div>
-        <button class="btn-delete" @click="deleteTemplate(t)">{{ $t('admin.delete') }}</button>
+        <button class="btn-delete" @click="deleteTemplate(tpl)">{{ $t('admin.delete') }}</button>
       </div>
     </div>
     <div v-else class="empty-state">{{ $t('admin.noTemplates') }}</div>
@@ -196,7 +267,7 @@
     <p class="section-desc">{{ $t('admin.auditLogDesc') }}</p>
 
     <div class="audit-filters">
-      <select v-model="auditAction" @change="fetchAuditLog(1)" class="audit-select">
+      <select :aria-label="$t('admin.filterByAction')" v-model="auditAction" @change="fetchAuditLog(1)" class="audit-select">
         <option value="">{{ $t('admin.allActions') }}</option>
         <option v-for="a in auditActions" :key="a" :value="a">{{ a }}</option>
       </select>
@@ -237,7 +308,7 @@
 
     <div class="backup-actions">
       <div class="backup-create">
-        <input v-model="backupDescription" :placeholder="$t('admin.backupDescPlaceholder')" class="backup-desc-input" />
+        <input :aria-label="$t('admin.backupDescPlaceholder')" v-model="backupDescription" :placeholder="$t('admin.backupDescPlaceholder')" class="backup-desc-input" />
         <button class="btn-save" @click="createBackup" :disabled="backupCreating">
           {{ backupCreating ? $t('admin.creating') : $t('admin.createBackup') }}
         </button>
@@ -247,7 +318,7 @@
           {{ $t('admin.restoreFromFile') }}
           <input type="file" accept=".tar.gz,.tgz" @change="handleRestoreFile" style="display:none" />
         </label>
-        <select v-model="restoreMode" class="restore-mode-select">
+        <select :aria-label="$t('admin.restoreModeLabel')" v-model="restoreMode" class="restore-mode-select">
           <option value="replace">{{ $t('admin.replaceMode') }}</option>
           <option value="merge">{{ $t('admin.mergeMode') }}</option>
         </select>
@@ -290,12 +361,19 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import axios from 'axios'
+import { formatBytes } from '../utils/format'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { api } from '../api'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import { apiError } from '../utils/apiError'
+import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
 
-const { t } = useI18n()
+const { toast } = useToast()
+const { confirmDialog } = useConfirm()
+
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const currentUser = auth.user
 
@@ -308,6 +386,14 @@ const defaults = reactive({})
 const defaultsLoading = ref(false)
 const defaultsSaving = ref(false)
 const defaultsSaved = ref(false)
+
+/** Label of a default-parameter field, in the user's language (falls back to the English label). */
+function fieldLabel(field) {
+  const paramKey = `params.${field.key}.label`
+  if (te(paramKey)) return t(paramKey)
+  const adminKey = `admin.defaultField.${field.key.replace('.', '_')}`
+  return te(adminKey) ? t(adminKey) : field.label
+}
 
 const defaultFields = [
   { key: 'general.algo', label: 'Algorithm', options: ['ga', 'beam', 'mcmc'] },
@@ -329,7 +415,7 @@ const defaultFields = [
 async function fetchDefaults() {
   defaultsLoading.value = true
   try {
-    const { data } = await axios.get('/api/admin/defaults')
+    const { data } = await api.admin.getDefaults()
     Object.assign(defaults, data)
   } catch { /* ignore */ }
   finally { defaultsLoading.value = false }
@@ -344,21 +430,21 @@ async function saveDefaults() {
     for (const [k, v] of Object.entries(defaults)) {
       if (v !== undefined && v !== '' && v !== null) clean[k] = v
     }
-    await axios.put('/api/admin/defaults', clean)
+    await api.admin.setDefaults(clean)
     // Reload to confirm
     Object.keys(defaults).forEach(k => delete defaults[k])
     Object.assign(defaults, clean)
     defaultsSaved.value = true
     setTimeout(() => { defaultsSaved.value = false }, 3000)
   } catch (e) {
-    alert(t('admin.saveFailed', { error: e.response?.data?.detail || e.message }))
+    toast.error(t('admin.saveFailed', { error: apiError(e) }))
   } finally {
     defaultsSaving.value = false
   }
 }
 
-function resetDefaults() {
-  if (!confirm(t('admin.resetConfirm'))) return
+async function resetDefaults() {
+  if (!(await confirmDialog({ message: t('admin.resetConfirm'), danger: true }))) return
   Object.keys(defaults).forEach(k => delete defaults[k])
   saveDefaults()
 }
@@ -367,10 +453,10 @@ async function fetchUsers() {
   loading.value = true
   error.value = ''
   try {
-    const { data } = await axios.get('/api/admin/users')
+    const { data } = await api.admin.listUsers()
     users.value = data
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Failed to load users'
+    error.value = apiError(e)
   } finally {
     loading.value = false
   }
@@ -378,33 +464,92 @@ async function fetchUsers() {
 
 async function toggleActive(u) {
   try {
-    const { data } = await axios.patch(`/api/admin/users/${u.id}`, {
+    const { data } = await api.admin.updateUser(u.id, {
       is_active: !u.is_active,
     })
     Object.assign(u, data)
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to update user')
+    toast.error(t('admin.err.updateUser', { error: apiError(e) }))
+  }
+}
+
+// Columns that only newer servers report.
+const hasVerifiedFlag = computed(() => users.value.some(u => typeof u.email_verified === 'boolean'))
+const hasUsage = computed(() => users.value.some(u => typeof u.used_bytes === 'number'))
+
+async function toggleVerified(u) {
+  try {
+    const { data } = await api.admin.updateUser(u.id, { email_verified: !u.email_verified })
+    Object.assign(u, data)
+  } catch (e) {
+    toast.error(t('admin.err.updateUser', { error: apiError(e) }))
+  }
+}
+
+// Create an account
+const newUser = reactive({ email: '', full_name: '', password: '', is_admin: false })
+const creatingUser = ref(false)
+const newUserError = ref('')
+
+async function createUser() {
+  newUserError.value = ''
+  creatingUser.value = true
+  try {
+    await api.admin.createUser({ ...newUser })
+    toast.success(t('admin.userCreated', { email: newUser.email }))
+    Object.assign(newUser, { email: '', full_name: '', password: '', is_admin: false })
+    await fetchUsers()
+  } catch (e) {
+    newUserError.value = apiError(e)
+  } finally {
+    creatingUser.value = false
+  }
+}
+
+// Data retention: preview first, then run exactly what was previewed.
+const retentionBusy = ref('')
+const retentionResult = ref(null)
+const retentionError = ref('')
+const retentionLines = computed(() => {
+  const r = retentionResult.value
+  if (!r) return []
+  return Object.entries(r)
+    .filter(([k, v]) => k !== 'dry_run' && (typeof v === 'number' || typeof v === 'string') && v !== 0 && v !== '')
+    .map(([key, value]) => ({ key: key.replace(/_/g, ' '), value: /bytes/.test(key) ? formatBytes(value) : value }))
+})
+
+async function runRetention(dryRun) {
+  if (!dryRun && !(await confirmDialog({ message: t('admin.retentionConfirm'), confirmLabel: t('admin.retentionRun'), danger: true }))) return
+  retentionBusy.value = dryRun ? 'preview' : 'run'
+  retentionError.value = ''
+  try {
+    const { data } = await api.admin.runRetention(null, { params: { dry_run: dryRun } })
+    retentionResult.value = { ...data, dry_run: dryRun }
+  } catch (e) {
+    retentionError.value = apiError(e)
+  } finally {
+    retentionBusy.value = ''
   }
 }
 
 async function toggleAdmin(u) {
   try {
-    const { data } = await axios.patch(`/api/admin/users/${u.id}`, {
+    const { data } = await api.admin.updateUser(u.id, {
       is_admin: !u.is_admin,
     })
     Object.assign(u, data)
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to update user')
+    toast.error(t('admin.err.updateUser', { error: apiError(e) }))
   }
 }
 
 async function deleteUser(u) {
-  if (!confirm(t('admin.deleteUserConfirm', { email: u.email }))) return
+  if (!(await confirmDialog({ message: t('admin.deleteUserConfirm', { email: u.email }), danger: true }))) return
   try {
-    await axios.delete(`/api/admin/users/${u.id}`)
+    await api.admin.deleteUser(u.id)
     users.value = users.value.filter(x => x.id !== u.id)
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to delete user')
+    toast.error(t('admin.err.deleteUser', { error: apiError(e) }))
   }
 }
 
@@ -414,6 +559,8 @@ async function deleteUser(u) {
 
 const scitqConfig = reactive({ enabled: false, package_installed: false })
 const scitqForm = reactive({ server: '', token: '', container: '' })
+// The server never sends the token back, only whether one is stored.
+const scitqTokenSet = ref(false)
 const scitqLoading = ref(false)
 const scitqSaving = ref(false)
 const scitqSaved = ref(false)
@@ -423,45 +570,56 @@ const scitqTestResult = ref(null)
 async function fetchScitq() {
   scitqLoading.value = true
   try {
-    const { data } = await axios.get('/api/admin/scitq')
+    const { data } = await api.admin.getScitq()
     scitqConfig.enabled = data.enabled
     scitqConfig.package_installed = data.package_installed
     scitqForm.server = data.server || ''
-    scitqForm.token = data.token || ''
+    scitqForm.token = ''
+    scitqTokenSet.value = !!(data.token_set ?? data.token)
     scitqForm.container = data.container || ''
   } catch { /* ignore */ }
   finally { scitqLoading.value = false }
 }
 
-async function saveScitq() {
+async function saveScitq({ clearToken = false } = {}) {
   scitqSaving.value = true
   scitqSaved.value = false
   scitqTestResult.value = null
   try {
-    const { data } = await axios.put('/api/admin/scitq', {
+    // An empty token means "keep the stored one"; removing it is explicit.
+    const body = {
       server: scitqForm.server.trim(),
-      token: scitqForm.token,
+      token: clearToken ? '' : scitqForm.token,
       container: scitqForm.container.trim(),
-    })
+    }
+    if (clearToken) body.clear_token = true
+    const { data } = await api.admin.setScitq(body)
     scitqConfig.enabled = data.enabled
     scitqConfig.package_installed = data.package_installed
+    scitqTokenSet.value = !!(data.token_set ?? data.token)
+    scitqForm.token = ''
     scitqSaved.value = true
     setTimeout(() => { scitqSaved.value = false }, 3000)
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to save scitq config')
+    toast.error(t('admin.err.saveScitq', { error: apiError(e) }))
   } finally {
     scitqSaving.value = false
   }
+}
+
+async function clearScitqToken() {
+  if (!(await confirmDialog({ message: t('admin.scitqTokenRemoveConfirm'), confirmLabel: t('admin.scitqTokenRemove'), danger: true }))) return
+  await saveScitq({ clearToken: true })
 }
 
 async function testScitq() {
   scitqTesting.value = true
   scitqTestResult.value = null
   try {
-    const { data } = await axios.post('/api/admin/scitq/test')
+    const { data } = await api.admin.testScitq()
     scitqTestResult.value = data
   } catch (e) {
-    scitqTestResult.value = { ok: false, error: e.response?.data?.detail || e.message }
+    scitqTestResult.value = { ok: false, error: apiError(e) }
   } finally {
     scitqTesting.value = false
   }
@@ -482,7 +640,7 @@ const restoreMode = ref('replace')
 async function fetchBackups() {
   backupLoading.value = true
   try {
-    const { data } = await axios.get('/api/admin/backup/list')
+    const { data } = await api.admin.listBackups()
     backups.value = data
   } catch { /* ignore */ }
   finally { backupLoading.value = false }
@@ -492,15 +650,15 @@ async function createBackup() {
   backupCreating.value = true
   backupMessage.value = ''
   try {
-    const { data } = await axios.post('/api/admin/backup', null, {
+    const { data } = await api.admin.createBackup(null, {
       params: { description: backupDescription.value },
     })
-    backupMessage.value = `Backup created: ${data.filename} (${formatSize(data.size_bytes)})`
+    backupMessage.value = t('admin.backupCreated', { name: data.filename, size: formatSize(data.size_bytes) })
     backupMsgType.value = 'success'
     backupDescription.value = ''
     await fetchBackups()
   } catch (e) {
-    backupMessage.value = e.response?.data?.detail || 'Backup failed'
+    backupMessage.value = apiError(e)
     backupMsgType.value = 'error'
   } finally {
     backupCreating.value = false
@@ -509,7 +667,7 @@ async function createBackup() {
 
 async function downloadBackup(b) {
   try {
-    const resp = await axios.get(`/api/admin/backup/download/${b.backup_id}`, {
+    const resp = await api.admin.downloadBackup(b.backup_id, {
       responseType: 'blob',
     })
     const url = URL.createObjectURL(resp.data)
@@ -519,20 +677,20 @@ async function downloadBackup(b) {
     a.click()
     URL.revokeObjectURL(url)
   } catch {
-    backupMessage.value = 'Download failed'
+    backupMessage.value = t('admin.backupDownloadFailed')
     backupMsgType.value = 'error'
   }
 }
 
 async function deleteBackupConfirm(b) {
-  if (!confirm(`Delete backup "${b.filename}"? This cannot be undone.`)) return
+  if (!(await confirmDialog({ message: t('admin.deleteBackupConfirm', { name: b.filename }), danger: true }))) return
   try {
-    await axios.delete(`/api/admin/backup/${b.backup_id}`)
-    backupMessage.value = 'Backup deleted'
+    await api.admin.deleteBackup(b.backup_id)
+    backupMessage.value = t('admin.backupDeleted')
     backupMsgType.value = 'success'
     await fetchBackups()
   } catch (e) {
-    backupMessage.value = e.response?.data?.detail || 'Delete failed'
+    backupMessage.value = apiError(e)
     backupMsgType.value = 'error'
   }
 }
@@ -541,11 +699,9 @@ async function handleRestoreFile(event) {
   const file = event.target.files[0]
   if (!file) return
 
-  const modeText = restoreMode.value === 'replace'
-    ? 'REPLACE all existing data'
-    : 'MERGE with existing data (skip conflicts)'
+  const confirmKey = restoreMode.value === 'replace' ? 'admin.restoreConfirmReplace' : 'admin.restoreConfirmMerge'
 
-  if (!confirm(`Restore from "${file.name}"?\n\nThis will ${modeText}.\nAre you sure?`)) {
+  if (!(await confirmDialog({ message: t(confirmKey, { name: file.name }), confirmLabel: t('admin.restoreAction'), danger: true }))) {
     event.target.value = ''
     return
   }
@@ -553,21 +709,21 @@ async function handleRestoreFile(event) {
   const form = new FormData()
   form.append('file', file)
 
-  backupMessage.value = 'Restoring... This may take a while.'
+  backupMessage.value = t('admin.restoring')
   backupMsgType.value = 'success'
 
   try {
-    const { data } = await axios.post(`/api/admin/restore?mode=${restoreMode.value}`, form)
+    const { data } = await api.admin.restoreBackup(restoreMode.value, form)
     const counts = Object.entries(data.restored_counts || {})
       .filter(([, c]) => c > 0)
       .map(([t, c]) => `${t}: ${c}`)
       .join(', ')
-    backupMessage.value = `Restored successfully (${data.mode} mode). ${counts}`
+    backupMessage.value = t('admin.restoreDone', { mode: data.mode, counts })
     backupMsgType.value = 'success'
     await fetchBackups()
     await fetchUsers()
   } catch (e) {
-    backupMessage.value = e.response?.data?.detail || 'Restore failed'
+    backupMessage.value = apiError(e)
     backupMsgType.value = 'error'
   }
   event.target.value = ''
@@ -596,7 +752,7 @@ const tplSaving = ref(false)
 
 async function fetchTemplates() {
   try {
-    const { data } = await axios.get('/api/templates/')
+    const { data } = await api.templates.list()
     tplTemplates.value = data
   } catch { /* ignore */ }
 }
@@ -610,7 +766,7 @@ async function createTemplate() {
     for (const [k, v] of Object.entries(defaults)) {
       if (v !== undefined && v !== '' && v !== null) clean[k] = v
     }
-    await axios.post('/api/templates/', {
+    await api.templates.create({
       name: tplName.value.trim(),
       description: tplDesc.value.trim(),
       config: clean,
@@ -619,19 +775,19 @@ async function createTemplate() {
     tplDesc.value = ''
     await fetchTemplates()
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to create template')
+    toast.error(t('admin.err.createTemplate', { error: apiError(e) }))
   } finally {
     tplSaving.value = false
   }
 }
 
-async function deleteTemplate(t) {
-  if (!confirm(`Delete template "${t.name}"?`)) return
+async function deleteTemplate(tpl) {
+  if (!(await confirmDialog({ message: t('admin.deleteTemplateConfirm', { name: tpl.name }), danger: true }))) return
   try {
-    await axios.delete(`/api/templates/${t.id}`)
+    await api.templates.remove(tpl.id)
     await fetchTemplates()
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to delete template')
+    toast.error(t('admin.err.deleteTemplate', { error: apiError(e) }))
   }
 }
 
@@ -655,7 +811,7 @@ async function fetchAuditLog(page = 1) {
   try {
     const params = { page, per_page: auditPerPage }
     if (auditAction.value) params.action = auditAction.value
-    const { data } = await axios.get('/api/admin/audit-log', { params })
+    const { data } = await api.admin.auditLog({ params })
     auditEntries.value = data.entries
     auditTotal.value = data.total
   } catch { /* ignore */ }
@@ -672,6 +828,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.create-user { margin: 1.25rem 0 2rem; padding: 1rem 1.25rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 8px; }
+.create-user h3 { font-size: 1rem; margin-bottom: 0.75rem; color: var(--text-primary); }
+.create-user-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem 1rem; align-items: end; margin-bottom: 0.75rem; }
+.create-user-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.create-user-field label { font-size: 0.8rem; color: var(--text-secondary); }
+.create-user-field input { padding: 0.45rem 0.6rem; border: 1px solid var(--border-light); border-radius: 6px; background: var(--bg-input); color: var(--text-body); font-size: 0.85rem; }
+.create-user-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-body); }
+.retention { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-start; margin-bottom: 2rem; }
+.retention-result { flex-basis: 100%; font-size: 0.85rem; color: var(--text-body); background: var(--bg-badge); border-radius: 6px; padding: 0.6rem 0.9rem; }
+.retention-result ul { margin: 0.3rem 0 0 1.1rem; }
+
+.scitq-hint { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.3rem; }
+.btn-inline-danger {
+  background: none; border: none; padding: 0; margin-left: 0.4rem;
+  color: var(--danger); text-decoration: underline; cursor: pointer; font-size: 0.8rem;
+}
+.btn-inline-danger:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .admin-page {
   max-width: 1100px;
   margin: 0 auto;
@@ -1076,7 +1250,7 @@ onMounted(() => {
   display: inline-block;
   padding: 0.1rem 0.4rem;
   border-radius: 3px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
   background: var(--bg-badge);
   color: var(--text-secondary);

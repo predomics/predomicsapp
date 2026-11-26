@@ -92,6 +92,8 @@ describe('PARAM_DEFS', () => {
   it('number defaults are numbers', () => {
     for (const p of PARAM_DEFS) {
       if (p.inputType === 'number') {
+        // null = "no limit / automatic" (e.g. tree depth): the field may stay empty
+        if (p.defaultValue === null) continue
         expect(typeof p.defaultValue).toBe('number')
       }
     }

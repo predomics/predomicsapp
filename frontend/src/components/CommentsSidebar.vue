@@ -1,8 +1,8 @@
 <template>
-  <div class="comments-sidebar" :class="{ open: visible }">
+  <aside class="comments-sidebar" :class="{ open: visible }" :aria-hidden="visible ? 'false' : 'true'" :inert="!visible" aria-labelledby="comments-title" @keydown.escape="$emit('close')">
     <div class="sidebar-header">
-      <h3>{{ $t('comments.notes') }}</h3>
-      <button class="close-btn" @click="$emit('close')">&times;</button>
+      <h3 id="comments-title">{{ $t('comments.notes') }}</h3>
+      <button type="button" class="close-btn" :aria-label="$t('common.close')" @click="$emit('close')"><span aria-hidden="true">&times;</span></button>
     </div>
 
     <div class="comments-list" ref="listEl">
@@ -15,7 +15,7 @@
           <span v-if="c.updated_at" class="comment-edited">{{ $t('comments.edited') }}</span>
         </div>
         <div v-if="editingId === c.id" class="edit-form">
-          <textarea v-model="editContent" rows="2" class="comment-textarea"></textarea>
+          <textarea :aria-label="$t('comments.editLabel')" v-model="editContent" rows="2" class="comment-textarea"></textarea>
           <div class="edit-actions">
             <button class="btn-sm btn-primary" @click="saveEdit(c.id)">{{ $t('comments.save') }}</button>
             <button class="btn-sm btn-outline" @click="editingId = null">{{ $t('comments.cancel') }}</button>
@@ -30,7 +30,7 @@
     </div>
 
     <div class="add-comment">
-      <textarea
+      <textarea :aria-label="$t('comments.placeholder')"
         v-model="newContent"
         :placeholder="$t('comments.placeholder')"
         rows="2"
@@ -41,22 +41,29 @@
         {{ $t('comments.add') }}
       </button>
     </div>
-  </div>
+  </aside>
 </template>
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
+import { timeAgo } from '../utils/time'
 import { useAuthStore } from '../stores/auth'
+import { apiError } from '../utils/apiError'
+import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+
+const { toast } = useToast()
+const { confirmDialog } = useConfirm()
 
 const { t } = useI18n()
 
 const props = defineProps({
-  projectId: String,
+  projectId: { type: String, required: true },
   visible: Boolean,
 })
-const emit = defineEmits(['close'])
+defineEmits(['close'])
 
 const auth = useAuthStore()
 const currentUserId = auth.user?.id
@@ -71,7 +78,7 @@ const listEl = ref(null)
 async function loadComments() {
   loading.value = true
   try {
-    const { data } = await axios.get(`/api/projects/${props.projectId}/comments`)
+    const { data } = await api.projects.comments(props.projectId)
     comments.value = data
   } catch (e) {
     console.error('Failed to load comments:', e)
@@ -83,7 +90,7 @@ async function loadComments() {
 async function addComment() {
   if (!newContent.value.trim()) return
   try {
-    const { data } = await axios.post(`/api/projects/${props.projectId}/comments`, {
+    const { data } = await api.projects.addComment(props.projectId, {
       content: newContent.value.trim(),
     })
     comments.value.push(data)
@@ -91,7 +98,7 @@ async function addComment() {
     await nextTick()
     if (listEl.value) listEl.value.scrollTop = listEl.value.scrollHeight
   } catch (e) {
-    alert('Failed to add comment: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('comments.addFailed', { error: apiError(e) }))
   }
 }
 
@@ -102,7 +109,7 @@ function startEdit(comment) {
 
 async function saveEdit(id) {
   try {
-    const { data } = await axios.put(`/api/projects/${props.projectId}/comments/${id}`, {
+    const { data } = await api.projects.updateComment(props.projectId, id, {
       content: editContent.value.trim(),
     })
     const idx = comments.value.findIndex(c => c.id === id)
@@ -112,31 +119,20 @@ async function saveEdit(id) {
     }
     editingId.value = null
   } catch (e) {
-    alert('Failed to update: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('comments.updateFailed', { error: apiError(e) }))
   }
 }
 
 async function deleteComment(id) {
-  if (!confirm(t('comments.deleteConfirm'))) return
+  if (!(await confirmDialog({ message: t('comments.deleteConfirm'), danger: true }))) return
   try {
-    await axios.delete(`/api/projects/${props.projectId}/comments/${id}`)
+    await api.projects.deleteComment(props.projectId, id)
     comments.value = comments.value.filter(c => c.id !== id)
   } catch (e) {
-    alert('Failed to delete: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('comments.deleteFailed', { error: apiError(e) }))
   }
 }
 
-function timeAgo(isoStr) {
-  if (!isoStr) return ''
-  const diff = Date.now() - new Date(isoStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return t('comments.justNow')
-  if (mins < 60) return t('comments.minutesAgo', { n: mins })
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return t('comments.hoursAgo', { n: hrs })
-  const days = Math.floor(hrs / 24)
-  return t('comments.daysAgo', { n: days })
-}
 
 onMounted(() => {
   if (props.projectId) loadComments()
@@ -188,8 +184,8 @@ onMounted(() => {
   margin-bottom: 0.3rem;
 }
 .comment-user { font-weight: 600; font-size: 0.8rem; color: var(--text-primary); }
-.comment-time { font-size: 0.7rem; color: var(--text-muted); margin-left: auto; }
-.comment-edited { font-size: 0.65rem; color: var(--text-faint); font-style: italic; }
+.comment-time { font-size: 0.75rem; color: var(--text-muted); margin-left: auto; }
+.comment-edited { font-size: 0.75rem; color: var(--text-faint); font-style: italic; }
 
 .comment-content {
   font-size: 0.85rem; color: var(--text-body);
@@ -200,7 +196,7 @@ onMounted(() => {
   display: flex; gap: 0.5rem; margin-top: 0.3rem;
 }
 .action-btn {
-  background: none; border: none; font-size: 0.7rem;
+  background: none; border: none; font-size: 0.75rem;
   color: var(--text-muted); cursor: pointer; padding: 0;
 }
 .action-btn:hover { color: var(--accent); }
@@ -221,7 +217,7 @@ onMounted(() => {
   border: 1px solid var(--border); border-radius: 6px;
   padding: 0.5rem; font-size: 0.8rem; font-family: inherit;
 }
-.comment-textarea:focus { outline: none; border-color: var(--accent); }
+.comment-textarea:focus { border-color: var(--accent); }
 
 .btn-sm { padding: 0.3rem 0.7rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
 .btn-primary { background: var(--accent); color: var(--accent-text); border: none; }

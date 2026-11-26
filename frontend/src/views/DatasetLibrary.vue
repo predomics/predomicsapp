@@ -4,9 +4,9 @@
 
     <!-- Search & filter bar -->
     <div class="filter-bar">
-      <input v-model="searchQuery" :placeholder="$t('datasets.searchPlaceholder')" class="search-input" @input="applyFilters" />
+      <input :aria-label="$t('datasets.searchPlaceholder')" v-model="searchQuery" :placeholder="$t('datasets.searchPlaceholder')" class="search-input" @input="applyFilters" />
       <div class="tag-filter-wrap">
-        <select v-model="filterTag" class="tag-filter" @change="applyFilters">
+        <select :aria-label="$t('datasets.filterByTag')" v-model="filterTag" class="tag-filter" @change="applyFilters">
           <option value="">{{ $t('datasets.allTags') }}</option>
           <option v-for="tag in store.tagSuggestions" :key="tag" :value="tag">{{ tag }}</option>
         </select>
@@ -20,9 +20,9 @@
 
     <!-- Create group form -->
     <div class="create-form">
-      <input v-model="groupName" :placeholder="$t('datasets.groupName')" class="name-input" @keyup.enter="createGroup" />
-      <input v-model="groupDesc" :placeholder="$t('datasets.description')" class="desc-input" />
-      <input v-model="groupTags" :placeholder="$t('datasets.tags')" class="tags-input" />
+      <input :aria-label="$t('datasets.groupName')" v-model="groupName" :placeholder="$t('datasets.groupName')" class="name-input" @keyup.enter="createGroup" />
+      <input :aria-label="$t('datasets.description')" v-model="groupDesc" :placeholder="$t('datasets.description')" class="desc-input" />
+      <input :aria-label="$t('datasets.tags')" v-model="groupTags" :placeholder="$t('datasets.tags')" class="tags-input" />
       <button @click="createGroup" :disabled="!groupName.trim() || creating">
         {{ creating ? $t('datasets.creating') : $t('datasets.createGroup') }}
       </button>
@@ -40,8 +40,8 @@
         <div class="card-header">
           <div class="card-content">
             <!-- Inline editable name -->
-            <h3 v-if="editingId !== d.id" @click="startEdit(d)" class="editable-name">{{ d.name }}</h3>
-            <input
+            <h3 tabindex="0" role="button" @keydown.enter.prevent="startEdit(d)" @keydown.space.prevent="startEdit(d)" v-if="editingId !== d.id" @click="startEdit(d)" class="editable-name">{{ d.name }}</h3>
+            <input :aria-label="$t('datasets.nameLabel')"
               v-else
               v-model="editName"
               class="edit-name-input"
@@ -51,10 +51,10 @@
               ref="editNameInput"
             />
             <!-- Inline editable description -->
-            <p v-if="editingId !== d.id" @click="startEditDesc(d)" class="desc editable-desc">
+            <p tabindex="0" role="button" @keydown.enter.prevent="startEditDesc(d)" @keydown.space.prevent="startEditDesc(d)" v-if="editingId !== d.id" @click="startEditDesc(d)" class="desc editable-desc">
               {{ d.description || $t('datasets.addDescription') }}
             </p>
-            <input
+            <input :aria-label="$t('datasets.description')"
               v-else-if="editingField === 'desc'"
               v-model="editDesc"
               class="edit-desc-input"
@@ -67,11 +67,11 @@
             <!-- Tags -->
             <div class="tag-row" v-if="d.tags?.length > 0 || editingTagsId === d.id">
               <template v-if="editingTagsId !== d.id">
-                <span v-for="tag in d.tags" :key="tag" class="tag-chip" @click="filterByTag(tag)">{{ tag }}</span>
-                <button class="tag-edit-btn" @click="startEditTags(d)" :title="$t('datasets.addTags')">+</button>
+                <span tabindex="0" role="button" @keydown.enter.prevent="filterByTag(tag)" @keydown.space.prevent="filterByTag(tag)" v-for="tag in d.tags" :key="tag" class="tag-chip" @click="filterByTag(tag)">{{ tag }}</span>
+                <button :aria-label="$t('datasets.addTags')" class="tag-edit-btn" @click="startEditTags(d)" :title="$t('datasets.addTags')">+</button>
               </template>
               <template v-else>
-                <input
+                <input :aria-label="$t('datasets.tags')"
                   v-model="editTagsValue"
                   class="tag-edit-input"
                   :placeholder="$t('datasets.tags')"
@@ -112,7 +112,7 @@
               <span class="class-label-text">{{ $t('datasets.classNames') }}:</span>
               <span v-for="cls in d.metadata.class_labels" :key="cls" class="class-chip">
                 <span class="class-idx">{{ cls }}</span>
-                <input
+                <input :aria-label="$t('datasets.classPlaceholder')"
                   type="text"
                   class="class-name-input"
                   :value="d.metadata?.class_names?.[cls] || ''"
@@ -124,10 +124,10 @@
             </div>
           </div>
           <div class="card-actions">
-            <button class="archive-btn" @click="toggleArchive(d)" :title="d.archived ? $t('datasets.unarchive') : $t('datasets.archive')">
+            <button :aria-label="d.archived ? $t('datasets.unarchive') : $t('datasets.archive')" class="archive-btn" @click="toggleArchive(d)" :title="d.archived ? $t('datasets.unarchive') : $t('datasets.archive')">
               <SvgIcon :name="d.archived ? 'unarchive' : 'archive'" :size="14" />
             </button>
-            <button class="delete-btn" @click="deleteDs(d)" :title="$t('common.delete')">
+            <button :aria-label="$t('common.delete')" class="delete-btn" @click="deleteDs(d)" :title="$t('common.delete')">
               <SvgIcon name="trash" :size="14" />
             </button>
           </div>
@@ -139,7 +139,7 @@
             <span class="file-name">{{ f.filename }}</span>
             <span v-if="f.role" class="file-role">{{ f.role }}</span>
             <button class="file-preview" @click="openPreview(d.id, f.id, f.filename)" :title="$t('datasets.preview')"><SvgIcon name="eye" :size="12" /> {{ $t('datasets.preview') }}</button>
-            <button class="file-del" @click="deleteFile(d, f)" :title="$t('common.remove')"><SvgIcon name="x" :size="12" /></button>
+            <button :aria-label="$t('common.remove')" class="file-del" @click="deleteFile(d, f)" :title="$t('common.remove')"><SvgIcon name="x" :size="12" /></button>
           </div>
         </div>
 
@@ -189,10 +189,14 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
 import { useDatasetStore } from '../stores/dataset'
 import DatasetPreviewModal from '../components/DatasetPreviewModal.vue'
 import SvgIcon from '../components/SvgIcon.vue'
+import { apiError } from '../utils/apiError'
+import { useConfirm } from '../composables/useConfirm'
+
+const { confirmDialog } = useConfirm()
 
 const { t } = useI18n()
 const store = useDatasetStore()
@@ -260,7 +264,7 @@ async function saveTags(d) {
     msgType.value = 'success'
     store.fetchTagSuggestions()
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.tagUpdateFailed')
+    message.value = apiError(e, t('datasets.tagUpdateFailed'))
     msgType.value = 'error'
   }
   editingTagsId.value = null
@@ -301,7 +305,7 @@ async function saveEdit(d) {
     message.value = t('datasets.editSaved')
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.editFailed')
+    message.value = apiError(e, t('datasets.editFailed'))
     msgType.value = 'error'
   }
   cancelEdit()
@@ -315,7 +319,7 @@ async function saveEditDesc(d) {
     message.value = t('datasets.editSaved')
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.editFailed')
+    message.value = apiError(e, t('datasets.editFailed'))
     msgType.value = 'error'
   }
   cancelEdit()
@@ -331,7 +335,7 @@ async function toggleArchive(d) {
       store.datasets = store.datasets.filter(ds => ds.id !== d.id)
     }
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.archiveFailed')
+    message.value = apiError(e, t('datasets.archiveFailed'))
     msgType.value = 'error'
   }
 }
@@ -349,7 +353,7 @@ async function createGroup() {
     groupTags.value = ''
     store.fetchTagSuggestions()
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.createFailed')
+    message.value = apiError(e, t('datasets.createFailed'))
     msgType.value = 'error'
   } finally {
     creating.value = false
@@ -364,32 +368,32 @@ async function addFile(event, datasetId) {
     message.value = t('datasets.added', { name: file.name })
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.uploadFailed')
+    message.value = apiError(e, t('datasets.uploadFailed'))
     msgType.value = 'error'
   }
   event.target.value = ''
 }
 
 async function deleteFile(ds, f) {
-  if (!confirm(t('datasets.removeFileConfirm', { filename: f.filename, dataset: ds.name }))) return
+  if (!(await confirmDialog({ message: t('datasets.removeFileConfirm', { filename: f.filename, dataset: ds.name }), danger: true }))) return
   try {
     await store.deleteFile(ds.id, f.id)
     message.value = t('datasets.removed', { name: f.filename })
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.deleteFailed')
+    message.value = apiError(e, t('datasets.deleteFailed'))
     msgType.value = 'error'
   }
 }
 
 async function deleteDs(d) {
-  if (!confirm(t('datasets.deleteConfirm', { name: d.name }))) return
+  if (!(await confirmDialog({ message: t('datasets.deleteConfirm', { name: d.name }), danger: true }))) return
   try {
     await store.deleteDataset(d.id)
     message.value = t('datasets.deleted', { name: d.name })
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.deleteFailed')
+    message.value = apiError(e, t('datasets.deleteFailed'))
     msgType.value = 'error'
   }
 }
@@ -400,7 +404,7 @@ async function toggleVersions(d) {
     return
   }
   try {
-    const { data } = await axios.get(`/api/datasets/${d.id}/versions`)
+    const { data } = await api.datasets.versions(d.id)
     d._versions = data
   } catch {
     d._versions = []
@@ -409,15 +413,15 @@ async function toggleVersions(d) {
 }
 
 async function restoreVersion(d, v) {
-  if (!confirm(t('datasets.restoreConfirm', { name: d.name, version: v.version_number }))) return
+  if (!(await confirmDialog({ message: t('datasets.restoreConfirm', { name: d.name, version: v.version_number }), danger: true }))) return
   try {
-    await axios.post(`/api/datasets/${d.id}/versions/${v.id}/restore`)
+    await api.datasets.restoreVersion(d.id, v.id)
     message.value = t('datasets.restored', { version: v.version_number })
     msgType.value = 'success'
     await store.fetchDatasets(filterTag.value || null, searchQuery.value || null)
     expandedVersions.value = null
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.restoreFailed')
+    message.value = apiError(e, t('datasets.restoreFailed'))
     msgType.value = 'error'
   }
 }
@@ -445,7 +449,7 @@ async function scanDs(d) {
     message.value = t('datasets.scanComplete', { name: d.name })
     msgType.value = 'success'
   } catch (e) {
-    message.value = e.response?.data?.detail || t('datasets.scanFailed')
+    message.value = apiError(e, t('datasets.scanFailed'))
     msgType.value = 'error'
   } finally {
     scanning.value = null
@@ -628,7 +632,7 @@ onMounted(() => {
   display: inline-block;
   padding: 0.1rem 0.5rem;
   border-radius: 10px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
   background: rgba(0, 191, 255, 0.12);
   color: var(--accent, #00BFFF);
@@ -645,14 +649,14 @@ onMounted(() => {
   padding: 0 0.4rem;
   border: 1px dashed var(--border);
   border-radius: 10px;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
   background: none;
   cursor: pointer;
   line-height: 1.4;
 }
 .tag-edit-btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
-.tag-edit-btn.add-first { font-size: 0.72rem; padding: 0.05rem 0.5rem; }
+.tag-edit-btn.add-first { font-size: 0.75rem; padding: 0.05rem 0.5rem; }
 
 .tag-edit-input {
   flex: 1;
@@ -669,7 +673,7 @@ onMounted(() => {
   padding: 0.15rem 0.5rem;
   border: none;
   border-radius: 4px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 .tag-save-btn { background: var(--accent); color: var(--accent-text); }
@@ -694,7 +698,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.2rem;
   padding: 0.1rem 0.4rem;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   border: 1px solid var(--accent);
   border-radius: 3px;
   background: none;
@@ -714,7 +718,7 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 .class-label-text {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -726,7 +730,7 @@ onMounted(() => {
   border: 1px solid var(--border-light);
   border-radius: 4px;
   background: var(--bg-badge);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 .class-idx {
   font-weight: 700;
@@ -738,10 +742,9 @@ onMounted(() => {
   border: none;
   background: transparent;
   color: var(--text-body);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.05rem 0.2rem;
   width: 80px;
-  outline: none;
   border-bottom: 1px dashed transparent;
 }
 .class-name-input:focus {
@@ -785,7 +788,7 @@ onMounted(() => {
   padding: 0.2rem 0.3rem;
   line-height: 1;
 }
-.archive-btn:hover { color: var(--warning); }
+.archive-btn:hover { color: var(--warning-dark); }
 
 /* Archived card style */
 .dataset-card.archived {
@@ -851,7 +854,7 @@ onMounted(() => {
 }
 
 .file-role {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   padding: 0.05rem 0.35rem;
   border-radius: 3px;
   background: var(--badge-dataset, #e3f2fd);
@@ -868,7 +871,7 @@ onMounted(() => {
   border: 1px solid var(--border-lighter);
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   padding: 0.1rem 0.35rem;
   border-radius: 3px;
   margin-left: auto;
@@ -892,7 +895,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.3rem;
   padding: 0.35rem 1rem;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   cursor: pointer;
   border-top: 1px solid var(--border-lighter);
@@ -942,13 +945,13 @@ onMounted(() => {
   border: 1px solid var(--border-lighter);
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: 3px;
 }
 .version-toggle:hover { color: var(--accent); border-color: var(--accent); }
 .version-count {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
 }
 .version-list {
@@ -974,12 +977,12 @@ onMounted(() => {
 }
 .ver-date {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 .ver-files {
   color: var(--text-faint);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 .ver-restore {
@@ -987,7 +990,7 @@ onMounted(() => {
   border: 1px solid var(--accent);
   color: var(--accent);
   cursor: pointer;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   padding: 0.1rem 0.35rem;
   border-radius: 3px;
 }

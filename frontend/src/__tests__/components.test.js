@@ -27,7 +27,7 @@ describe('EmptyState', () => {
 
   it('renders with default props', async () => {
     const { default: EmptyState } = await import('../components/projects/EmptyState.vue')
-    const wrapper = mount(EmptyState)
+    const wrapper = mount(EmptyState, { global: { plugins: [i18n] } })
     expect(wrapper.find('h3').text()).toBe('No project selected')
     expect(wrapper.find('p').text()).toContain('Select a project')
   })
@@ -47,6 +47,7 @@ describe('EmptyState', () => {
   it('renders slot content', async () => {
     const { default: EmptyState } = await import('../components/projects/EmptyState.vue')
     const wrapper = mount(EmptyState, {
+      global: { plugins: [i18n] },
       slots: {
         default: '<button>Click me</button>',
       },
@@ -56,73 +57,67 @@ describe('EmptyState', () => {
   })
 })
 
-describe('OnboardingTour', () => {
+describe('ProjectChecklist', () => {
+  const PROJECT_EMPTY = { project_id: 'p1', datasets: [] }
+  const PROJECT_DATA = { project_id: 'p1', datasets: [{ files: [{ role: 'xtrain' }, { role: 'ytrain' }] }] }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
   })
 
-  it('reads dismissed state from localStorage on mount', async () => {
-    // First-time user: no key in storage
-    expect(localStorage.getItem('predomics_onboarding_dismissed')).toBeNull()
-
-    // Set dismissed flag
-    localStorage.setItem('predomics_onboarding_dismissed', 'true')
-    expect(localStorage.getItem('predomics_onboarding_dismissed')).toBe('true')
-  })
-
-  it('component imports successfully', async () => {
-    const mod = await import('../components/OnboardingTour.vue')
-    expect(mod.default).toBeTruthy()
-    expect(mod.default.__name).toBe('OnboardingTour')
-  })
-
-  it('renders without errors when not dismissed', async () => {
-    const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
-    // Render with disabled Teleport
-    const wrapper = mount(OnboardingTour, {
-      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
+  async function mountChecklist(props) {
+    const { default: ProjectChecklist } = await import('../components/ProjectChecklist.vue')
+    return mount(ProjectChecklist, {
+      props: { projectId: 'p1', ...props },
+      global: { plugins: [i18n], stubs: { 'router-link': { props: ['to'], template: '<a :href="to"><slot /></a>' } } },
     })
-    // Component should render (visible becomes true in onMounted)
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.tour-overlay').exists()).toBe(true)
-    expect(wrapper.findAll('.dot').length).toBe(6)
+  }
+
+  it('steps follow the project state', async () => {
+    const { checklistSteps } = await import('../utils/projectChecklist')
+    const done = (project, jobs, flags) => checklistSteps(project, jobs, flags).filter(s => s.done).map(s => s.id)
+    expect(done(PROJECT_EMPTY, [], {})).toEqual([])
+    expect(done(PROJECT_DATA, [], {})).toEqual(['data'])
+    expect(done(PROJECT_DATA, [], { parameters: true })).toEqual(['data', 'parameters'])
+    expect(done(PROJECT_DATA, [{ status: 'running' }], {})).toEqual(['data', 'parameters', 'launch'])
+    // results count only once a job has completed AND the user has looked at them
+    expect(done(PROJECT_DATA, [{ status: 'completed' }], {})).toEqual(['data', 'parameters', 'launch'])
+    expect(done(PROJECT_DATA, [{ status: 'completed' }], { results: true })).toEqual(['data', 'parameters', 'launch', 'results'])
   })
 
-  it('hides when previously dismissed', async () => {
-    localStorage.setItem('predomics_onboarding_dismissed', 'true')
-    const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
-    const wrapper = mount(OnboardingTour, {
-      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
-    })
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.tour-overlay').exists()).toBe(false)
+  it('points at the first unfinished step', async () => {
+    const wrapper = await mountChecklist({ project: PROJECT_DATA, jobs: [] })
+    expect(wrapper.find('.checklist').exists()).toBe(true)
+    const next = wrapper.find('li.next')
+    expect(next.find('a').attributes('href')).toBe('/project/p1/parameters')
+    expect(wrapper.findAll('li.done')).toHaveLength(1)
   })
 
-  it('navigates through steps', async () => {
-    const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
-    const wrapper = mount(OnboardingTour, {
-      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
-    })
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.find('.tour-title').text()).toContain('Welcome')
-    await wrapper.find('.tour-btn.primary').trigger('click')
-    expect(wrapper.find('.tour-title').text()).toContain('Create a Project')
-    await wrapper.find('.tour-btn.secondary').trigger('click')
-    expect(wrapper.find('.tour-title').text()).toContain('Welcome')
+  it('hides once every step is done', async () => {
+    const { markChecklistStep } = await import('../utils/projectChecklist')
+    markChecklistStep('p1', 'parameters')
+    markChecklistStep('p1', 'results')
+    const wrapper = await mountChecklist({ project: PROJECT_DATA, jobs: [{ status: 'completed' }] })
+    expect(wrapper.find('.checklist').exists()).toBe(false)
   })
 
-  it('dismiss hides tour overlay', async () => {
-    const { default: OnboardingTour } = await import('../components/OnboardingTour.vue')
-    const wrapper = mount(OnboardingTour, {
-      global: { plugins: [i18n], stubs: { Teleport: { template: '<div><slot /></div>' } } },
-    })
-    await wrapper.vm.$nextTick()
+  it('stays hidden after being dismissed, for that project only', async () => {
+    const wrapper = await mountChecklist({ project: PROJECT_EMPTY, jobs: [] })
+    await wrapper.find('.checklist-dismiss').trigger('click')
+    expect(wrapper.find('.checklist').exists()).toBe(false)
+    const again = await mountChecklist({ project: PROJECT_EMPTY, jobs: [] })
+    expect(again.find('.checklist').exists()).toBe(false)
+    const other = await mountChecklist({ projectId: 'p2', project: { ...PROJECT_EMPTY, project_id: 'p2' }, jobs: [] })
+    expect(other.find('.checklist').exists()).toBe(true)
+  })
 
-    expect(wrapper.find('.tour-overlay').exists()).toBe(true)
-    await wrapper.find('.tour-close').trigger('click')
-    expect(wrapper.find('.tour-overlay').exists()).toBe(false)
+  it('reappears after "show checklists again"', async () => {
+    const { dismissChecklist, resetChecklists } = await import('../utils/projectChecklist')
+    dismissChecklist('p1')
+    resetChecklists()
+    const wrapper = await mountChecklist({ project: PROJECT_EMPTY, jobs: [] })
+    expect(wrapper.find('.checklist').exists()).toBe(true)
   })
 })
 
@@ -148,8 +143,8 @@ describe('HomeView', () => {
       },
     })
 
-    expect(wrapper.find('.pipeline').exists()).toBe(true)
-    expect(wrapper.findAll('.pipe-step').length).toBe(5)
+    expect(wrapper.find('.workflow-track').exists()).toBe(true)
+    expect(wrapper.findAll('.wf-step').length).toBe(4)
   })
 
   it('renders use case cards', async () => {
@@ -200,17 +195,89 @@ describe('ParamSection', () => {
   it('renders with category and params', async () => {
     const { default: ParamSection } = await import('../components/ParamSection.vue')
     const wrapper = mount(ParamSection, {
+      global: { plugins: [i18n] },
       props: {
         category: { id: 'general', label: 'General' },
         params: [
           { key: 'seed', label: 'Random seed', category: 'general', level: 'basic',
             inputType: 'number', defaultValue: 42, description: 'Seed for reproducibility' },
         ],
-        form: { general: { seed: 42 } },
-        advancedMode: false,
+        form: { seed: 42 },
       },
     })
     expect(wrapper.find('.param-section').exists()).toBe(true)
     expect(wrapper.text()).toContain('General')
+  })
+
+  it('binds each label to its input and exposes help to the keyboard', async () => {
+    const { default: ParamSection } = await import('../components/ParamSection.vue')
+    const form = { seed: 42, epsilon: 0.00001 }
+    const wrapper = mount(ParamSection, {
+      global: { plugins: [i18n] },
+      props: {
+        category: { id: 'general', label: 'General' },
+        params: [
+          { key: 'seed', label: 'Random seed', category: 'general', level: 'basic',
+            inputType: 'number', defaultValue: 42, description: 'Seed for reproducibility', min: 0, step: 1 },
+          { key: 'epsilon', label: 'Epsilon', category: 'general', level: 'advanced',
+            inputType: 'number', defaultValue: 0.00001, description: 'Threshold', min: 0 },
+        ],
+        form,
+      },
+    })
+    const input = wrapper.find('#param-general-seed')
+    expect(input.exists()).toBe(true)
+    expect(wrapper.find('label[for="param-general-seed"]').text()).toBe('Random seed')
+    const help = wrapper.find('button.info-dot')
+    expect(help.attributes('aria-expanded')).toBe('false')
+    await help.trigger('click')
+    expect(help.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('#param-general-seed-help').text()).toContain('Seed for reproducibility')
+    // advanced settings stay folded until asked for
+    expect(wrapper.find('details').element.open).toBe(false)
+  })
+
+  it('shows a validation message next to the field and opens Advanced when the error is there', async () => {
+    const { default: ParamSection } = await import('../components/ParamSection.vue')
+    const wrapper = mount(ParamSection, {
+      global: { plugins: [i18n] },
+      props: {
+        category: { id: 'general', label: 'General' },
+        params: [
+          { key: 'seed', label: 'Random seed', category: 'general', level: 'basic',
+            inputType: 'number', defaultValue: 42, description: 'Seed', min: 0, step: 1 },
+          { key: 'epsilon', label: 'Epsilon', category: 'general', level: 'advanced',
+            inputType: 'number', defaultValue: 0.00001, description: 'Threshold', min: 0 },
+        ],
+        form: { seed: -1, epsilon: null },
+        errors: {
+          'general.seed': { code: 'min', params: { min: 0 } },
+          'general.epsilon': { code: 'required', params: {} },
+        },
+      },
+    })
+    const err = wrapper.find('#param-general-seed-error')
+    expect(err.text()).toContain('at least 0')
+    expect(wrapper.find('#param-general-seed').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.find('details').element.open).toBe(true)
+  })
+
+  it('an emptied number becomes null (reported as required), not NaN', async () => {
+    const { default: ParamSection } = await import('../components/ParamSection.vue')
+    const form = { seed: 42 }
+    const wrapper = mount(ParamSection, {
+      global: { plugins: [i18n] },
+      props: {
+        category: { id: 'general', label: 'General' },
+        params: [{ key: 'seed', label: 'Random seed', category: 'general', level: 'basic',
+          inputType: 'number', defaultValue: 42, description: 'Seed', min: 0, step: 1 }],
+        form,
+      },
+    })
+    const input = wrapper.find('#param-general-seed')
+    await input.setValue('')
+    expect(form.seed).toBeNull()
+    await input.setValue('7')
+    expect(form.seed).toBe(7)
   })
 })

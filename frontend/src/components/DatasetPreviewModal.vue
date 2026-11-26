@@ -1,20 +1,20 @@
 <template>
   <Teleport to="body">
     <div class="preview-overlay" @click.self="$emit('close')">
-      <div class="preview-modal">
+      <div class="preview-modal" v-dialog="() => $emit('close')" aria-labelledby="preview-modal-title">
         <div class="preview-header">
-          <h3>{{ filename }}</h3>
+          <h3 id="preview-modal-title">{{ filename || $t('components.filePreview') }}</h3>
           <div class="preview-meta" v-if="preview">
-            <span class="meta-badge">{{ preview.total_rows }} rows</span>
-            <span class="meta-badge">{{ preview.total_cols }} cols</span>
+            <span class="meta-badge">{{ $t('modals.previewRows', { n: preview.total_rows }) }}</span>
+            <span class="meta-badge">{{ $t('modals.previewCols', { n: preview.total_cols }) }}</span>
             <span class="meta-badge">{{ preview.delimiter }}</span>
             <span class="meta-badge" v-if="preview.role">{{ preview.role }}</span>
             <span class="meta-badge dim">{{ formatSize(preview.file_size_bytes) }}</span>
           </div>
-          <button class="close-btn" @click="$emit('close')">&times;</button>
+          <button :aria-label="$t('common.close')" class="close-btn" @click="$emit('close')">&times;</button>
         </div>
 
-        <div v-if="loading" class="preview-loading">Loading preview...</div>
+        <div v-if="loading" class="preview-loading" role="status">{{ $t('modals.previewLoading') }}</div>
         <div v-else-if="error" class="preview-error">{{ error }}</div>
         <template v-else-if="preview">
           <div class="table-wrap">
@@ -38,19 +38,19 @@
               </tbody>
               <tfoot v-if="hasNumericStats">
                 <tr class="stat-row">
-                  <td class="row-num">min</td>
+                  <td class="row-num">{{ $t('components.statMin') }}</td>
                   <td v-for="col in preview.columns" :key="'min-'+col">
                     {{ preview.stats[col]?.type === 'numeric' ? preview.stats[col].min : '' }}
                   </td>
                 </tr>
                 <tr class="stat-row">
-                  <td class="row-num">max</td>
+                  <td class="row-num">{{ $t('components.statMax') }}</td>
                   <td v-for="col in preview.columns" :key="'max-'+col">
                     {{ preview.stats[col]?.type === 'numeric' ? preview.stats[col].max : '' }}
                   </td>
                 </tr>
                 <tr class="stat-row">
-                  <td class="row-num">mean</td>
+                  <td class="row-num">{{ $t('components.statMean') }}</td>
                   <td v-for="col in preview.columns" :key="'mean-'+col">
                     {{ preview.stats[col]?.type === 'numeric' ? preview.stats[col].mean : '' }}
                   </td>
@@ -59,7 +59,7 @@
             </table>
           </div>
           <div class="preview-footer" v-if="preview.total_rows > preview.rows.length">
-            Showing first {{ preview.rows.length }} of {{ preview.total_rows }} rows
+            {{ $t('components.showingFirstRows', { shown: preview.rows.length, total: preview.total_rows }) }}
           </div>
         </template>
       </div>
@@ -69,12 +69,14 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
+import { api } from '../api'
+import { apiError } from '../utils/apiError'
+import { vDialog } from '../directives/dialog'
 
 const props = defineProps({
   datasetId: { type: String, required: true },
   fileId: { type: String, required: true },
-  filename: { type: String, default: 'File Preview' },
+  filename: { type: String, default: '' },
 })
 
 defineEmits(['close'])
@@ -103,13 +105,12 @@ function formatSize(bytes) {
 
 onMounted(async () => {
   try {
-    const { data } = await axios.get(
-      `/api/datasets/${props.datasetId}/files/${props.fileId}/preview`,
+    const { data } = await api.datasets.previewFile(props.datasetId, props.fileId,
       { params: { rows: 20 } },
     )
     preview.value = data
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Failed to load preview'
+    error.value = apiError(e)
   } finally {
     loading.value = false
   }
@@ -165,7 +166,7 @@ onMounted(async () => {
   padding: 0.15rem 0.4rem;
   background: var(--bg-badge);
   border-radius: 4px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
   font-weight: 500;
 }
@@ -223,7 +224,7 @@ onMounted(async () => {
 
 .col-type {
   display: block;
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   font-weight: 400;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -231,7 +232,7 @@ onMounted(async () => {
 
 .row-num {
   color: var(--text-muted);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   text-align: center;
   background: var(--bg-badge);
   min-width: 30px;
@@ -242,7 +243,7 @@ td.numeric { text-align: right; }
 .stat-row td {
   background: var(--bg-badge);
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-style: italic;
 }
 

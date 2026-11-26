@@ -1,11 +1,20 @@
 <template>
   <div id="app">
-    <nav class="navbar">
+    <a href="#main-content" class="skip-link">{{ $t('nav.skipToContent') }}</a>
+    <nav class="navbar" :aria-label="$t('nav.mainNavigation')">
       <router-link to="/" class="brand">
         <img src="/logo-dark.png" alt="PredomicsApp" class="brand-logo" />
         PredomicsApp
       </router-link>
-      <div class="nav-links">
+      <button
+        type="button"
+        class="nav-toggle"
+        :aria-expanded="navOpen ? 'true' : 'false'"
+        aria-controls="nav-links"
+        :aria-label="$t('nav.toggleMenu')"
+        @click="navOpen = !navOpen"
+      >&#9776;</button>
+      <div id="nav-links" :class="['nav-links', { open: navOpen }]">
         <router-link v-if="auth.isLoggedIn" to="/dashboard">{{ $t('nav.dashboard') }}</router-link>
         <router-link v-if="auth.isLoggedIn" to="/projects">{{ $t('nav.projects') }}</router-link>
         <router-link v-if="auth.isLoggedIn" to="/datasets">{{ $t('nav.datasets') }}</router-link>
@@ -15,46 +24,51 @@
         <router-link to="/credits">{{ $t('nav.credits') }}</router-link>
       </div>
       <div class="nav-right">
-        <button class="lang-btn" @click="toggleLocale" :title="currentLocaleInfo.name">
-          <span class="lang-flag">{{ currentLocaleInfo.flag }}</span>
+        <button type="button" class="lang-btn" @click="toggleLocale" :title="currentLocaleInfo.name" :aria-label="$t('nav.switchLanguage', { name: currentLocaleInfo.name })">
+          <span class="lang-flag" aria-hidden="true">{{ currentLocaleInfo.flag }}</span>
           <span class="lang-code">{{ currentLocaleInfo.label }}</span>
         </button>
-        <button class="theme-btn" @click="theme.cycle()" :title="`Theme: ${theme.mode}`">
-          <span v-if="theme.mode === 'light'">&#9788;</span>
-          <span v-else-if="theme.mode === 'dark'">&#9790;</span>
-          <span v-else>&#9211;</span>
+        <button type="button" class="theme-btn" @click="theme.cycle()" :title="themeLabel" :aria-label="themeLabel">
+          <span v-if="theme.mode === 'light'" aria-hidden="true">&#9788;</span>
+          <span v-else-if="theme.mode === 'dark'" aria-hidden="true">&#9790;</span>
+          <span v-else aria-hidden="true">&#9211;</span>
         </button>
         <template v-if="auth.isLoggedIn">
           <router-link to="/profile" class="user-email">{{ auth.user?.email }}</router-link>
-          <button class="btn-logout" @click="handleLogout">{{ $t('nav.logout') }}</button>
+          <button type="button" class="btn-logout" @click="handleLogout">{{ $t('nav.logout') }}</button>
         </template>
         <router-link v-else to="/login" class="btn-login">{{ $t('nav.login') }}</router-link>
       </div>
     </nav>
-    <main class="container">
+    <main id="main-content" class="container" tabindex="-1">
       <router-view />
     </main>
-    <OnboardingTour v-if="auth.isLoggedIn" />
+    <ConfirmDialog />
     <ToastContainer />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
-import { LOCALES } from './i18n'
-import OnboardingTour from './components/OnboardingTour.vue'
+import { LOCALES, applyDocumentLang } from './i18n'
 import ToastContainer from './components/ToastContainer.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
 const router = useRouter()
-const { locale } = useI18n()
+const route = useRoute()
+const { locale, t } = useI18n()
 
-const currentLocale = computed(() => locale.value)
+const navOpen = ref(false)
+watch(() => route.fullPath, () => { navOpen.value = false })
+
+const themeLabel = computed(() => t('nav.theme', { mode: t(`nav.themeMode.${theme.mode}`) }))
+watch(locale, (code) => applyDocumentLang(code), { immediate: true })
 const currentLocaleInfo = computed(() => LOCALES.find(l => l.code === locale.value) || LOCALES[0])
 
 function toggleLocale() {
@@ -92,8 +106,8 @@ function handleLogout() {
   --text-primary: #1a1a2e;
   --text-body: #2c3e50;
   --text-secondary: #546e7a;
-  --text-muted: #78909c;
-  --text-faint: #90a4ae;
+  --text-muted: #546e7a;
+  --text-faint: #5d717d;
   --text-nav-link: #b0bec5;
 
   --border: #cfd8dc;
@@ -107,6 +121,7 @@ function handleLogout() {
   --accent: #1a1a2e;
   --accent-hover: #16213e;
   --accent-text: #ffffff;
+  --tab-active: #1d4ed8;
   --brand: #4fc3f7;
 
   --success: #4caf50;
@@ -114,10 +129,10 @@ function handleLogout() {
   --success-bg: #e8f5e9;
   --success-bg-alt: #f1f8e9;
   --warning: #ff9800;
-  --warning-dark: #e65100;
+  --warning-dark: #c24400;
   --warning-bg: #fff3e0;
   --warning-bg-alt: #fff8e1;
-  --danger: #e53935;
+  --danger: #cd1e1a;
   --danger-dark: #c62828;
   --danger-bg: #fce4ec;
   --info: #1565c0;
@@ -163,6 +178,34 @@ function handleLogout() {
   --cat-voting-bar:     hsla(50, 70%, 45%, 0.70);
   --cat-gpu:            hsla(170, 55%, 42%, 0.08);
   --cat-gpu-bar:        hsla(170, 55%, 42%, 0.70);
+  --cat-feature-selection: hsla(205, 55%, 45%, 0.08);
+  --cat-feature-selection-bar: hsla(205, 55%, 45%, 0.70);
+  --cat-sa: hsla(15, 70%, 50%, 0.08);
+  --cat-sa-bar: hsla(15, 70%, 50%, 0.70);
+  --cat-lasso: hsla(260, 45%, 55%, 0.08);
+  --cat-lasso-bar: hsla(260, 45%, 55%, 0.70);
+  --cat-ils: hsla(95, 45%, 40%, 0.08);
+  --cat-ils-bar: hsla(95, 45%, 40%, 0.70);
+  --cat-aco: hsla(40, 75%, 45%, 0.08);
+  --cat-aco-bar: hsla(40, 75%, 45%, 0.70);
+  --cat-rf: hsla(125, 45%, 38%, 0.08);
+  --cat-rf-bar: hsla(125, 45%, 38%, 0.70);
+  --cat-svm: hsla(300, 40%, 50%, 0.08);
+  --cat-svm-bar: hsla(300, 40%, 50%, 0.70);
+  --cat-logistic: hsla(185, 55%, 40%, 0.08);
+  --cat-logistic-bar: hsla(185, 55%, 40%, 0.70);
+  --cat-xgboost: hsla(5, 65%, 52%, 0.08);
+  --cat-xgboost-bar: hsla(5, 65%, 52%, 0.70);
+  --cat-lightgbm: hsla(75, 55%, 38%, 0.08);
+  --cat-lightgbm-bar: hsla(75, 55%, 38%, 0.70);
+  --cat-extra_trees: hsla(155, 50%, 38%, 0.08);
+  --cat-extra_trees-bar: hsla(155, 50%, 38%, 0.70);
+  --cat-adaboost: hsla(330, 55%, 52%, 0.08);
+  --cat-adaboost-bar: hsla(330, 55%, 52%, 0.70);
+  --cat-knn: hsla(240, 50%, 58%, 0.08);
+  --cat-knn-bar: hsla(240, 50%, 58%, 0.70);
+  --cat-clinical: hsla(20, 60%, 48%, 0.08);
+  --cat-clinical-bar: hsla(20, 60%, 48%, 0.70);
 }
 
 /* ================================================================
@@ -180,9 +223,9 @@ function handleLogout() {
   --text-primary: #e8e8f0;
   --text-body: #d0d0dc;
   --text-secondary: #a0a8b8;
-  --text-muted: #808898;
-  --text-faint: #606878;
-  --text-nav-link: #808898;
+  --text-muted: #a0a8b8;
+  --text-faint: #9098a8;
+  --text-nav-link: #a8b0c0;
 
   --border: #3a3a52;
   --border-light: #2e2e44;
@@ -195,6 +238,7 @@ function handleLogout() {
   --accent: #4fc3f7;
   --accent-hover: #81d4fa;
   --accent-text: #0d0d16;
+  --tab-active: #4fc3f7;
   --brand: #4fc3f7;
 
   --success: #66bb6a;
@@ -251,6 +295,34 @@ function handleLogout() {
   --cat-voting-bar:     hsla(50, 70%, 60%, 0.80);
   --cat-gpu:            hsla(170, 55%, 50%, 0.12);
   --cat-gpu-bar:        hsla(170, 55%, 60%, 0.80);
+  --cat-feature-selection: hsla(205, 55%, 53%, 0.12);
+  --cat-feature-selection-bar: hsla(205, 55%, 63%, 0.80);
+  --cat-sa: hsla(15, 70%, 58%, 0.12);
+  --cat-sa-bar: hsla(15, 70%, 68%, 0.80);
+  --cat-lasso: hsla(260, 45%, 63%, 0.12);
+  --cat-lasso-bar: hsla(260, 45%, 73%, 0.80);
+  --cat-ils: hsla(95, 45%, 48%, 0.12);
+  --cat-ils-bar: hsla(95, 45%, 58%, 0.80);
+  --cat-aco: hsla(40, 75%, 53%, 0.12);
+  --cat-aco-bar: hsla(40, 75%, 63%, 0.80);
+  --cat-rf: hsla(125, 45%, 46%, 0.12);
+  --cat-rf-bar: hsla(125, 45%, 56%, 0.80);
+  --cat-svm: hsla(300, 40%, 58%, 0.12);
+  --cat-svm-bar: hsla(300, 40%, 68%, 0.80);
+  --cat-logistic: hsla(185, 55%, 48%, 0.12);
+  --cat-logistic-bar: hsla(185, 55%, 58%, 0.80);
+  --cat-xgboost: hsla(5, 65%, 60%, 0.12);
+  --cat-xgboost-bar: hsla(5, 65%, 70%, 0.80);
+  --cat-lightgbm: hsla(75, 55%, 46%, 0.12);
+  --cat-lightgbm-bar: hsla(75, 55%, 56%, 0.80);
+  --cat-extra_trees: hsla(155, 50%, 46%, 0.12);
+  --cat-extra_trees-bar: hsla(155, 50%, 56%, 0.80);
+  --cat-adaboost: hsla(330, 55%, 60%, 0.12);
+  --cat-adaboost-bar: hsla(330, 55%, 70%, 0.80);
+  --cat-knn: hsla(240, 50%, 66%, 0.12);
+  --cat-knn-bar: hsla(240, 50%, 76%, 0.80);
+  --cat-clinical: hsla(20, 60%, 56%, 0.12);
+  --cat-clinical-bar: hsla(20, 60%, 66%, 0.80);
 }
 
 /* ================================================================
@@ -267,6 +339,35 @@ body {
   background: var(--bg-page);
   color: var(--text-body);
   transition: background 0.2s, color 0.2s;
+}
+
+/* Visible keyboard focus everywhere (mouse clicks are unaffected). */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+main:focus { outline: none; }
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 0.5rem 1rem;
+  z-index: 10001;
+  border-radius: 0 0 6px 0;
+}
+.skip-link:focus { left: 0; }
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ================================================================
@@ -311,6 +412,8 @@ body {
 
 .nav-links a.router-link-active {
   color: white;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .nav-right {
@@ -345,7 +448,7 @@ body {
 }
 
 .lang-code {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 .lang-btn:hover {
@@ -406,5 +509,37 @@ body {
   max-width: 1600px;
   margin: 1.5rem auto;
   padding: 0 1rem;
+}
+
+.nav-toggle {
+  display: none;
+  margin-left: 1rem;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  .navbar { flex-wrap: wrap; padding: 0.6rem 1rem; row-gap: 0.5rem; }
+  .nav-toggle { display: inline-block; order: 2; margin-left: auto; }
+  .nav-right { order: 3; margin-left: 0.75rem; gap: 0.5rem; }
+  .nav-links {
+    order: 4;
+    display: none;
+    flex-direction: column;
+    gap: 0.25rem;
+    width: 100%;
+    margin-left: 0;
+  }
+  .nav-links.open { display: flex; }
+  .nav-links a { padding: 0.45rem 0.25rem; }
+  .user-email { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 560px) {
+  .user-email { display: none; }
 }
 </style>

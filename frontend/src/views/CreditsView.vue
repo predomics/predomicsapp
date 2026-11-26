@@ -384,7 +384,7 @@ const contributors = computed(() => [
 .badge-lead {
   background: var(--brand);
   color: var(--accent-text);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   margin-left: 0.5rem;
   vertical-align: middle;
 }
@@ -489,7 +489,7 @@ const contributors = computed(() => [
 .orcid-link {
   display: inline-block;
   font-size: 0.75rem;
-  color: var(--success);
+  color: var(--success-dark);
   text-decoration: none;
   padding: 0.15rem 0.5rem;
   border-radius: 10px;

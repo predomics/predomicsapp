@@ -1,65 +1,174 @@
 <template>
   <div class="login-page">
     <div class="login-card">
-      <h1 class="login-title">PredomicsApp</h1>
-      <p class="login-subtitle">Microbiome-based classification</p>
+      <h1 class="login-title">{{ $t('login.title') }}</h1>
+      <p class="login-subtitle">{{ $t('login.subtitle') }}</p>
 
-      <div class="tab-switcher">
-        <button :class="{ active: mode === 'login' }" @click="mode = 'login'">Login</button>
-        <button :class="{ active: mode === 'register' }" @click="mode = 'register'">Register</button>
+      <div class="tab-switcher" role="tablist" :aria-label="$t('login.modeLabel')">
+        <button type="button" role="tab" :aria-selected="mode === 'login'" :class="{ active: mode === 'login' }" @click="setMode('login')">{{ $t('login.loginTab') }}</button>
+        <button type="button" role="tab" :aria-selected="mode === 'register'" :class="{ active: mode === 'register' }" @click="setMode('register')">{{ $t('login.registerTab') }}</button>
       </div>
 
-      <form @submit.prevent="submit">
+      <form @submit.prevent="submit" novalidate>
         <div v-if="mode === 'register'" class="field">
-          <label>Full Name</label>
-          <input v-model="fullName" type="text" placeholder="Your name" />
+          <label for="login-fullname">{{ $t('login.fullName') }}</label>
+          <input id="login-fullname" v-model="fullName" type="text" autocomplete="name" :placeholder="$t('login.fullNamePlaceholder')" />
         </div>
         <div class="field">
-          <label>Email</label>
-          <input v-model="email" type="email" placeholder="email@example.com" required />
+          <label for="login-email">{{ $t('login.email') }}</label>
+          <input id="login-email" v-model.trim="email" type="email" autocomplete="email" :placeholder="$t('login.emailPlaceholder')" required />
         </div>
         <div class="field">
-          <label>Password</label>
-          <input v-model="password" type="password" placeholder="Password" required />
+          <label for="login-password">{{ $t('login.password') }}</label>
+          <input
+            id="login-password"
+            v-model="password"
+            type="password"
+            :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
+            :placeholder="$t('login.passwordPlaceholder')"
+            :aria-describedby="mode === 'register' ? 'login-password-hint' : undefined"
+            required
+          />
+          <p v-if="mode === 'register'" id="login-password-hint" class="hint">{{ $t('login.passwordHint', { n: MIN_PASSWORD }) }}</p>
         </div>
-        <p v-if="error" class="error">{{ error }}</p>
-        <button type="submit" class="btn-primary" :disabled="loading">
-          {{ loading ? 'Please wait...' : (mode === 'login' ? 'Login' : 'Create Account') }}
+        <div v-if="mode === 'register'" class="field">
+          <label for="login-password2">{{ $t('login.confirmPassword') }}</label>
+          <input id="login-password2" v-model="password2" type="password" autocomplete="new-password" :placeholder="$t('login.confirmPasswordPlaceholder')" required />
+        </div>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <p v-if="lockedText" class="hint" role="status" aria-live="polite">{{ lockedText }}</p>
+        <div v-if="unverifiedEmail" class="verify-box" role="status">
+          <p><strong>{{ $t('verify.checkInbox') }}</strong></p>
+          <p>{{ verifyMsg || $t('verify.checkInboxDesc', { email: unverifiedEmail }) }}</p>
+          <button type="button" class="btn-link" :disabled="resending" @click="resendVerification">
+            {{ resending ? $t('auth.sending') : $t('verify.resend') }}
+          </button>
+          <p v-if="resendMsg" class="hint">{{ resendMsg }}</p>
+        </div>
+        <button type="submit" class="btn-primary" :disabled="loading || (mode === 'login' && lockedFor > 0)">
+          {{ loading ? $t('login.loading') : (mode === 'login' ? $t('login.loginButton') : $t('login.registerButton')) }}
         </button>
-        <router-link v-if="mode === 'login'" to="/forgot-password" class="forgot-link">Forgot password?</router-link>
+        <router-link v-if="mode === 'login'" to="/forgot-password" class="forgot-link">{{ $t('login.forgotPassword') }}</router-link>
       </form>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onBeforeUnmount } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../stores/auth'
+import { apiError, apiErrorCode, retryAfterSeconds } from '../utils/apiError'
+import { api } from '../api'
+import { safeRedirect } from '../utils/http'
+
+const MIN_PASSWORD = 8
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+const { t } = useI18n()
 
 const mode = ref('login')
 const email = ref('')
 const password = ref('')
+const password2 = ref('')
 const fullName = ref('')
 const error = ref('')
 const loading = ref(false)
 
-async function submit() {
+// Set when the server requires a confirmed email address before login.
+const unverifiedEmail = ref('')
+const resending = ref(false)
+const resendMsg = ref('')
+const verifyMsg = ref('')
+
+// Too many failed logins: the server says how long to wait (Retry-After).
+const lockedFor = ref(0)
+let lockTimer = null
+const lockedText = computed(() => {
+  const s = lockedFor.value
+  if (s <= 0) return ''
+  return s >= 90 ? t('login.lockedMinutes', { n: Math.ceil(s / 60) }) : t('login.lockedSeconds', { n: s })
+})
+function startLock(seconds) {
+  clearInterval(lockTimer)
+  lockedFor.value = seconds
+  lockTimer = setInterval(() => {
+    lockedFor.value -= 1
+    if (lockedFor.value <= 0) { clearInterval(lockTimer); lockTimer = null; error.value = '' }
+  }, 1000)
+}
+onBeforeUnmount(() => clearInterval(lockTimer))
+
+function setMode(m) {
+  mode.value = m
   error.value = ''
+  unverifiedEmail.value = ''
+  resendMsg.value = ''
+}
+
+async function resendVerification() {
+  resending.value = true
+  resendMsg.value = ''
+  try {
+    await api.auth.resendVerification({ email: unverifiedEmail.value })
+    resendMsg.value = t('verify.resent')
+  } catch (e) {
+    resendMsg.value = apiError(e, t('verify.resendFailed'))
+  } finally {
+    resending.value = false
+  }
+}
+
+function validate() {
+  if (!email.value || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.value)) return t('login.invalidEmail')
+  if (!password.value) return t('login.passwordRequired')
+  if (mode.value === 'register') {
+    if (password.value.length < MIN_PASSWORD) return t('login.passwordTooShort', { n: MIN_PASSWORD })
+    if (password.value !== password2.value) return t('auth.passwordsMismatch')
+  }
+  return ''
+}
+
+async function submit() {
+  error.value = validate()
+  if (error.value) return
+  unverifiedEmail.value = ''
+  resendMsg.value = ''
+  verifyMsg.value = ''
   loading.value = true
   try {
     if (mode.value === 'login') {
       await auth.login(email.value, password.value)
     } else {
-      await auth.register(email.value, password.value, fullName.value)
+      const res = await auth.register(email.value, password.value, fullName.value)
+      if (res?.verificationRequired) {
+        // Account created, but the address must be confirmed before the first login.
+        unverifiedEmail.value = email.value
+        verifyMsg.value = res.message
+        mode.value = 'login'
+        password.value = ''
+        password2.value = ''
+        return
+      }
     }
-    router.push('/projects')
+    router.push(safeRedirect(route.query.redirect))
   } catch (e) {
-    const detail = e.response?.data?.detail
-    error.value = detail || 'Something went wrong. Please try again.'
+    if (apiErrorCode(e) === 'EMAIL_NOT_VERIFIED') {
+      // Account exists (or was just created) but its address is not confirmed yet.
+      apiError(e)
+      unverifiedEmail.value = email.value
+      mode.value = 'login'
+      password2.value = ''
+      return
+    }
+    const wait = e?.response?.status === 429 ? retryAfterSeconds(e) : 0
+    // The server's own words ("Invalid email or password", "Registration is disabled",
+    // "Too many attempts"…)
+    error.value = apiError(e, t('login.error'))
+    if (wait > 0) startLock(wait)
   } finally {
     loading.value = false
   }
@@ -67,6 +176,27 @@ async function submit() {
 </script>
 
 <style scoped>
+.verify-box {
+  border: 1px solid var(--info);
+  background: var(--info-bg);
+  color: var(--text-body);
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.85rem;
+}
+.verify-box p { margin: 0 0 0.35rem; }
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: underline;
+}
+.btn-link:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .login-page {
   display: flex;
   justify-content: center;
@@ -140,7 +270,6 @@ async function submit() {
   border: 1px solid var(--border-light);
   border-radius: 6px;
   font-size: 0.9rem;
-  outline: none;
   transition: border-color 0.2s;
   background: var(--bg-input);
   color: var(--text-body);
@@ -188,5 +317,10 @@ async function submit() {
 }
 .forgot-link:hover {
   color: var(--accent);
+}
+.hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
 }
 </style>

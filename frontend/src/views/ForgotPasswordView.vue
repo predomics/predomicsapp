@@ -6,17 +6,18 @@
 
       <form @submit.prevent="submit" v-if="!sent">
         <div class="field">
-          <label>{{ $t('auth.email') }}</label>
-          <input v-model="email" type="email" :placeholder="$t('auth.emailPlaceholder')" required />
+          <label for="forgot-email">{{ $t('auth.email') }}</label>
+          <input id="forgot-email" v-model.trim="email" type="email" autocomplete="email" :placeholder="$t('auth.emailPlaceholder')" required />
         </div>
-        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
         <button type="submit" class="btn-primary" :disabled="loading">
           {{ loading ? $t('auth.sending') : $t('auth.sendResetLink') }}
         </button>
       </form>
 
-      <div v-else class="success-msg">
+      <div v-else class="success-msg" role="status">
         <p>{{ $t('auth.emailSentMsg') }}</p>
+        <p v-if="!devToken" class="admin-hint">{{ $t('auth.contactAdminMsg') }}</p>
         <p v-if="devToken" class="dev-token">
           {{ $t('auth.devModeMsg') }}<br/>
           <code>{{ devToken }}</code>
@@ -33,7 +34,8 @@
 <script setup>
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
+import { apiError } from '../utils/apiError'
 
 const { t } = useI18n()
 
@@ -47,12 +49,13 @@ async function submit() {
   error.value = ''
   loading.value = true
   try {
-    const { data } = await axios.post('/api/auth/forgot-password', { email: email.value })
+    const { data } = await api.auth.forgotPassword({ email: email.value })
     sent.value = true
-    // In dev mode (no SMTP), the token is returned directly
-    if (data.token) devToken.value = data.token
+    // Only a server running in debug mode returns the token; normally the
+    // link goes out by email (or the administrator resets the password).
+    if (data && (data.token || data.reset_token)) devToken.value = data.token || data.reset_token
   } catch (e) {
-    error.value = e.response?.data?.detail || 'Something went wrong'
+    error.value = apiError(e, t('errors.generic'))
   } finally {
     loading.value = false
   }
@@ -148,4 +151,9 @@ async function submit() {
   text-decoration: none;
 }
 .back-link:hover { color: var(--accent); }
+.admin-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+}
 </style>

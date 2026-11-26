@@ -26,12 +26,12 @@
       <label class="enr-control">
         {{ $t('results.enrichmentAnnotationType') }}
         <select v-model="annotationType">
-          <option value="phylum">Phylum</option>
-          <option value="family">Family</option>
-          <option value="butyrate">Butyrate</option>
-          <option value="inflammation">Inflammation</option>
-          <option value="transit">Transit</option>
-          <option value="oralisation">Oralisation</option>
+          <option value="phylum">{{ $t('results.annotPhylum') }}</option>
+          <option value="family">{{ $t('results.annotFamily') }}</option>
+          <option value="butyrate">{{ $t('results.annotButyrate') }}</option>
+          <option value="inflammation">{{ $t('results.annotInflammation') }}</option>
+          <option value="transit">{{ $t('results.annotTransit') }}</option>
+          <option value="oralisation">{{ $t('results.annotOralisation') }}</option>
         </select>
       </label>
 
@@ -39,6 +39,15 @@
         {{ loading ? $t('results.enrichmentComputing') : $t('results.enrichmentRun') }}
       </button>
     </div>
+
+    <AsyncState
+      v-if="loading || error"
+      :loading="loading"
+      :error="error"
+      :retry="runEnrichment"
+      :loading-text="$t('results.enrichmentComputing')"
+      :error-title="$t('results.enrichmentFailed')"
+    />
 
     <!-- Summary cards -->
     <div v-if="enrichmentData" class="summary-grid">
@@ -81,8 +90,8 @@
           <th>{{ $t('results.enrichmentCategory') }}</th>
           <th>{{ $t('results.enrichmentInSignature') }}</th>
           <th>{{ $t('results.enrichmentInBackground') }}</th>
-          <th>% sig</th>
-          <th>% bg</th>
+          <th>{{ $t('results.enrichmentPctSignature') }}</th>
+          <th>{{ $t('results.enrichmentPctBackground') }}</th>
           <th>{{ $t('results.enrichmentFoldEnrichment') }}</th>
           <th>{{ $t('results.enrichmentPvalue') }}</th>
           <th>{{ $t('results.enrichmentFdr') }}</th>
@@ -116,14 +125,18 @@
 <script setup>
 import { ref, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
-import { useChartTheme } from '../../composables/useChartTheme'
+import { api } from '../../api'
+import { loadPlotlyLib, usePlotlyCleanup } from '../../utils/plotly'
+import { useChartTheme, withAlpha } from '../../composables/useChartTheme'
+import AsyncState from '../AsyncState.vue'
+import { apiError } from '../../utils/apiError'
+import { LONG_TIMEOUT_MS } from '../../utils/http'
 
 let Plotly = null
+usePlotlyCleanup()
 async function loadPlotly() {
   if (Plotly) return Plotly
-  const mod = await import('plotly.js-dist-min')
-  Plotly = mod.default
+  Plotly = await loadPlotlyLib()
   return Plotly
 }
 
@@ -145,6 +158,7 @@ const signatureLevel = ref('individual')
 const modelIndex = ref(0)
 const annotationType = ref('phylum')
 const loading = ref(false)
+const error = ref('')
 const enrichmentData = ref(null)
 const chartView = ref('proportion')
 const chartEl = ref(null)
@@ -163,21 +177,22 @@ watch(() => props.active, (isActive) => {
 
 async function runEnrichment() {
   loading.value = true
+  error.value = ''
   try {
-    const { data } = await axios.post(
-      `/api/data-explore/${props.projectId}/enrichment`,
+    const { data } = await api.dataExplore.enrichment(props.projectId,
       {
         job_id: props.jobId,
         signature_level: signatureLevel.value,
         model_index: modelIndex.value,
         annotation_type: annotationType.value,
-      }
+      },
+      { timeout: LONG_TIMEOUT_MS },
     )
     enrichmentData.value = data
     await nextTick()
     renderChart()
   } catch (e) {
-    console.error('Enrichment failed:', e)
+    error.value = apiError(e)
     enrichmentData.value = null
   } finally {
     loading.value = false
@@ -208,7 +223,11 @@ function renderProportionChart(P, results) {
       y: categories,
       type: 'bar',
       orientation: 'h',
-      marker: { color: results.map(r => r.significant ? '#2196F3' : '#90CAF9') },
+      marker: {
+        color: results.map(r => r.significant ? chartColors().class0 : withAlpha(chartColors().class0, 0.4)),
+        // Significant categories are outlined as well as darker.
+        line: { color: chartColors().text, width: results.map(r => r.significant ? 1.5 : 0) },
+      },
     },
     {
       name: t('results.enrichmentInBackground'),
@@ -216,7 +235,7 @@ function renderProportionChart(P, results) {
       y: categories,
       type: 'bar',
       orientation: 'h',
-      marker: { color: '#BDBDBD' },
+      marker: { color: chartColors().neutral },
     },
   ]
 
@@ -238,8 +257,8 @@ function renderSignificanceChart(P, results) {
   const categories = sorted.map(r => r.category)
   const negLogFdr = sorted.map(r => r.fdr > 0 ? -Math.log10(r.fdr) : 5)
   const colors = sorted.map(r => {
-    if (!r.significant) return '#BDBDBD'
-    return r.direction === 'enriched' ? '#1976D2' : '#E53935'
+    if (!r.significant) return chartColors().neutral
+    return r.direction === 'enriched' ? chartColors().class0 : chartColors().class1
   })
 
   const traces = [{
@@ -263,12 +282,12 @@ function renderSignificanceChart(P, results) {
       type: 'line',
       x0: fdrThreshold, x1: fdrThreshold,
       y0: -0.5, y1: sorted.length - 0.5,
-      line: { color: '#E53935', width: 1.5, dash: 'dash' },
+      line: { color: chartColors().class1, width: 1.5, dash: 'dash' },
     }],
     annotations: [{
       x: fdrThreshold, y: sorted.length - 0.5,
       text: 'FDR = 0.05',
-      showarrow: false, xanchor: 'left', font: { size: 10, color: '#E53935' },
+      showarrow: false, xanchor: 'left', font: { size: 10, color: chartColors().class1 },
     }],
   }
 

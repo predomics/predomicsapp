@@ -51,24 +51,27 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { useChartTheme } from '../../composables/useChartTheme'
+import { useChartTheme, withAlpha } from '../../composables/useChartTheme'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../../api'
+import { ct } from '../../utils/chartText'
+import { loadPlotlyLib, usePlotlyCleanup } from '../../utils/plotly'
+import { apiError } from '../../utils/apiError'
 
 let Plotly = null
+usePlotlyCleanup()
 async function ensurePlotly() {
   if (!Plotly) {
-    const mod = await import('plotly.js-dist-min')
-    Plotly = mod.default
+    Plotly = await loadPlotlyLib()
   }
   return Plotly
 }
 
-const CLUSTER_COLORS = [
-  '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-  '#aec7e8', '#ffbb78',
-]
+/** Cluster colours come from the theme's categorical series (cycles past 10). */
+const clusterColor = (i) => {
+  const series = chartColors().series
+  return series[i % series.length]
+}
 
 const props = defineProps({
   projectId: { type: String, required: true },
@@ -103,9 +106,6 @@ const clusterCounts = computed(() => {
   return sorted.map(k => counts[k])
 })
 
-function clusterColor(idx) {
-  return CLUSTER_COLORS[idx % CLUSTER_COLORS.length]
-}
 
 // ----------- Fetch -----------
 
@@ -115,15 +115,13 @@ async function fetchStability() {
   error.value = null
 
   try {
-    const { data } = await axios.get(
-      `/api/analysis/${props.projectId}/jobs/${props.jobId}/stability`
-    )
+    const { data } = await api.analysis.jobStability(props.projectId, props.jobId)
     stabData.value = data
     await nextTick()
     renderActiveView()
   } catch (err) {
     console.error('Stability error:', err)
-    error.value = err.response?.data?.detail || err.message
+    error.value = apiError(err)
   } finally {
     loading.value = false
   }
@@ -153,9 +151,9 @@ async function renderIndicesChart() {
     name: 'Tanimoto',
     type: 'scatter',
     mode: 'lines+markers',
-    line: { color: '#2ca02c', width: 2.5 },
+    line: { color: c.good, width: 2.5 },
     marker: { size: 6 },
-    hovertemplate: 'k=%{x}<br>Tanimoto=%{y:.3f}<br>n=%{customdata} models<extra></extra>',
+    hovertemplate: `k=%{x}<br>Tanimoto=%{y:.3f}<br>n=%{customdata} ${ct('models')}<extra></extra>`,
     customdata: byK.map(d => d.n_models),
   }
 
@@ -165,7 +163,7 @@ async function renderIndicesChart() {
     name: 'Kuncheva',
     type: 'scatter',
     mode: 'lines+markers',
-    line: { color: '#9467bd', width: 2 },
+    line: { color: c.accent, width: 2, dash: 'dash' },
     marker: { size: 5 },
     hovertemplate: 'k=%{x}<br>Kuncheva=%{y:.3f}<extra></extra>',
   }
@@ -176,7 +174,7 @@ async function renderIndicesChart() {
     name: 'CW_rel',
     type: 'scatter',
     mode: 'lines+markers',
-    line: { color: '#17becf', width: 2 },
+    line: { color: c.class0, width: 2, dash: 'dashdot' },
     marker: { size: 5 },
     hovertemplate: 'k=%{x}<br>CW_rel=%{y:.3f}<extra></extra>',
   }
@@ -185,10 +183,10 @@ async function renderIndicesChart() {
   const aucTrace = {
     x: xVals,
     y: byK.map(d => d.mean_auc),
-    name: 'Mean AUC',
+    name: ct('Mean AUC'),
     type: 'scatter',
     mode: 'lines+markers',
-    line: { color: '#d62728', width: 2, dash: 'dot' },
+    line: { color: c.class1, width: 2, dash: 'dot' },
     marker: { size: 5 },
     yaxis: 'y2',
     hovertemplate: 'k=%{x}<br>AUC=%{y:.3f}<extra></extra>',
@@ -198,11 +196,11 @@ async function renderIndicesChart() {
   const countTrace = {
     x: xVals,
     y: byK.map(d => d.n_models),
-    name: 'Models',
+    name: ct('Models'),
     type: 'bar',
-    marker: { color: 'rgba(200,200,200,0.3)' },
+    marker: { color: withAlpha(c.neutral, 0.35) },
     yaxis: 'y3',
-    hovertemplate: 'k=%{x}<br>%{y} models<extra></extra>',
+    hovertemplate: `k=%{x}<br>%{y} ${ct('models')}<extra></extra>`,
   }
 
   const layout = {
@@ -250,15 +248,9 @@ async function renderHeatmap() {
     x: hm.sparsity_levels.map(k => `k=${k}`),
     y: hm.features,
     type: 'heatmap',
-    colorscale: [
-      [0, '#ffffff'],
-      [0.2, '#fee8c8'],
-      [0.5, '#fdbb84'],
-      [0.8, '#e34a33'],
-      [1.0, '#b30000'],
-    ],
-    colorbar: { title: 'Prevalence', len: 0.8 },
-    hovertemplate: '%{y}<br>k=%{x}<br>Prevalence=%{z:.2f}<extra></extra>',
+    colorscale: c.sequentialWarm,
+    colorbar: { title: ct('Prevalence'), len: 0.8 },
+    hovertemplate: `%{y}<br>k=%{x}<br>${ct('Prevalence')}=%{z:.2f}<extra></extra>`,
   }
 
   const height = Math.max(400, hm.features.length * 18 + 100)
@@ -330,7 +322,7 @@ async function renderDendrogram() {
     y: lineY,
     type: 'scatter',
     mode: 'lines',
-    line: { color: '#333', width: 1.5 },
+    line: { color: c.text, width: 1.5 },
     hoverinfo: 'skip',
     showlegend: false,
   }
@@ -340,7 +332,7 @@ async function renderDendrogram() {
   const leafYArr = leafOrder.map(() => 0)
   const leafColors = leafOrder.map(idx => {
     const cl = clusters[idx] || 1
-    return CLUSTER_COLORS[(cl - 1) % CLUSTER_COLORS.length]
+    return clusterColor(cl - 1)
   })
   const leafLabels = leafOrder.map(idx => labels[idx] || `M${idx}`)
 
@@ -349,7 +341,7 @@ async function renderDendrogram() {
     y: leafYArr,
     type: 'scatter',
     mode: 'markers',
-    marker: { size: 8, color: leafColors, line: { width: 1, color: '#fff' } },
+    marker: { size: 8, color: leafColors, line: { width: 1, color: c.paper } },
     text: leafLabels,
     hovertemplate: '%{text}<extra></extra>',
     showlegend: false,
@@ -361,7 +353,7 @@ async function renderDendrogram() {
     y: [0.7, 0.7],
     type: 'scatter',
     mode: 'lines',
-    line: { color: '#d62728', width: 1, dash: 'dash' },
+    line: { color: c.class1, width: 1, dash: 'dash' },
     hoverinfo: 'skip',
     showlegend: false,
   }
@@ -375,11 +367,11 @@ async function renderDendrogram() {
       tickvals: leafXArr,
       ticktext: leafLabels,
       tickangle: 90,
-      tickfont: { size: 7 },
+      tickfont: { size: 10 },
       range: [-1, n],
     },
     yaxis: {
-      title: 'Tanimoto distance',
+      title: ct('Tanimoto distance'),
       gridcolor: c.grid,
       rangemode: 'tozero',
     },
@@ -388,9 +380,9 @@ async function renderDendrogram() {
     annotations: [{
       x: n - 1,
       y: 0.7,
-      text: 'cutoff = 0.7',
+      text: `${ct('cutoff')} = 0.7`,
       showarrow: false,
-      font: { size: 10, color: '#d62728' },
+      font: { size: 10, color: c.class1 },
       yshift: 10,
     }],
   }

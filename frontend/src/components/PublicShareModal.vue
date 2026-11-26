@@ -1,9 +1,9 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal">
+    <div class="modal" v-dialog="() => $emit('close')" aria-labelledby="public-share-modal-title">
       <div class="modal-header">
-        <h3>{{ $t('modals.publicShareLinks') }}</h3>
-        <button class="close-btn" @click="$emit('close')">&times;</button>
+        <h3 id="public-share-modal-title">{{ $t('modals.publicShareLinks') }}</h3>
+        <button type="button" class="close-btn" :aria-label="$t('common.close')" @click="$emit('close')"><span aria-hidden="true">&times;</span></button>
       </div>
 
       <div class="modal-body">
@@ -52,14 +52,21 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from 'axios'
+import { api } from '../api'
+import { apiError } from '../utils/apiError'
+import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+import { vDialog } from '../directives/dialog'
+
+const { toast } = useToast()
+const { confirmDialog } = useConfirm()
 
 const { t } = useI18n()
 
 const props = defineProps({
-  projectId: String,
+  projectId: { type: String, required: true },
 })
-const emit = defineEmits(['close'])
+defineEmits(['close'])
 
 const links = ref([])
 const loading = ref(true)
@@ -70,7 +77,7 @@ const copiedMsg = ref('')
 async function loadLinks() {
   loading.value = true
   try {
-    const { data } = await axios.get(`/api/projects/${props.projectId}/public`)
+    const { data } = await api.projects.publicLinks(props.projectId)
     links.value = data
   } catch (e) {
     console.error('Failed to load public links:', e)
@@ -82,25 +89,25 @@ async function loadLinks() {
 async function createLink() {
   creating.value = true
   try {
-    const { data } = await axios.post(`/api/projects/${props.projectId}/public`, {
+    const { data } = await api.projects.createPublicLink(props.projectId, {
       expires_in_days: expiryDays.value,
     })
     links.value.unshift(data)
     await copyLink(data.token)
   } catch (e) {
-    alert('Failed to create link: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('modals.createLinkFailed', { error: apiError(e) }))
   } finally {
     creating.value = false
   }
 }
 
 async function revokeLink(id) {
-  if (!confirm(t('modals.revokeConfirm'))) return
+  if (!(await confirmDialog({ message: t('modals.revokeConfirm'), danger: true }))) return
   try {
-    await axios.delete(`/api/projects/${props.projectId}/public/${id}`)
+    await api.projects.revokePublicLink(props.projectId, id)
     links.value = links.value.filter(l => l.id !== id)
   } catch (e) {
-    alert('Failed to revoke: ' + (e.response?.data?.detail || e.message))
+    toast.error(t('modals.revokeFailed', { error: apiError(e) }))
   }
 }
 
@@ -171,7 +178,7 @@ onMounted(loadLinks)
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .msg { padding: 0.4rem 0.7rem; border-radius: 6px; font-size: 0.8rem; margin-bottom: 0.75rem; }
-.msg-success { background: var(--success-bg); color: var(--success); }
+.msg-success { background: var(--success-bg); color: var(--success-dark); }
 
 .links-list { display: flex; flex-direction: column; gap: 0.75rem; }
 .link-row {
@@ -187,11 +194,11 @@ onMounted(loadLinks)
 }
 .link-meta {
   display: flex; align-items: center; gap: 0.75rem;
-  font-size: 0.7rem; color: var(--text-muted);
+  font-size: 0.75rem; color: var(--text-muted);
 }
 .no-expiry { font-style: italic; }
 
-.btn-sm { padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.7rem; cursor: pointer; }
+.btn-sm { padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
 .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); }
 .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
 .btn-danger:hover { background: var(--danger-bg); }

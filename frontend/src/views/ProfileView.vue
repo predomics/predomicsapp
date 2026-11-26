@@ -12,6 +12,17 @@
         <span class="label">{{ $t('profile.joined') }}</span>
         <span class="value">{{ auth.user?.created_at ? new Date(auth.user.created_at).toLocaleDateString() : '' }}</span>
       </div>
+      <div v-if="usage" class="info-row usage-row">
+        <span class="label" id="usage-label">{{ $t('profile.storage') }}</span>
+        <span class="value">
+          <template v-if="usage.quota_bytes > 0">
+            {{ $t('profile.storageUsedOf', { used: formatBytes(usage.used_bytes), quota: formatBytes(usage.quota_bytes) }) }}
+            <progress class="usage-bar" :class="{ near: usagePct >= 90 }" :value="usage.used_bytes" :max="usage.quota_bytes" aria-labelledby="usage-label">{{ usagePct }}%</progress>
+            <span v-if="usagePct >= 90" class="usage-warn">{{ $t('profile.storageAlmostFull') }}</span>
+          </template>
+          <template v-else>{{ $t('profile.storageUsedNoQuota', { used: formatBytes(usage.used_bytes) }) }}</template>
+        </span>
+      </div>
     </section>
 
     <section class="card">
@@ -19,7 +30,7 @@
       <form @submit.prevent="saveName">
         <div class="form-group">
           <label>{{ $t('profile.fullName') }}</label>
-          <input v-model="fullName" type="text" :placeholder="$t('profile.yourName')" />
+          <input :aria-label="$t('profile.yourName')" v-model="fullName" type="text" :placeholder="$t('profile.yourName')" />
         </div>
         <button type="submit" class="btn btn-primary" :disabled="savingName">
           {{ savingName ? $t('profile.saving') : $t('profile.save') }}
@@ -64,7 +75,7 @@
       <p class="card-desc">{{ $t('profile.apiKeysDesc') }}</p>
 
       <div class="api-key-create">
-        <input v-model="apiKeyName" :placeholder="$t('profile.keyNamePlaceholder')" class="form-input" @keyup.enter="createApiKey" />
+        <input :aria-label="$t('profile.keyNamePlaceholder')" v-model="apiKeyName" :placeholder="$t('profile.keyNamePlaceholder')" class="form-input" @keyup.enter="createApiKey" />
         <button class="btn btn-primary" @click="createApiKey" :disabled="!apiKeyName.trim() || creatingKey">
           {{ creatingKey ? $t('profile.creating') : $t('profile.createKey') }}
         </button>
@@ -94,8 +105,8 @@
       <p class="card-desc">{{ $t('profile.webhooksDesc') }}</p>
 
       <div class="webhook-create">
-        <input v-model="webhookName" :placeholder="$t('profile.webhookName')" class="form-input" />
-        <input v-model="webhookUrl" :placeholder="$t('profile.webhookUrlPlaceholder')" class="form-input flex-1" />
+        <input :aria-label="$t('profile.webhookName')" v-model="webhookName" :placeholder="$t('profile.webhookName')" class="form-input" />
+        <input :aria-label="$t('profile.webhookUrlPlaceholder')" v-model="webhookUrl" :placeholder="$t('profile.webhookUrlPlaceholder')" class="form-input flex-1" />
         <button class="btn btn-primary" @click="createWebhook" :disabled="!webhookName.trim() || !webhookUrl.trim() || creatingWebhook">
           {{ creatingWebhook ? $t('profile.creating') : $t('profile.addWebhook') }}
         </button>
@@ -128,11 +139,11 @@
       <form @submit.prevent="savePassword">
         <div class="form-group">
           <label>{{ $t('profile.currentPassword') }}</label>
-          <input v-model="currentPw" type="password" />
+          <input :aria-label="$t('profile.currentPassword')" v-model="currentPw" type="password" />
         </div>
         <div class="form-group">
           <label>{{ $t('profile.newPassword') }}</label>
-          <input v-model="newPw" type="password" />
+          <input :aria-label="$t('profile.newPassword')" v-model="newPw" type="password" />
         </div>
         <button type="submit" class="btn btn-primary" :disabled="savingPw || !currentPw || !newPw">
           {{ savingPw ? $t('profile.saving') : $t('profile.changePasswordBtn') }}
@@ -145,11 +156,19 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import axios from 'axios'
+import { api } from '../api'
 import { useAuthStore } from '../stores/auth'
 import { isSupported, requestPermission } from '../utils/notify'
 import { useDebugMode } from '../composables/useDebugMode'
 import { useI18n } from 'vue-i18n'
+import { apiError } from '../utils/apiError'
+import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+import { formatBytes } from '../utils/format'
+import { resetChecklists } from '../utils/projectChecklist'
+
+const { toast } = useToast()
+const { confirmDialog } = useConfirm()
 
 const auth = useAuthStore()
 const debug = useDebugMode()
@@ -165,6 +184,13 @@ const savingPw = ref(false)
 const pwMsg = ref('')
 const pwError = ref(false)
 const prefMsg = ref('')
+
+// Storage used by this account (null when the server has no quota endpoint)
+const usage = ref(null)
+const usagePct = computed(() => {
+  const u = usage.value
+  return u && u.quota_bytes > 0 ? Math.min(100, Math.round((u.used_bytes / u.quota_bytes) * 100)) : 0
+})
 
 // API Keys
 const apiKeys = ref([])
@@ -206,7 +232,7 @@ async function toggleNotifications() {
 }
 
 function resetTour() {
-  localStorage.removeItem('predomics_onboarding_dismissed')
+  resetChecklists()
   prefMsg.value = t('profile.tourReset')
   setTimeout(() => { prefMsg.value = '' }, 3000)
 }
@@ -215,12 +241,13 @@ onMounted(() => {
   fullName.value = auth.user?.full_name || ''
   fetchApiKeys()
   fetchWebhooks()
+  auth.fetchUsage().then((u) => { usage.value = u })
 })
 
 // API Key functions
 async function fetchApiKeys() {
   try {
-    const { data } = await axios.get('/api/auth/api-keys')
+    const { data } = await api.auth.listApiKeys()
     apiKeys.value = data
   } catch { /* ignore */ }
 }
@@ -230,31 +257,31 @@ async function createApiKey() {
   creatingKey.value = true
   newKeySecret.value = ''
   try {
-    const { data } = await axios.post('/api/auth/api-keys', { name: apiKeyName.value.trim() })
+    const { data } = await api.auth.createApiKey({ name: apiKeyName.value.trim() })
     newKeySecret.value = data.key
     apiKeyName.value = ''
     await fetchApiKeys()
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to create key')
+    toast.error(t('profile.err.createKey', { error: apiError(e) }))
   } finally {
     creatingKey.value = false
   }
 }
 
 async function revokeApiKey(k) {
-  if (!confirm(`Revoke API key "${k.name}"? This cannot be undone.`)) return
+  if (!(await confirmDialog({ message: t('profile.revokeKeyConfirm', { name: k.name }), danger: true }))) return
   try {
-    await axios.delete(`/api/auth/api-keys/${k.id}`)
+    await api.auth.deleteApiKey(k.id)
     apiKeys.value = apiKeys.value.filter(x => x.id !== k.id)
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to revoke key')
+    toast.error(t('profile.err.revokeKey', { error: apiError(e) }))
   }
 }
 
 // Webhook functions
 async function fetchWebhooks() {
   try {
-    const { data } = await axios.get('/api/webhooks/')
+    const { data } = await api.webhooks.list()
     webhooks.value = data
   } catch { /* ignore */ }
 }
@@ -264,7 +291,7 @@ async function createWebhook() {
   creatingWebhook.value = true
   newWebhookSecret.value = ''
   try {
-    const { data } = await axios.post('/api/webhooks/', {
+    const { data } = await api.webhooks.create({
       name: webhookName.value.trim(),
       url: webhookUrl.value.trim(),
     })
@@ -273,7 +300,7 @@ async function createWebhook() {
     webhookUrl.value = ''
     await fetchWebhooks()
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to create webhook')
+    toast.error(t('profile.err.createWebhook', { error: apiError(e) }))
   } finally {
     creatingWebhook.value = false
   }
@@ -282,23 +309,23 @@ async function createWebhook() {
 async function testWebhook(w) {
   webhookMsg.value = ''
   try {
-    const { data } = await axios.post(`/api/webhooks/${w.id}/test`)
+    const { data } = await api.webhooks.test(w.id)
     webhookMsg.value = `Test ${data.status}`
     webhookMsgType.value = data.status === 'delivered' ? 'success' : 'error'
   } catch (e) {
-    webhookMsg.value = e.response?.data?.detail || 'Test failed'
+    webhookMsg.value = apiError(e)
     webhookMsgType.value = 'error'
   }
   setTimeout(() => { webhookMsg.value = '' }, 4000)
 }
 
 async function deleteWebhook(w) {
-  if (!confirm(`Delete webhook "${w.name}"?`)) return
+  if (!(await confirmDialog({ message: t('profile.deleteWebhookConfirm', { name: w.name }), danger: true }))) return
   try {
-    await axios.delete(`/api/webhooks/${w.id}`)
+    await api.webhooks.remove(w.id)
     webhooks.value = webhooks.value.filter(x => x.id !== w.id)
   } catch (e) {
-    alert(e.response?.data?.detail || 'Failed to delete webhook')
+    toast.error(t('profile.err.deleteWebhook', { error: apiError(e) }))
   }
 }
 
@@ -307,9 +334,9 @@ async function saveName() {
   nameMsg.value = ''
   try {
     await auth.updateProfile(fullName.value)
-    nameMsg.value = 'Name updated'
+    nameMsg.value = t('profile.nameUpdated')
   } catch (e) {
-    nameMsg.value = e.response?.data?.detail || 'Failed to update'
+    nameMsg.value = apiError(e)
   } finally {
     savingName.value = false
   }
@@ -321,12 +348,12 @@ async function savePassword() {
   pwError.value = false
   try {
     await auth.changePassword(currentPw.value, newPw.value)
-    pwMsg.value = 'Password changed'
+    pwMsg.value = t('profile.passwordChanged')
     currentPw.value = ''
     newPw.value = ''
   } catch (e) {
     pwError.value = true
-    pwMsg.value = e.response?.data?.detail || 'Failed to change password'
+    pwMsg.value = apiError(e)
   } finally {
     savingPw.value = false
   }
@@ -334,6 +361,11 @@ async function savePassword() {
 </script>
 
 <style scoped>
+.usage-row .value { display: flex; flex-direction: column; gap: 0.3rem; align-items: flex-start; }
+.usage-bar { width: 220px; max-width: 100%; height: 0.6rem; accent-color: var(--accent); }
+.usage-bar.near { accent-color: var(--danger); }
+.usage-warn { color: var(--danger); font-size: 0.8rem; }
+
 .profile {
   max-width: 500px;
   margin: 0 auto;
@@ -411,7 +443,7 @@ async function savePassword() {
   font-size: 0.8rem;
 }
 
-.msg.success { color: var(--success); }
+.msg.success { color: var(--success-dark); }
 .msg.error { color: var(--danger); }
 
 .pref-row {
@@ -499,7 +531,7 @@ async function savePassword() {
   margin-right: 0.5rem;
 }
 .key-used {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   color: var(--text-faint);
 }
 .key-actions {
@@ -513,7 +545,7 @@ async function savePassword() {
   background: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 .btn-danger-sm:hover { background: var(--danger-bg); }
 .btn-test-sm {
@@ -523,7 +555,7 @@ async function savePassword() {
   background: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 .btn-test-sm:hover { background: var(--accent-faint, rgba(59,130,246,0.08)); }
 .empty-hint {
