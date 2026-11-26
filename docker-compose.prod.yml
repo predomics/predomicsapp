@@ -1,52 +1,75 @@
 # PredomicsApp — Production Docker Compose Override
 #
 # Usage:
-#   cp .env.example .env   # edit with production values
-#   ./scripts/ssl-init.sh  # first-time SSL certificate setup
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   ./scripts/setup.sh         # writes .env (or: cp .env.example .env and edit)
+#   ./scripts/ssl-init.sh      # first-time SSL certificate (NGINX_MODE=https only)
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
 # This file overrides the base docker-compose.yml with:
-#   - NGINX reverse proxy with SSL/TLS
-#   - Let's Encrypt certificate auto-renewal
-#   - Resource limits on all services
-#   - No exposed ports except 80/443
-#   - Log rotation
-#   - Scheduled database backups
+#   - NGINX reverse proxy (TLS termination, or plain HTTP with NGINX_MODE=http)
+#   - Let's Encrypt renewal, with NGINX reloading renewed certificates
+#   - No published ports except 80/443 (app and db are internal only)
+#   - Resource limits on app and db, log rotation on every service
+#   - Scheduled database + data backups (cron, default 02:00 UTC)
+#
+# Required in .env: DOMAIN, POSTGRES_PASSWORD, PREDOMICS_SECRET_KEY
+# Requires Docker Compose >= 2.24 (`!override`, optional env_file).
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   # --------------------------------------------------------------------------
-  # NGINX — reverse proxy with SSL termination
+  # NGINX — reverse proxy (templates in nginx/https or nginx/http)
   # --------------------------------------------------------------------------
   nginx:
-    image: nginx:alpine
-    container_name: predomics-nginx
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    container_name: ${PREDOMICS_STACK:-predomics}-nginx
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env (e.g. predomics.example.com)}
+      # Upload limit enforced by the proxy; keep it >= PREDOMICS_MAX_UPLOAD_MB.
+      NGINX_MAX_BODY: ${NGINX_MAX_BODY:-500M}
+      # Address or CIDR of a proxy/load balancer in front of this nginx whose
+      # X-Forwarded-For / X-Forwarded-Proto are believed. Leave the default when
+      # nginx is the entry point.
+      NGINX_TRUSTED_PROXY: ${NGINX_TRUSTED_PROXY:-127.0.0.1}
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certbot/conf:/etc/letsencrypt:ro
-      - ./certbot/www:/var/www/certbot:ro
+      # Rendered by the nginx image's envsubst step into /etc/nginx/conf.d/
+      - ./nginx/${NGINX_MODE:-https}:/etc/nginx/templates:ro
+      - ./nginx/snippets:/etc/nginx/predomics:ro
+      # Reloads NGINX every 6 h so renewed certificates are picked up
+      - ./nginx/40-reload-certs.sh:/docker-entrypoint.d/40-reload-certs.sh:ro
+      - ${CERTBOT_DIR:-./certbot}/conf:/etc/letsencrypt:ro
+      - ${CERTBOT_DIR:-./certbot}/www:/var/www/certbot:ro
     depends_on:
-      - app
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
   # --------------------------------------------------------------------------
-  # Certbot — Let's Encrypt auto-renewal (checks every 12 hours)
+  # Certbot — Let's Encrypt renewal (checks every 12 hours)
   # --------------------------------------------------------------------------
   certbot:
-    image: certbot/certbot
-    container_name: predomics-certbot
+    image: certbot/certbot:v2.11.0@sha256:ddf9e5d226a56e886986838fa0ebedc0237511c78664352e8d0f4346ee022cd8
+    container_name: ${PREDOMICS_STACK:-predomics}-certbot
     volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 43200; done'"
+      - ${CERTBOT_DIR:-./certbot}/conf:/etc/letsencrypt
+      - ${CERTBOT_DIR:-./certbot}/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 43200 & wait $${!}; done'"
     restart: unless-stopped
+    logging: *default-logging
 
   # --------------------------------------------------------------------------
   # Database — production overrides
@@ -55,7 +78,7 @@ services:
     ports: !override []
     environment:
       POSTGRES_USER: predomics
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: predomics
     deploy:
       resources:
@@ -65,11 +88,7 @@ services:
         reservations:
           cpus: "0.25"
           memory: 256M
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    logging: *default-logging
 
   # --------------------------------------------------------------------------
   # Application — production overrides
@@ -77,72 +96,66 @@ services:
   app:
     ports: !override []
     environment:
-      - PREDOMICS_DATA_DIR=/app/data
-      - PREDOMICS_UPLOAD_DIR=/app/data/uploads
-      - PREDOMICS_PROJECT_DIR=/app/data/projects
-      - PREDOMICS_SAMPLE_DIR=/app/data/qin2014_cirrhosis
-      - PREDOMICS_DATABASE_URL=${PREDOMICS_DATABASE_URL}
-      - PREDOMICS_SECRET_KEY=${PREDOMICS_SECRET_KEY}
-      - PREDOMICS_CORS_ORIGINS=${PREDOMICS_CORS_ORIGINS}
+      - PREDOMICS_DATABASE_URL=${PREDOMICS_DATABASE_URL:-postgresql+asyncpg://predomics:${POSTGRES_PASSWORD}@db:5432/predomics}
+      - PREDOMICS_SECRET_KEY=${PREDOMICS_SECRET_KEY:?Set PREDOMICS_SECRET_KEY in .env (openssl rand -hex 32)}
+      - PREDOMICS_CORS_ORIGINS=${PREDOMICS_CORS_ORIGINS:-["https://${DOMAIN}"]}
+      # Used to build the links in password-reset emails.
+      - PREDOMICS_FRONTEND_URL=${PREDOMICS_FRONTEND_URL:-https://${DOMAIN}}
+      # The app is only reachable through nginx here, so its X-Forwarded-*
+      # headers are trusted (real client IPs for rate limiting and audit logs).
+      - FORWARDED_ALLOW_IPS=*
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 4G
+          cpus: "${PREDOMICS_CPU_LIMIT:-2.0}"
+          memory: ${PREDOMICS_MEMORY_LIMIT:-4G}
         reservations:
           cpus: "0.5"
           memory: 512M
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+    logging: *default-logging
 
   # --------------------------------------------------------------------------
-  # Backup — daily PostgreSQL dump + data volume tar
+  # Backup — PostgreSQL dump + data volume archive on a cron schedule
+  # (scripts/backup-job.sh; restore with scripts/restore.sh)
   # --------------------------------------------------------------------------
   backup:
-    image: postgres:16-alpine
-    container_name: predomics-backup
+    image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+    container_name: ${PREDOMICS_STACK:-predomics}-backup
     volumes:
-      - ./backups:/backups
+      - ${BACKUP_DIR:-./backups}:/backups
       - app-data:/app/data:ro
+      - ./scripts/backup-job.sh:/usr/local/bin/backup-job.sh:ro
     environment:
       PGHOST: db
       PGUSER: predomics
-      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       PGDATABASE: predomics
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
-    entrypoint: >
-      /bin/sh -c '
-        echo "Backup service started (daily at 02:00 UTC)"
-        while true; do
-          NEXT=$$(date -d "tomorrow 02:00" +%s 2>/dev/null || date -v+1d -v2H -v0M -v0S +%s 2>/dev/null || echo 0)
-          NOW=$$(date +%s)
-          if [ "$$NEXT" -gt "$$NOW" ]; then SLEEP=$$((NEXT - NOW)); else SLEEP=86400; fi
-          sleep $$SLEEP
-
-          TS=$$(date +%Y%m%d_%H%M%S)
-          echo "[$$TS] Starting backup..."
-
-          pg_dump -Fc > /backups/db_$$TS.dump 2>/dev/null && \
-            echo "[$$TS] DB dump: ok" || echo "[$$TS] DB dump: FAILED"
-
-          tar czf /backups/data_$$TS.tar.gz -C /app/data . 2>/dev/null && \
-            echo "[$$TS] Data tar: ok" || echo "[$$TS] Data tar: FAILED"
-
-          # Retention: remove backups older than N days
-          find /backups -name "db_*.dump" -mtime +$$BACKUP_RETENTION_DAYS -delete 2>/dev/null
-          find /backups -name "data_*.tar.gz" -mtime +$$BACKUP_RETENTION_DAYS -delete 2>/dev/null
-          echo "[$$TS] Cleanup done (retention: $$BACKUP_RETENTION_DAYS days)"
-        done
-      '
+      # Standard 5-field cron expression, evaluated in UTC.
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 2 * * *}
+      # Optional: URL called (HTTP GET) when a backup fails, e.g. a healthchecks.io
+      # "fail" URL or a chat webhook.
+      BACKUP_FAILURE_URL: ${BACKUP_FAILURE_URL:-}
+      # Optional: shell command run after a successful backup, e.g. an rclone or
+      # rsync push of /backups to another host.
+      BACKUP_POST_HOOK: ${BACKUP_POST_HOOK:-}
+      TZ: UTC
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        echo "$${BACKUP_SCHEDULE} /bin/sh /usr/local/bin/backup-job.sh > /proc/1/fd/1 2>&1" > /etc/crontabs/root
+        echo "Backup service started — schedule (UTC): $${BACKUP_SCHEDULE}, retention: $${BACKUP_RETENTION_DAYS} days"
+        exec crond -f -l 8
+    # Unhealthy while the last backup attempt failed.
+    healthcheck:
+      test: ["CMD-SHELL", "test ! -f /backups/LAST_FAILURE"]
+      interval: 5m
+      timeout: 5s
+      retries: 1
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
+    logging: *default-logging

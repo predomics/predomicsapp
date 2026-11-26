@@ -1,28 +1,36 @@
 
-=== PredomicsApp has been deployed! ===
+=== PredomicsApp {{ default .Chart.AppVersion .Values.image.tag }} has been deployed ===
 
 {{- if .Values.ingress.enabled }}
 
 Access the application at:
-  https://{{ .Values.ingress.host }}
+  {{ include "predomicsapp.publicUrl" . }}
 
 {{- else }}
 
 Get the application URL by running:
-  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "predomicsapp.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
-  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8000:{{ .Values.service.targetPort }}
-  echo "Visit http://127.0.0.1:8000"
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "predomicsapp.fullname" . }} 8000:{{ .Values.service.port }}
+  echo "Visit http://127.0.0.1:8000"   (health: http://127.0.0.1:8000/health, API docs: /api/docs)
 
 {{- end }}
 
-Health check:
-  curl http://127.0.0.1:8000/health
+First login:
+{{- if .Values.env.PREDOMICS_ADMIN_EMAIL }}
+  Register with {{ .Values.env.PREDOMICS_ADMIN_EMAIL }} — that account gets administrator rights.
+{{- else }}
+  No administrator is configured. Set env.PREDOMICS_ADMIN_EMAIL to the email of
+  the account that should administer this instance, then `helm upgrade`.
+{{- end }}
 
 {{- if not .Values.secrets.existingSecret }}
 
-IMPORTANT: The chart auto-generated secrets for this release.
-To view them:
-  kubectl get secret {{ include "predomicsapp.fullname" . }} -o yaml
+Secrets (JWT key{{ if .Values.postgresql.enabled }}, database password{{ end }}) are stored in:
+  kubectl --namespace {{ .Release.Namespace }} get secret {{ include "predomicsapp.fullname" . }} -o yaml
+They are generated once, kept across upgrades and NOT deleted by `helm uninstall`.
+{{- end }}
 
-For production, create your own secret and set secrets.existingSecret in values.yaml.
+{{- if .Values.postgresql.enabled }}
+
+The bundled PostgreSQL is a single instance without backups. Schedule
+`pg_dump` yourself or use an external database (postgresql.enabled=false).
 {{- end }}

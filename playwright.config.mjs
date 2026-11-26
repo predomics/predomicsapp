@@ -13,6 +13,8 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || 'http://localhost:8001',
     viewport: { width: 1440, height: 900 },
     colorScheme: 'dark',
+    // Self-signed certificate on a test stack: E2E_INSECURE_TLS=1
+    ignoreHTTPSErrors: !!process.env.E2E_INSECURE_TLS,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },

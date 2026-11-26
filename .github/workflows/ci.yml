@@ -5,164 +5,333 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Reused by release.yml: a release is only published after this passes.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 env:
-  DOCKER_BUILDKIT: 1
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
 
 jobs:
   # -------------------------------------------------------------------------
-  # Backend tests (Python + FastAPI)
+  # Backend tests (Python + FastAPI), installed from the same hashed lock file
+  # as the image and run on PostgreSQL (so the Alembic migration tests run too).
+  # The Rust engine is not available here, so jobs use the mock engine; the real
+  # engine is exercised in the `image` job below.
   # -------------------------------------------------------------------------
   backend-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+        env:
+          POSTGRES_USER: predomics
+          POSTGRES_PASSWORD: predomics
+          POSTGRES_DB: predomics
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U predomics -d predomics"
+          --health-interval 5s --health-timeout 3s --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
+      - name: Install locked dependencies + test tools
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install "pytest>=8,<10" "pytest-asyncio>=0.23" "pytest-cov>=5" "aiosqlite>=0.19" "ruff>=0.6" "pip-audit>=2.7"
 
-      - name: Run tests
-        run: PYTHONPATH=. pytest tests/ -v --tb=short
+      # Blocking: syntax errors and undefined names. These are bugs, not style.
+      - name: Lint (ruff, errors)
+        run: ruff check --select E9,F63,F7,F82 app tests alembic --output-format=github
+
+      # Not blocking yet: the full rule set of pyproject.toml still reports
+      # findings in older code. Remove continue-on-error once it is clean.
+      - name: Lint (ruff, full rule set, informational)
+        continue-on-error: true
+        run: ruff check app tests alembic --output-format=github
+
+      - name: Run tests on SQLite
+        run: PYTHONPATH=. python -m pytest tests/ -q --tb=short
         env:
-          PREDOMICS_DATA_DIR: /tmp/predomics-test
-          PREDOMICS_PROJECT_DIR: /tmp/predomics-test/projects
-          PREDOMICS_UPLOAD_DIR: /tmp/predomics-test/uploads
+          PREDOMICS_ALLOW_MOCK_ENGINE: "true"
+
+      # Same suite on PostgreSQL; the migration tests only run here. The tests
+      # work in a scratch database they create and drop themselves.
+      - name: Run tests on PostgreSQL (with migrations)
+        run: PYTHONPATH=. python -m pytest tests/ -q --tb=short --cov=app --cov-report=term --cov-report=xml
+        env:
+          PREDOMICS_ALLOW_MOCK_ENGINE: "true"
+          PREDOMICS_TEST_PG_URL: postgresql+asyncpg://predomics:predomics@localhost:5432/predomics
+
+      - name: Alembic — an empty database upgrades and matches the models
+        run: |
+          python -m backend.app.migrate
+          python -m backend.app.migrate status
+          python -m backend.app.migrate check
+        working-directory: .
+        env:
+          PREDOMICS_DATABASE_URL: postgresql+asyncpg://predomics:predomics@localhost:5432/predomics
+          PREDOMICS_SECRET_KEY: ci-secret-key-0123456789abcdef0123456789
+          PREDOMICS_DATA_DIR: ${{ runner.temp }}/predomics-data
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          if-no-files-found: ignore
+
+      - name: Dependency vulnerabilities (pip-audit, informational)
+        continue-on-error: true
+        run: pip-audit -r requirements.lock --no-deps --disable-pip
 
   # -------------------------------------------------------------------------
-  # Frontend lint + build (Vue.js)
+  # Frontend unit tests + production build (Vue.js)
   # -------------------------------------------------------------------------
-  frontend-build:
+  frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint (eslint)
+        run: npm run lint
+
+      - name: Unit tests (vitest)
+        run: npm test
+
       - name: Build
         run: npm run build
 
+      - name: Dependency vulnerabilities (npm audit, informational)
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
+
   # -------------------------------------------------------------------------
-  # Docker build + E2E tests (full stack)
+  # Deployment files: compose, Helm chart, shell scripts, Dockerfile
   # -------------------------------------------------------------------------
-  docker-build:
+  deploy-config:
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: docker compose config (base, dev, production)
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.dev.yml --profile test config -q
+          DOMAIN=ci.example.org POSTGRES_PASSWORD=ci-password \
+          PREDOMICS_SECRET_KEY=0123456789abcdef0123456789abcdef \
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q
+
+      - name: NGINX templates render and pass nginx -t
+        run: |
+          mkdir -p /tmp/le/live/ci.example.org /tmp/www
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 -subj "/CN=ci.example.org" \
+            -keyout /tmp/le/live/ci.example.org/privkey.pem \
+            -out /tmp/le/live/ci.example.org/fullchain.pem
+          for mode in https http; do
+            docker run --rm -e DOMAIN=ci.example.org -e NGINX_MAX_BODY=500M -e NGINX_TRUSTED_PROXY=127.0.0.1 \
+              -v "$PWD/nginx/$mode:/etc/nginx/templates:ro" \
+              -v "$PWD/nginx/snippets:/etc/nginx/predomics:ro" \
+              -v /tmp/le:/etc/letsencrypt:ro -v /tmp/www:/var/www/certbot:ro \
+              nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 nginx -t
+          done
+
+      - name: Helm lint and render
+        run: |
+          helm lint helm/predomicsapp
+          helm template ci helm/predomicsapp > /dev/null
+          helm template ci helm/predomicsapp --set postgresql.enabled=false \
+            --set externalDatabase.url=postgresql+asyncpg://u:p@db:5432/predomics \
+            --set ingress.enabled=true --set ingress.tls.enabled=true > /dev/null
+
+      - name: Shell scripts (shellcheck)
+        run: shellcheck -S warning scripts/*.sh nginx/*.sh
+
+      - name: Dockerfile (hadolint, informational)
+        continue-on-error: true
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
+
+      - name: Lock file hashes are complete and current
+        run: python3 scripts/hash-lock.py --check
+
+      - name: Version numbers agree (pyproject, frontend, Helm appVersion)
+        run: |
+          py=$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -1)
+          fe=$(jq -r .version frontend/package.json)
+          helm=$(sed -n 's/^appVersion: "\(.*\)"/\1/p' helm/predomicsapp/Chart.yaml)
+          echo "backend/pyproject.toml: $py   frontend/package.json: $fe   helm appVersion: $helm"
+          [ -n "$py" ] && [ "$py" = "$helm" ] && [ "$py" = "$fe" ]
+
+  # -------------------------------------------------------------------------
+  # Build the real image (with the Rust engine), start it against PostgreSQL,
+  # and run the end-to-end tests against it. Runs on pull requests too.
+  # -------------------------------------------------------------------------
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: [backend-test, frontend, deploy-config]
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Build Docker image
-        run: |
-          docker build -t predomicsapp:latest .
+      - name: Build image (layer cache shared with the release workflow)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: predomicsapp:ci
+          build-args: |
+            APP_VERSION=ci-${{ github.sha }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha,scope=image-amd64
+          cache-to: type=gha,mode=max,scope=image-amd64
 
-      - name: Test Docker image startup
+      - name: Image runs as a non-root user and contains the engine
         run: |
-          # Start a postgres container for the app
-          docker network create test-net
-          docker run -d --name test-db --network test-net \
-            -e POSTGRES_USER=predomics \
-            -e POSTGRES_PASSWORD=predomics \
-            -e POSTGRES_DB=predomics \
-            postgres:16-alpine
-          # Wait for postgres
-          for i in $(seq 1 15); do
-            if docker exec test-db pg_isready -U predomics > /dev/null 2>&1; then
-              echo "Postgres ready on attempt $i"
-              break
-            fi
-            sleep 2
-          done
-          # Start app with postgres connection
-          docker run -d --name test-app --network test-net -p 8000:8000 \
-            -e PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@test-db:5432/predomics \
-            predomicsapp:latest
+          docker run --rm predomicsapp:ci sh -c 'id -u' | grep -qx 10001
+          docker run --rm predomicsapp:ci python -c "import gpredomicspy, xgboost, lightgbm, umap; print('imports ok')"
+          docker run --rm predomicsapp:ci cat /app/engine/gpredomics.sha /app/engine/gpredomicspy.sha
+
+      - name: Vulnerability scan (trivy, informational)
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: predomicsapp:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Start the stack (image + PostgreSQL)
+        run: |
+          docker network create ci-net
+          docker run -d --name ci-db --network ci-net \
+            -e POSTGRES_USER=predomics -e POSTGRES_PASSWORD=predomics -e POSTGRES_DB=predomics \
+            postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8000/health; then
-              echo "Health check passed on attempt $i"
-              docker stop test-app test-db
-              docker network rm test-net
-              exit 0
-            fi
-            echo "Waiting for app to start (attempt $i/30)..."
+            docker exec ci-db pg_isready -U predomics -d predomics -q && break
             sleep 2
           done
-          echo "Health check failed after 30 attempts"
-          docker logs test-app
-          docker stop test-app test-db
-          docker network rm test-net
-          exit 1
+          # `app` is the name the NGINX templates proxy to.
+          docker run -d --name ci-app --network ci-net --network-alias app -p 8001:8000 \
+            -e PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@ci-db:5432/predomics \
+            -e PREDOMICS_SECRET_KEY=ci-secret-key-0123456789abcdef0123456789 \
+            predomicsapp:ci
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8001/health > /tmp/health.json; then
+              echo "App ready on attempt $i"; break
+            fi
+            sleep 2
+          done
+          cat /tmp/health.json
 
-      # --- E2E tests (Playwright against the Docker image we just built) ---
+      - name: Health reports a working engine (no mock results)
+        run: |
+          jq -e '.status == "ok" and .gpredomicspy_available == true' /tmp/health.json
+          # Readiness: database reachable and data volume writable
+          curl -sf http://localhost:8001/health/ready | jq -e '.database == "ok" and .storage == "ok"'
+          # The image says which engine commits it contains
+          jq -e '(.engine_ref // "") != "" and (.enginepy_ref // "") != ""' /tmp/health.json
+
+      - name: Database is at the latest revision and matches the models
+        run: |
+          docker exec ci-app python -m backend.app.migrate status
+          docker exec ci-app python -m backend.app.migrate check
+          ! docker logs ci-app 2>&1 | grep -iE "Traceback|InFailedSqlTransaction"
+
+      - name: The image upgrades a database of the previous release (v2.2.0 schema)
+        run: ./scripts/check-upgrade.sh predomicsapp:ci
+
+      # The end-to-end tests go through the production proxy configuration, so
+      # the NGINX templates and the Content Security Policy are tested too.
+      - name: Start the NGINX proxy in front of the app
+        run: |
+          docker run -d --name ci-nginx --network ci-net -p 8080:80 \
+            -e DOMAIN=_ -e NGINX_MAX_BODY=500M -e NGINX_TRUSTED_PROXY=127.0.0.1 \
+            -v "$PWD/nginx/http:/etc/nginx/templates:ro" -v "$PWD/nginx/snippets:/etc/nginx/predomics:ro" \
+            nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+          for _ in $(seq 1 30); do curl -sf http://localhost:8080/health > /dev/null && break; sleep 1; done
+          curl -sI http://localhost:8080/ | grep -i '^content-security-policy:'
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/metrics)" = "404" ]
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install E2E dependencies
-        run: npm ci
-
-      - name: Install Playwright browser
-        run: npx playwright install chromium
-
-      - name: Start app for E2E
         run: |
-          docker network create e2e-net
-          docker run -d --name e2e-db --network e2e-net \
-            -e POSTGRES_USER=predomics \
-            -e POSTGRES_PASSWORD=predomics \
-            -e POSTGRES_DB=predomics \
-            postgres:16-alpine
-          for i in $(seq 1 15); do
-            if docker exec e2e-db pg_isready -U predomics > /dev/null 2>&1; then
-              echo "Postgres ready on attempt $i"
-              break
-            fi
-            sleep 2
-          done
-          docker run -d --name e2e-app --network e2e-net -p 8001:8000 \
-            -e PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@e2e-db:5432/predomics \
-            -e PREDOMICS_SECRET_KEY=e2e-test-secret \
-            predomicsapp:latest
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8001/health; then
-              echo "App ready on attempt $i"
-              break
-            fi
-            echo "Waiting for app (attempt $i/30)..."
-            sleep 2
-          done
+          npm ci
+          npx playwright install --with-deps chromium
 
       - name: Run E2E tests
         run: npm run test:e2e
         env:
-          BASE_URL: http://localhost:8001
+          BASE_URL: http://localhost:8080
+          E2E_REQUIRE_CSP: "1"
 
-      - name: E2E cleanup
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
+      - name: Application logs
+        if: always()
+        run: docker logs ci-app 2>&1 | tail -n 200 || true
+
+      - name: Cleanup
         if: always()
         run: |
-          docker stop e2e-app e2e-db 2>/dev/null || true
-          docker network rm e2e-net 2>/dev/null || true
+          docker rm -f ci-nginx ci-app ci-db 2>/dev/null || true
+          docker network rm ci-net 2>/dev/null || true

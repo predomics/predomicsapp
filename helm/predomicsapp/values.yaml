@@ -1,18 +1,29 @@
 # PredomicsApp — Helm Chart Default Values
+#
+# `helm install predomics ./helm/predomicsapp` works with these defaults: it
+# deploys the app (one replica) and a small single-instance PostgreSQL.
+# For anything serious, point `externalDatabase.url` at a managed database and
+# set `postgresql.enabled=false`.
 
 # --------------------------------------------------------------------------
-# Application image
+# Application image (published by .github/workflows/release.yml)
 # --------------------------------------------------------------------------
 image:
-  repository: ghcr.io/predomics/predomicsapp-web
-  tag: latest
+  repository: ghcr.io/predomics/predomicsapp
+  # Empty = the chart's appVersion. Avoid "latest": upgrades would be invisible.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
 
 # --------------------------------------------------------------------------
 # Deployment
 # --------------------------------------------------------------------------
+# PredomicsApp keeps running jobs, caches and rate-limit counters in the
+# process and stores files on one ReadWriteOnce volume: it must run as a single
+# replica. The chart refuses any other value.
 replicaCount: 1
 
 resources:
@@ -22,6 +33,9 @@ resources:
   limits:
     cpu: "2"
     memory: 4Gi
+
+# Seconds given to the pod to stop (running jobs are interrupted on restart).
+terminationGracePeriodSeconds: 60
 
 # --------------------------------------------------------------------------
 # Service
@@ -37,8 +51,13 @@ service:
 ingress:
   enabled: false
   className: nginx
-  annotations: {}
-    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  # Defaults for ingress-nginx: without them uploads are capped at 1 MB and
+  # long requests are cut after 60 s. Add e.g.
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 500m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
   host: predomics.example.com
   tls:
     enabled: false
@@ -52,73 +71,135 @@ persistence:
   storageClass: ""
   accessMode: ReadWriteOnce
   size: 20Gi
+  # Use a volume claim created outside the chart instead.
+  existingClaim: ""
 
 # --------------------------------------------------------------------------
-# PostgreSQL (bundled via sub-chart or external)
+# PostgreSQL
 # --------------------------------------------------------------------------
 postgresql:
-  # Set to false to use an external database
+  # true  = deploy a single-instance PostgreSQL StatefulSet with this chart
+  #         (convenient, not highly available, back it up yourself);
+  # false = use externalDatabase.url.
   enabled: true
+  image:
+    repository: postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
   auth:
     username: predomics
     database: predomics
-    # existingSecret: ""    # use an existing K8s secret for the password
-  primary:
-    resources:
-      requests:
-        cpu: 250m
-        memory: 256Mi
-      limits:
-        cpu: "1"
-        memory: 1Gi
-    persistence:
-      enabled: true
-      size: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 10Gi
 
 # External database (used when postgresql.enabled=false)
 externalDatabase:
   url: ""
   # e.g. postgresql+asyncpg://user:pass@host:5432/predomics
+  # The URL contains the password: prefer secrets.existingSecret with a
+  # `database-url` key, which takes precedence over this value.
 
 # --------------------------------------------------------------------------
-# Application environment
+# Application settings (rendered into a ConfigMap; see DEPLOYMENT.md "Settings")
 # --------------------------------------------------------------------------
 env:
   PREDOMICS_DATA_DIR: /app/data
   PREDOMICS_UPLOAD_DIR: /app/data/uploads
   PREDOMICS_PROJECT_DIR: /app/data/projects
-  PREDOMICS_SAMPLE_DIR: /app/data/qin2014_cirrhosis
-  PREDOMICS_DEFAULT_THREAD_NUMBER: "4"
+  PREDOMICS_SAMPLES_DIR: /app/samples
+  # Accounts
+  PREDOMICS_REGISTRATION_ENABLED: "true"
+  PREDOMICS_ADMIN_EMAIL: ""          # this account gets admin rights
+  PREDOMICS_SEED_DEMO: "false"       # true = create demo@predomics.com / demo
+  # Uploads and jobs
+  PREDOMICS_MAX_UPLOAD_MB: "500"
+  PREDOMICS_MAX_CONCURRENT_JOBS: "2"
+  PREDOMICS_MAX_THREADS_PER_JOB: "2" # keep jobs x threads within resources.limits.cpu
+  PREDOMICS_JOB_TIMEOUT_MINUTES: "0"
+  PREDOMICS_MAX_JOBS_PER_USER: "0"   # 0 = no per-user limit
+  PREDOMICS_REQUEUE_INTERRUPTED: "false"  # true = re-run jobs interrupted by a pod restart
+  # Accounts (continued)
+  PREDOMICS_REQUIRE_EMAIL_VERIFICATION: "false"  # needs PREDOMICS_SMTP_HOST
+  # Storage: quota and retention (0 = off; nothing is deleted automatically)
+  PREDOMICS_USER_QUOTA_MB: "0"
+  PREDOMICS_JOB_RETENTION_DAYS: "0"
+  PREDOMICS_BACKUP_RETENTION_COUNT: "0"
+  # Logs: text or json
+  PREDOMICS_LOG_FORMAT: "json"
+  PREDOMICS_LOG_LEVEL: "INFO"
+  # Schema upgrades at start-up. false = run `python -m backend.app.migrate`
+  # yourself (e.g. a pre-upgrade Job) and the pod refuses an outdated database.
+  PREDOMICS_AUTO_MIGRATE: "true"
+  # The pod is only reachable through the Service/Ingress: trust their
+  # X-Forwarded-* headers (real client IPs for rate limiting and audit logs).
+  FORWARDED_ALLOW_IPS: "*"
+
+# Public URL of the application (CORS origin and links in password-reset
+# emails). Empty = derived from ingress.host when the ingress is enabled.
+publicUrl: ""
 
 # --------------------------------------------------------------------------
 # Secrets (will be created as a Kubernetes Secret)
 # --------------------------------------------------------------------------
 secrets:
+  # JWT signing key. Empty = generated once and kept across upgrades.
   # Generate with: openssl rand -hex 32
   secretKey: ""
-  # Only used when postgresql.enabled=true
+  # Password of the bundled PostgreSQL (postgresql.enabled=true).
+  # Empty = generated once and kept across upgrades.
   postgresPassword: ""
-  # Provide existingSecret to use a pre-created K8s secret instead
+  # Bearer token for GET /metrics (Prometheus). Empty = no metrics endpoint.
+  metricsToken: ""
+  # Use a pre-created Secret instead. Keys: `secret-key`, optionally
+  # `metrics-token`, and
+  # `postgres-password` (bundled database) or `database-url` (external).
   existingSecret: ""
+
+# --------------------------------------------------------------------------
+# Prometheus (needs secrets.metricsToken). Adds scrape annotations to the pod;
+# the token has to be given to Prometheus as bearer credentials. Do not route
+# /metrics through the ingress.
+# --------------------------------------------------------------------------
+metrics:
+  podAnnotations: false
 
 # --------------------------------------------------------------------------
 # Health checks
 # --------------------------------------------------------------------------
+# Allows up to 5 minutes for start-up (schema migrations) before liveness applies.
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 5
+  failureThreshold: 60
+  timeoutSeconds: 3
+
 livenessProbe:
   httpGet:
     path: /health
     port: http
-  initialDelaySeconds: 15
   periodSeconds: 30
-  timeoutSeconds: 5
+  timeoutSeconds: 10
+  failureThreshold: 4
 
+# /health/ready also checks the database and the data volume.
 readinessProbe:
   httpGet:
-    path: /health
+    path: /health/ready
     port: http
-  initialDelaySeconds: 5
   periodSeconds: 10
-  timeoutSeconds: 3
+  timeoutSeconds: 5
+  failureThreshold: 3
 
 # --------------------------------------------------------------------------
 # Pod settings
@@ -127,5 +208,20 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 podAnnotations: {}
-podSecurityContext: {}
-securityContext: {}
+
+# The image's application user is uid/gid 10001.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  # Writable paths are the data volume and an emptyDir on /tmp.
+  readOnlyRootFilesystem: true

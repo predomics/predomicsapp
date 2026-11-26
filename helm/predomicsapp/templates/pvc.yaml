@@ -1,10 +1,13 @@
-{{- if .Values.persistence.enabled -}}
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ include "predomicsapp.fullname" . }}-data
   labels:
     {{- include "predomicsapp.labels" . | nindent 4 }}
+  annotations:
+    # User data: never deleted by `helm uninstall`.
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
     - {{ .Values.persistence.accessMode }}

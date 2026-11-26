@@ -1,16 +1,19 @@
 apiVersion: v2
 name: predomicsapp
-description: PredomicsApp — AI-powered biomarker discovery platform
+description: PredomicsApp — interpretable predictive models for microbiome data (web UI for the gpredomics engine)
 type: application
-version: 0.1.0
-appVersion: "1.0.0"
+# Chart version (bump on every chart change).
+version: 0.3.0
+# Application version: the default image tag. Keep in sync with the git tag
+# and backend/pyproject.toml (the release workflow checks this).
+appVersion: "2.2.0"
 keywords:
   - predomics
   - biomarker
   - metagenomics
   - machine-learning
-home: https://github.com/predomics/predomicsapp-web
+home: https://github.com/predomics/predomicsapp
 sources:
-  - https://github.com/predomics/predomicsapp-web
+  - https://github.com/predomics/predomicsapp
 maintainers:
   - name: PredomicsApp Team

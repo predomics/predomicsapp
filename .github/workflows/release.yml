@@ -1,49 +1,168 @@
 name: Release
 
+# Pushing a tag vX.Y.Z publishes ghcr.io/<owner>/predomicsapp:X.Y.Z (and :latest),
+# for linux/amd64 and linux/arm64 — but only if:
+#   - the tagged commit is on main,
+#   - the tag matches backend/pyproject.toml, frontend/package.json and the
+#     Helm appVersion,
+#   - the full CI workflow (tests, image build, end-to-end tests) passes.
+
 on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: read
+
 env:
-  DOCKER_BUILDKIT: 1
+  IMAGE: ghcr.io/${{ github.repository_owner }}/predomicsapp
 
 jobs:
-  release:
+  # -------------------------------------------------------------------------
+  # Gate 1: the tag is sane
+  # -------------------------------------------------------------------------
+  preflight:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Tagged commit is on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::Tag $GITHUB_REF_NAME does not point to a commit on main."; exit 1; }
+
+      - name: Tag matches the declared versions
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          py=$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml | head -1)
+          fe=$(jq -r .version frontend/package.json)
+          helm=$(sed -n 's/^appVersion: "\(.*\)"/\1/p' helm/predomicsapp/Chart.yaml)
+          echo "tag: $v   backend/pyproject.toml: $py   frontend/package.json: $fe   helm appVersion: $helm"
+          [ "$v" = "$py" ] && [ "$v" = "$fe" ] && [ "$v" = "$helm" ] \
+            || { echo "::error::Bump backend/pyproject.toml, frontend/package.json and helm/predomicsapp/Chart.yaml (appVersion) to $v before tagging."; exit 1; }
+
+  # -------------------------------------------------------------------------
+  # Gate 2: the whole CI workflow on the tagged commit
+  # -------------------------------------------------------------------------
+  ci:
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  # -------------------------------------------------------------------------
+  # Build one image per architecture on native runners (no emulation: the Rust
+  # engine would take hours under QEMU) and push them by digest.
+  # -------------------------------------------------------------------------
+  build:
+    needs: [preflight, ci]
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/predomicsapp:latest
-            ghcr.io/${{ github.repository_owner }}/predomicsapp:${{ steps.version.outputs.version }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            APP_VERSION=${{ needs.preflight.outputs.version }}
+            VCS_REF=${{ github.sha }}
           labels: |
-            org.opencontainers.image.title=PredomicsApp
-            org.opencontainers.image.description=Web application for gpredomics ML model discovery
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.version=${{ needs.preflight.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # Same cache scope as the CI image job: the amd64 release is built from
+          # the layers that were just tested.
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # Publish the multi-architecture tags
+  # -------------------------------------------------------------------------
+  publish:
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push the manifest list
+        working-directory: /tmp/digests
+        run: |
+          version="${{ needs.preflight.outputs.version }}"
+          tags="-t ${IMAGE}:${version}"
+          # Pre-releases (v1.2.3-rc1) do not move :latest.
+          case "$version" in *-*) ;; *) tags="$tags -t ${IMAGE}:latest" ;; esac
+          # shellcheck disable=SC2046,SC2086
+          docker buildx imagetools create $tags $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${version}"

@@ -1,0 +1,54 @@
+# PredomicsApp — NGINX reverse proxy, plain HTTP mode (NGINX_MODE=http)
+#
+# For deployments where TLS is terminated elsewhere (institutional proxy, load
+# balancer) or on a trusted internal network. Passwords and tokens travel in
+# clear text between the client and this proxy: do not expose this mode to the
+# internet directly.
+#
+# Behind a TLS-terminating proxy, set NGINX_TRUSTED_PROXY to its address (or
+# CIDR) so that the client address and the https scheme it reports are used.
+#
+# Template: ${DOMAIN}, ${NGINX_MAX_BODY} and ${NGINX_TRUSTED_PROXY} are
+# substituted at container start.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# Access-log format without the query string (used for /ws/, whose query
+# carries a credential).
+log_format predomics_noargs '$remote_addr - $remote_user [$time_local] '
+                            '"$request_method $uri $server_protocol" $status $body_bytes_sent '
+                            '"$http_referer" "$http_user_agent"';
+
+# Proxies in front of this nginx whose X-Forwarded-For is believed
+# (NGINX_TRUSTED_PROXY, an address or CIDR; default: none besides localhost).
+set_real_ip_from ${NGINX_TRUSTED_PROXY};
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+
+# Scheme reported to the application: what the trusted proxy in front says, or
+# plain http when there is none (a client-supplied header is only believed when
+# the connection comes from NGINX_TRUSTED_PROXY).
+map "$realip_remote_addr|$remote_addr|$http_x_forwarded_proto" $predomics_proto_from_proxy {
+    default http;
+    "~^([^|]+)\|\1\|"   http;      # peer is the client itself: not behind a trusted proxy
+    "~\|https$"          https;
+}
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    set $predomics_hsts "";
+    set $predomics_forwarded_proto $predomics_proto_from_proxy;
+    include /etc/nginx/predomics/security-headers.conf;
+
+    client_max_body_size  ${NGINX_MAX_BODY};
+    proxy_read_timeout    600s;
+    proxy_send_timeout    600s;
+    proxy_connect_timeout 10s;
+
+    include /etc/nginx/predomics/locations.conf;
+}

@@ -1,7 +1,36 @@
-# Exclude build artifacts and dev files only
+# Allow-list: only what the Dockerfile copies is sent to the build context.
+*
+
+!backend/
+!frontend/
+!samples/
+!scripts/docker-entrypoint.sh
+
+# --- never ship these, even inside the allowed directories -------------------
 **/.git
-**/node_modules
+**/.DS_Store
 **/__pycache__
-**/target
-**/.venv
 **/*.pyc
+**/node_modules
+**/target
+
+# Python environments, caches, test artefacts
+backend/.venv*
+backend/venv
+backend/.pytest_cache
+backend/.ruff_cache
+backend/.coverage
+backend/htmlcov
+backend/*.egg-info
+backend/tests
+backend/data
+backend/app/static
+
+# Frontend build output and test artefacts (the image builds its own dist)
+frontend/dist
+frontend/coverage
+frontend/.vite
+
+# Secrets and local configuration
+**/.env
+**/.env.*

@@ -1,58 +1,97 @@
+# PredomicsApp — base stack (app + PostgreSQL)
+#
+#   docker compose up -d --build        → http://localhost:8001
+#
+# Local/evaluation use: both ports are published on 127.0.0.1 only.
+# For a server, add the production override (TLS, backups, no published app/db
+# ports):  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Everything is configurable from an optional `.env` file next to this one
+# (see .env.example). Requires Docker Compose >= 2.24.
+#
+# A second, independent stack on the same host (staging, tests): give it its own
+# project name, container-name prefix and ports, e.g.
+#   PREDOMICS_STACK=staging PREDOMICS_PORT=8011 PREDOMICS_DB_PORT=5443 \
+#     docker compose -p staging up -d
 name: predomics
 
 services:
   db:
-    image: postgres:16-alpine
-    container_name: predomics-db
+    image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+    container_name: ${PREDOMICS_STACK:-predomics}-db
     environment:
       POSTGRES_USER: predomics
-      POSTGRES_PASSWORD: predomics
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-predomics}
       POSTGRES_DB: predomics
     volumes:
       - pg-data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"
+      # Host port for psql / DB tools. Change with PREDOMICS_DB_PORT.
+      - "${PREDOMICS_BIND:-127.0.0.1}:${PREDOMICS_DB_PORT:-5433}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U predomics"]
+      test: ["CMD-SHELL", "pg_isready -U predomics -d predomics"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
 
   app:
-    container_name: predomics-web
+    container_name: ${PREDOMICS_STACK:-predomics}-web
+    image: ${PREDOMICS_IMAGE:-predomics-app:latest}
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Engine pin: leave unset to use the commits pinned in the Dockerfile.
+        - GPREDOMICS_REF=${GPREDOMICS_REF:-faff348892ca0047de560daf41ec89029861b4fe}
+        - GPREDOMICSPY_REF=${GPREDOMICSPY_REF:-d963ec310be71afc7f9517084d6a348450160029}
+        - APP_VERSION=${APP_VERSION:-}
+        - VCS_REF=${VCS_REF:-unknown}
     ports:
-      - "8001:8000"
+      # Change the host port with PREDOMICS_PORT; set PREDOMICS_BIND=0.0.0.0 to
+      # expose it on the network (prefer the production override for that).
+      - "${PREDOMICS_BIND:-127.0.0.1}:${PREDOMICS_PORT:-8001}:8000"
     volumes:
       - app-data:/app/data
+    # Every PREDOMICS_* setting written in .env reaches the app.
+    env_file:
+      - path: .env
+        required: false
     environment:
       - PREDOMICS_DATA_DIR=/app/data
       - PREDOMICS_UPLOAD_DIR=/app/data/uploads
       - PREDOMICS_PROJECT_DIR=/app/data/projects
       - PREDOMICS_SAMPLES_DIR=/app/samples
-      - PREDOMICS_SAMPLE_DIR=/app/samples/qin2014_cirrhosis
-      - PREDOMICS_DATABASE_URL=postgresql+asyncpg://predomics:predomics@db:5432/predomics
-      - PREDOMICS_SECRET_KEY=change-me-in-production
+      - PREDOMICS_DATABASE_URL=${PREDOMICS_DATABASE_URL:-postgresql+asyncpg://predomics:${POSTGRES_PASSWORD:-predomics}@db:5432/predomics}
+      # Empty = the app generates a random key and keeps it in the data volume.
+      - PREDOMICS_SECRET_KEY=${PREDOMICS_SECRET_KEY:-}
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      # Ready = API up, database reachable, data volume writable.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=8)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    # Give running jobs' bookkeeping a moment on `docker compose stop`.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # Optional: scitq distributed task queue (uncomment to enable)
-  # Set PREDOMICS_SCITQ_SERVER=scitq-server:5000 in the app environment above
+  # Set PREDOMICS_SCITQ_SERVER=scitq-server:5000 in .env
   # ---------------------------------------------------------------------------
   # scitq-server:
   #   image: gmtscience/scitq-server:latest
   #   container_name: predomics-scitq-server
   #   ports:
-  #     - "5000:5000"
+  #     - "127.0.0.1:5000:5000"
   #   restart: unless-stopped
   #
   # scitq-worker:
-  #   image: predomics-app:latest
+  #   image: predomics-app:latest       # the image built by the `app` service
   #   container_name: predomics-scitq-worker
   #   volumes:
   #     - app-data:/app/data

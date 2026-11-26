@@ -62,12 +62,38 @@ Secret name — use existing secret or generate one.
 {{- end }}
 
 {{/*
-Database URL — either external or built from bundled PostgreSQL.
+Application image (tag defaults to the chart appVersion).
 */}}
-{{- define "predomicsapp.databaseUrl" -}}
-{{- if .Values.externalDatabase.url }}
-{{- .Values.externalDatabase.url }}
-{{- else }}
-{{- printf "postgresql+asyncpg://%s:$(POSTGRES_PASSWORD)@%s-postgresql:5432/%s" .Values.postgresql.auth.username (include "predomicsapp.fullname" .) .Values.postgresql.auth.database }}
+{{- define "predomicsapp.image" -}}
+{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
+{{- end }}
+
+{{/*
+Name of the bundled PostgreSQL service / statefulset.
+*/}}
+{{- define "predomicsapp.postgresqlName" -}}
+{{- printf "%s-postgresql" (include "predomicsapp.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Public URL of the application ("" when unknown).
+*/}}
+{{- define "predomicsapp.publicUrl" -}}
+{{- if .Values.publicUrl }}
+{{- .Values.publicUrl | trimSuffix "/" }}
+{{- else if .Values.ingress.enabled }}
+{{- printf "%s://%s" (ternary "https" "http" .Values.ingress.tls.enabled) .Values.ingress.host }}
+{{- end }}
+{{- end }}
+
+{{/*
+Configuration checks that should stop an install/upgrade early.
+*/}}
+{{- define "predomicsapp.validate" -}}
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail "replicaCount must be 1: PredomicsApp keeps job state in the process and uses a ReadWriteOnce volume." }}
+{{- end }}
+{{- if and (not .Values.postgresql.enabled) (not .Values.externalDatabase.url) (not .Values.secrets.existingSecret) }}
+{{- fail "postgresql.enabled=false requires externalDatabase.url (or secrets.existingSecret with a `database-url` key)." }}
 {{- end }}
 {{- end }}

@@ -1,0 +1,44 @@
+# Weekly dependency update pull requests. CI (tests + image build + E2E) runs on
+# each of them, so an update that breaks the lock-based image is caught there.
+version: 2
+updates:
+  # backend/requirements.lock is not a file name Dependabot recognises: this
+  # entry covers pyproject.toml only. Refresh the lock with `make lock`.
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Digest-pinned images in the Compose files
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly

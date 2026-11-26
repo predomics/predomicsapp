@@ -1,67 +1,54 @@
 #!/usr/bin/env bash
-# PredomicsApp — Backup Script
+# PredomicsApp — manual backup from the host
 #
-# Creates timestamped PostgreSQL dumps and data volume archives.
-# Run manually or add to cron:  0 2 * * * /path/to/backup.sh
+# Creates a timestamped PostgreSQL dump and a data volume archive in ./backups,
+# using the same job as the scheduled backup of the production stack
+# (scripts/backup-job.sh). Works with the base stack and the production stack.
 #
 # Usage:
-#   ./scripts/backup.sh                    # default: 7-day retention
+#   ./scripts/backup.sh                      # 7-day retention
 #   BACKUP_RETENTION_DAYS=30 ./scripts/backup.sh
+#   0 2 * * * /path/to/scripts/backup.sh     # host cron alternative
+#
+# Exits non-zero when any part of the backup fails.
+# Note: the data archive contains <data>/.secret_key if the app generated its
+# own JWT key — store backups as carefully as the .env file.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BACKUP_DIR="${PROJECT_DIR}/backups"
-RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
-TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+BACKUP_DIR="${BACKUP_DIR:-${PROJECT_DIR}/backups}"
+DB_CONTAINER="${DB_CONTAINER:-predomics-db}"
+DATA_VOLUME="${DATA_VOLUME:-predomics_app-data}"
 
 mkdir -p "$BACKUP_DIR"
 
-echo "=== PredomicsApp Backup — $TIMESTAMP ==="
-
-# --------------------------------------------------------------------------
-# 1. PostgreSQL dump (custom format for efficient restore)
-# --------------------------------------------------------------------------
-echo "[1/2] Dumping PostgreSQL database..."
-DB_FILE="${BACKUP_DIR}/db_${TIMESTAMP}.dump"
-docker exec predomics-db pg_dump -U predomics -Fc predomics > "$DB_FILE" 2>/dev/null
-
-if [ -s "$DB_FILE" ]; then
-    echo "      Database dump: $(du -h "$DB_FILE" | cut -f1)"
-else
-    echo "      WARNING: Database dump is empty or failed"
-    rm -f "$DB_FILE"
+if ! docker inspect -f '{{.State.Running}}' "$DB_CONTAINER" 2>/dev/null | grep -q true; then
+    echo "ERROR: database container '$DB_CONTAINER' is not running." >&2
+    exit 1
 fi
 
-# --------------------------------------------------------------------------
-# 2. Data volume archive (uploads, projects, datasets)
-# --------------------------------------------------------------------------
-echo "[2/2] Archiving data volume..."
-DATA_FILE="${BACKUP_DIR}/data_${TIMESTAMP}.tar.gz"
+# Same image as the running database (already on this host, same pg_dump version).
+PG_IMAGE="${PG_IMAGE:-$(docker inspect -f '{{.Config.Image}}' "$DB_CONTAINER")}"
+
+# Run the job in a throwaway container that shares the database container's
+# network, so it works whether or not the database port is published.
 docker run --rm \
-    -v predomics_app-data:/data:ro \
-    -v "${BACKUP_DIR}":/backup \
-    alpine tar czf "/backup/data_${TIMESTAMP}.tar.gz" -C /data . 2>/dev/null
-
-if [ -s "$DATA_FILE" ]; then
-    echo "      Data archive: $(du -h "$DATA_FILE" | cut -f1)"
-else
-    echo "      WARNING: Data archive is empty or failed"
-fi
-
-# --------------------------------------------------------------------------
-# 3. Retention cleanup
-# --------------------------------------------------------------------------
-echo "Cleaning up backups older than ${RETENTION_DAYS} days..."
-DELETED=0
-while IFS= read -r -d '' f; do
-    rm -f "$f"
-    DELETED=$((DELETED + 1))
-done < <(find "$BACKUP_DIR" \( -name "db_*.dump" -o -name "data_*.tar.gz" \) -mtime +"$RETENTION_DAYS" -print0 2>/dev/null)
-echo "      Removed $DELETED old backup(s)"
+    --network "container:${DB_CONTAINER}" \
+    -e PGHOST=127.0.0.1 \
+    -e PGUSER=predomics \
+    -e PGDATABASE=predomics \
+    -e PGPASSWORD="$(docker exec "$DB_CONTAINER" printenv POSTGRES_PASSWORD)" \
+    -e BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}" \
+    -e TZ=UTC \
+    -v "${DATA_VOLUME}:/app/data:ro" \
+    -v "${BACKUP_DIR}:/backups" \
+    -v "${SCRIPT_DIR}/backup-job.sh:/usr/local/bin/backup-job.sh:ro" \
+    --entrypoint /bin/sh \
+    "$PG_IMAGE" /usr/local/bin/backup-job.sh
 
 echo ""
-echo "=== Backup complete ==="
-echo "Location: $BACKUP_DIR"
-ls -lh "$BACKUP_DIR"/db_"${TIMESTAMP}"* "$BACKUP_DIR"/data_"${TIMESTAMP}"* 2>/dev/null || true
+echo "Backups in: $BACKUP_DIR"
+# shellcheck disable=SC2012
+ls -lh "$BACKUP_DIR" | tail -n 6

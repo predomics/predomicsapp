@@ -2,21 +2,25 @@
  * PredomicsApp End-to-End Integration Tests
  *
  * Prerequisites:
- *   - App running at BASE_URL (default http://localhost:8001)
- *   - npm install @playwright/test playwright
+ *   - App running at BASE_URL (default http://localhost:8001), built with the
+ *     real engine (the job test fails on mock results) and with registration
+ *     open (PREDOMICS_REGISTRATION_ENABLED=true, the default)
+ *   - npm ci                             (repository root)
  *   - npx playwright install chromium
  *
- * Usage:
+ * Usage (from the repository root):
  *   npm run test:e2e
  *   BASE_URL=http://localhost:8001 npx playwright test
  */
 import { test, expect } from '@playwright/test'
 import path from 'path'
+import fs from 'fs'
 
 const BASE = process.env.BASE_URL || 'http://localhost:8001'
 const TEST_EMAIL = `e2e_${Date.now()}@test.com`
 const TEST_PASSWORD = 'TestPass123!'
-const DATA_DIR = path.resolve('data/qin2014_cirrhosis')
+// Bundled demo dataset (tracked in the repository)
+const DATA_DIR = path.resolve('samples/qin2014_cirrhosis')
 
 // Shared state across serial tests
 let authToken = ''
@@ -78,7 +82,11 @@ test.describe.serial('PredomicsApp E2E', () => {
 
     // Fill registration form
     await page.fill('input[type="email"]', TEST_EMAIL)
-    await page.fill('input[type="password"]', TEST_PASSWORD)
+    // Password and its confirmation
+    const passwordFields = page.locator('input[type="password"]')
+    for (let i = 0; i < await passwordFields.count(); i++) {
+      await passwordFields.nth(i).fill(TEST_PASSWORD)
+    }
 
     // Fill name field if visible (register mode has it)
     const nameField = page.locator('input[type="text"][placeholder*="name" i]')
@@ -156,7 +164,9 @@ test.describe.serial('PredomicsApp E2E', () => {
 
   // ── 5. Upload dataset ──
   test('upload dataset files', async ({ page }) => {
-    if (!projectId) test.skip()
+    expect(projectId, 'project was created by the previous test').toBeTruthy()
+    const xFile = path.join(DATA_DIR, 'Xtrain.tsv')
+    expect(fs.existsSync(xFile), `sample file ${xFile} exists`).toBeTruthy()
 
     await loginViaAPI(page)
 
@@ -164,21 +174,22 @@ test.describe.serial('PredomicsApp E2E', () => {
     await page.waitForTimeout(3000)
     await dismissOverlays(page)
 
-    // Upload X file (try Xtrain.tsv, fallback to X_train.tsv)
+    // Upload the X train matrix through the first file input of the Data tab
     const fileInput = page.locator('input[type="file"]').first()
-    if (await fileInput.count() > 0) {
-      const fs = await import('fs')
-      const xFile = [path.join(DATA_DIR, 'Xtrain.tsv'), path.join(DATA_DIR, 'X_train.tsv')]
-        .find(f => fs.existsSync(f))
-      if (xFile) {
-        await fileInput.setInputFiles(xFile)
-        await page.waitForTimeout(2000)
-      }
-    }
+    await expect(fileInput).toBeAttached({ timeout: 10000 })
+    await fileInput.setInputFiles(xFile)
 
-    // Page should show dataset info
-    const pageContent = await page.textContent('body')
-    expect(pageContent.length).toBeGreaterThan(100)
+    // The upload really happened: the project now has a dataset holding the
+    // file, recognised as the training matrix.
+    const token = await page.evaluate(() => localStorage.getItem('token'))
+    await expect.poll(async () => {
+      const project = await page.evaluate(async ({ t, id }) => {
+        const r = await fetch(`/api/projects/${id}`, { headers: { Authorization: `Bearer ${t}` } })
+        return r.ok ? r.json() : null
+      }, { t: token, id: projectId })
+      const files = (project?.datasets || []).flatMap(d => d.files || [])
+      return files.filter(f => f.filename === 'Xtrain.tsv').map(f => f.role)
+    }, { timeout: 30000, message: 'Xtrain.tsv attached to the project as xtrain' }).toEqual(['xtrain'])
   })
 
   // ── 6. Dashboard shows stats ──
@@ -232,7 +243,82 @@ test.describe.serial('PredomicsApp E2E', () => {
 
   // ── 10. API docs accessible ──
   test('swagger docs are accessible', async ({ request }) => {
-    const resp = await request.get(`${BASE}/docs`)
-    expect(resp.ok()).toBeTruthy()
+    // The interactive docs live under /api (a bare /docs is the SPA fallback).
+    const docs = await request.get(`${BASE}/api/docs`)
+    expect(docs.ok()).toBeTruthy()
+    expect((await docs.text()).toLowerCase()).toContain('swagger')
+
+    const spec = await request.get(`${BASE}/api/openapi.json`)
+    expect(spec.ok()).toBeTruthy()
+    const body = await spec.json()
+    expect(Object.keys(body.paths || {}).length).toBeGreaterThan(50)
+  })
+
+  // ── 11. A real analysis job, end to end ──
+  test('runs a real analysis job on the bundled sample dataset', async ({ request }) => {
+    test.setTimeout(300000)
+
+    // The image must contain the engine: mock results are not acceptable here.
+    const health = await (await request.get(`${BASE}/health`)).json()
+    expect(health.gpredomicspy_available, 'gpredomicspy engine is available').toBe(true)
+
+    const login = await request.post(`${BASE}/api/auth/login`, {
+      data: { email: TEST_EMAIL, password: TEST_PASSWORD },
+    })
+    expect(login.ok()).toBeTruthy()
+    const headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+
+    // Load the demo dataset into a new project
+    const loaded = await request.post(`${BASE}/api/samples/qin2014_cirrhosis/load`, { headers })
+    expect(loaded.ok(), `sample load: ${loaded.status()}`).toBeTruthy()
+    const project = await loaded.json()
+    const files = (project.datasets || []).flatMap(d => d.files || [])
+    const fileId = role => files.find(f => f.role === role)?.id
+    expect(fileId('xtrain'), 'xtrain file in the sample project').toBeTruthy()
+    expect(fileId('ytrain'), 'ytrain file in the sample project').toBeTruthy()
+
+    // Launch a deliberately small genetic-algorithm run
+    const query = new URLSearchParams({
+      x_file_id: fileId('xtrain'),
+      y_file_id: fileId('ytrain'),
+      job_name: 'e2e tiny run',
+    })
+    if (fileId('xtest') && fileId('ytest')) {
+      query.set('xtest_file_id', fileId('xtest'))
+      query.set('ytest_file_id', fileId('ytest'))
+    }
+    const run = await request.post(`${BASE}/api/analysis/${project.project_id}/run?${query}`, {
+      headers,
+      data: {
+        general: { algo: 'ga', language: 'bin,ter', data_type: 'raw,prev', thread_number: 2, seed: 42 },
+        // Small but not degenerate: with a population near 100 the engine's parent
+        // selection can leave fewer than two parents and gpredomics panics (ga.rs cross_over).
+        ga: { population_size: 200, max_epochs: 15, min_epochs: 5 },
+      },
+    })
+    expect(run.ok(), `job launch: ${run.status()} ${await run.text()}`).toBeTruthy()
+    const jobId = (await run.json()).job_id
+    expect(jobId).toBeTruthy()
+
+    // Wait for a terminal state
+    const jobUrl = `${BASE}/api/analysis/${project.project_id}/jobs/${jobId}`
+    let job = null
+    await expect.poll(async () => {
+      const r = await request.get(jobUrl, { headers })
+      job = r.ok() ? await r.json() : null
+      return job?.status ?? 'pending'
+    }, { timeout: 240000, intervals: [2000], message: 'job reaches a terminal state' })
+      .not.toMatch(/^(pending|queued|running)$/)
+
+    const logs = await request.get(`${jobUrl}/logs`, { headers })
+    const logText = logs.ok() ? await logs.text() : ''
+    expect(job.status, `job failed; log tail: ${logText.slice(-1500)}`).toBe('completed')
+    expect(logText, 'results come from the real engine').not.toContain('[mock]')
+    expect(job.best_auc, 'a model was found').toBeGreaterThan(0.5)
+    expect(job.best_k).toBeGreaterThanOrEqual(1)
+
+    // Results are readable
+    const results = await request.get(`${jobUrl}/results`, { headers })
+    expect(results.ok(), `results: ${results.status()}`).toBeTruthy()
   })
 })
