@@ -362,6 +362,7 @@ class EnrichmentRequest(BaseModel):
 
 
 class ExperimentDetail(ExperimentSummary):
+    best_auc_test: Optional[float] = None  # AUC of the best model on the held-out test set, when there is one
     feature_names: list[str] = []
     sample_names: list[str] = []
     best_individual: Optional[IndividualResponse] = None

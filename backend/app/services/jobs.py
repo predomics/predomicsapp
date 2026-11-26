@@ -391,6 +391,23 @@ def _tail(path: Path, n: int = 500) -> str:
         return "Unknown error"
 
 
+def _planned_generations(param_path: str) -> int:
+    """Planned generation count of a genetic-algorithm job (0 when unknown or not GA)."""
+    import yaml
+
+    try:
+        with open(param_path) as fh:
+            params = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError):
+        return 0
+    if str((params.get("general") or {}).get("algo", "ga")).lower() != "ga":
+        return 0
+    try:
+        return max(0, int((params.get("ga") or {}).get("max_epochs") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def run_local_job(job_id: str, project_id: str, param_path: str, user_id: str = "") -> None:
     """Run one job to a terminal state. Never raises; never leaves it ``running``."""
     try:
@@ -478,7 +495,9 @@ def _run_local_job(job_id: str, project_id: str, param_path: str, user_id: str) 
     epoch_re = re.compile(r"max_epochs[:\s]+(\d+)", re.IGNORECASE)
     ansi_re = re.compile(r"\x1b\[[0-9;]*m")
     progress_points = []
-    max_gen = 0
+    # The engine prints its parameters only at the end, so the planned number
+    # of generations comes from the job's own parameter file.
+    max_gen = _planned_generations(param_path)
     t0 = time.monotonic()
 
     def _write_progress():

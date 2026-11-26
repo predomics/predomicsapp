@@ -1849,6 +1849,9 @@ class TestAnalysisDeep:
         data = resp.json()
         assert "feature_names" in data
         assert "best_individual" in data
+        # The test-set AUC of the last generation is surfaced for the simple view.
+        assert isinstance(data["best_auc_test"], float)
+        assert 0.5 <= data["best_auc_test"] <= 1.0
 
     @pytest.mark.asyncio
     async def test_get_job_logs_returns_dict(self, auth_client):

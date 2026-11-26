@@ -682,6 +682,8 @@ async def get_job_detail(
         raise HTTPException(status_code=404, detail="Results not found")
 
     best = results.get("best_individual", {})
+    tracking = results.get("generation_tracking") or []
+    test_auc = tracking[-1].get("best_auc_test") if tracking and isinstance(tracking[-1], dict) else None
     return ExperimentDetail(
         job_id=job_id,
         name=job.name,
@@ -693,6 +695,7 @@ async def get_job_detail(
         sample_count=len(results.get("sample_names", [])),
         best_auc=best.get("auc"),
         best_k=best.get("k"),
+        best_auc_test=test_auc if isinstance(test_auc, (int, float)) and test_auc > 0 else None,
         feature_names=results.get("feature_names", []),
         sample_names=results.get("sample_names", []),
         best_individual=IndividualResponse(**best) if best else None,

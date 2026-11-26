@@ -255,3 +255,48 @@ def test_zscore_model_predicts_from_stored_statistics():
     results.pop("zscore_stats")
     with pytest.raises(UnsupportedModelError):
         predict_from_model(results, x_test, features_in_rows=True)
+
+
+class _FakeExperiment:
+    def __init__(self, scores, labels, fail=False):
+        self._s, self._l, self._fail = scores, labels, fail
+
+    def predict_scores_test(self):
+        if self._fail:
+            raise RuntimeError("no test data")
+        return self._s
+
+    def test_labels(self):
+        return self._l
+
+
+def test_holdout_auc_scores_the_engine_test_split():
+    from app.services import worker
+    exp = _FakeExperiment([0.1, 0.4, 0.35, 0.8], [0, 0, 1, 1])
+    assert worker._holdout_auc(exp) == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize("exp", [
+    _FakeExperiment([], []),                          # holdout_ratio 0: nothing kept
+    _FakeExperiment([0.1, 0.2], [1, 1]),              # one class only
+    _FakeExperiment([0.1, 0.2, 0.3], [0, 1, 2]),      # not a 0/1 problem
+    _FakeExperiment([0.1], [0, 1]),                   # length mismatch
+    _FakeExperiment(None, None, fail=True),           # engine without a test split
+])
+def test_holdout_auc_none_when_not_scorable(exp):
+    from app.services import worker
+    assert worker._holdout_auc(exp) is None
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("general:\n  algo: ga\nga:\n  max_epochs: 200\n", 200),
+    ("ga:\n  max_epochs: 75\n", 75),                       # algo defaults to ga
+    ("general:\n  algo: beam\nga:\n  max_epochs: 200\n", 0),
+    ("general: [unclosed\n", 0),
+])
+def test_planned_generations_reads_the_job_parameters(tmp_path, text, expected):
+    from app.services.jobs import _planned_generations
+    p = tmp_path / "param.yaml"
+    p.write_text(text)
+    assert _planned_generations(str(p)) == expected
+    assert _planned_generations(str(tmp_path / "missing.yaml")) == 0

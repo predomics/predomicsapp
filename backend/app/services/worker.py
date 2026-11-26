@@ -187,6 +187,28 @@ def _evaluate_one_generation(gen_best, ctx):
         return None
 
 
+def _holdout_auc(experiment):
+    """AUC of the final best model on the engine's own held-out samples.
+
+    Returns None when the engine kept no test samples (holdout_ratio 0) or the
+    labels are not a 0/1 problem with both classes present.
+    """
+    try:
+        scores = np.asarray(experiment.predict_scores_test(), dtype=float)
+        labels = np.asarray(experiment.test_labels(), dtype=float)
+    except Exception:  # noqa: BLE001 - older engines or no test split
+        return None
+    if scores.size == 0 or scores.size != labels.size:
+        return None
+    if set(np.unique(labels).tolist()) != {0.0, 1.0}:
+        return None
+    try:
+        return round(float(compute_auc(labels, scores)), 6)
+    except Exception as e:  # noqa: BLE001
+        print(f"[worker] Warning: holdout evaluation failed: {e}")
+        return None
+
+
 def _strip_ansi(text):
     """Remove ANSI escape codes from text."""
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
@@ -561,6 +583,15 @@ def main():
             entry["fit_std"] = round(float(np.std(fit_values)), 4)
 
         generation_tracking.append(entry)
+
+    # No separate test files: the engine still holds out `holdout_ratio` of the
+    # training samples and scores the final best model on them. Record that
+    # score so the overfitting check and the results show it.
+    if test_ctx is None and not is_regression and generation_tracking:
+        holdout_auc = _holdout_auc(experiment)
+        if holdout_auc is not None:
+            generation_tracking[-1]["best_auc_test"] = holdout_auc
+            generation_tracking[-1]["test_source"] = "holdout"
 
     gen_dur = _time.monotonic() - t_gen
     print(f"[worker] Generation tracking: {n_gens} generations. ({gen_dur:.1f}s)", flush=True)
