@@ -66,12 +66,16 @@ export const PARAM_DEFS = [
   },
   {
     key: 'language', label: 'Language', category: 'general', level: 'basic', inputType: 'checkboxGroup', defaultValue: 'bin,ter,ratio',
-    description: 'Model languages to explore. Initial population is split among selected languages.',
+    description: 'Model languages to explore. Initial population is split among selected languages. The OR variants (Beam Search only) replace each variable by a clause of variables combined with OR, e.g. (A ∨ B) + C - D.',
     options: [
       { value: 'bin', label: 'Binary' },
       { value: 'ter', label: 'Ternary' },
       { value: 'ratio', label: 'Ratio' },
       { value: 'pow2', label: 'Power of 2' },
+      // OR (clause) languages: the engine grows them with Beam Search only
+      { value: 'bin-or', label: 'Binary-OR', onlyWith: { key: 'algo', values: ['beam'], hint: 'parameters.beamOnly' } },
+      { value: 'ter-or', label: 'Ternary-OR', onlyWith: { key: 'algo', values: ['beam'], hint: 'parameters.beamOnly' } },
+      { value: 'ratio-or', label: 'Ratio-OR', onlyWith: { key: 'algo', values: ['beam'], hint: 'parameters.beamOnly' } },
     ],
   },
   {
@@ -217,7 +221,7 @@ export const PARAM_DEFS = [
     description: 'Epochs of per-language competition before merging into a global population.', min: 0, step: 5, unit: 'epochs',
   },
 
-  // ===================== BEAM (5) =====================
+  // ===================== BEAM (6) =====================
   {
     key: 'method', label: 'Method', category: 'beam', level: 'basic', inputType: 'select', defaultValue: 'LimitedExhaustive',
     description: 'LimitedExhaustive: all k-combinations. ParallelForward: extend each model by one feature.',
@@ -238,6 +242,10 @@ export const PARAM_DEFS = [
   {
     key: 'max_nb_of_models', label: 'Max models', category: 'beam', level: 'basic', inputType: 'number', defaultValue: 1000,
     description: 'Limits features to keep at each epoch based on model count possibilities.', min: 100, step: 1000,
+  },
+  {
+    key: 'max_clause_size', label: 'Max clause size', category: 'beam', level: 'basic', inputType: 'number', defaultValue: 3,
+    description: 'OR languages only (Binary-OR, Ternary-OR, Ratio-OR): maximum number of variables in one clause (A ∨ B ∨ C). 0 = no limit.', min: 0, step: 1,
   },
 
   // ===================== MCMC (4) =====================

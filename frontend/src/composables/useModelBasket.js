@@ -54,6 +54,8 @@ export function useModelBasket(projectId) {
       addedAt: new Date().toISOString(),
       metrics: { ...individual.metrics },
       named_features: { ...(individual.named_features || {}) },
+      // OR (clause) languages: keep the clause structure for display
+      ...(individual.named_clauses ? { named_clauses: individual.named_clauses.map(c => ({ ...c, features: [...c.features] })) } : {}),
     })
     return true
   }

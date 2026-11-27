@@ -67,15 +67,16 @@
         </div>
 
         <!-- Feature coefficients -->
-        <div v-if="bestFeatures.length > 0" class="features-section">
+        <div v-if="bestTerms.length > 0" class="features-section">
           <h4>{{ $t('publicShare.modelFeatures') }}</h4>
           <div class="feature-chips">
             <span
-              v-for="f in bestFeatures" :key="f.name"
+              v-for="term in bestTerms" :key="term.key"
               class="feature-chip"
-              :class="f.coef > 0 ? 'positive' : 'negative'"
+              :class="term.coef > 0 ? 'positive' : 'negative'"
+              :title="term.names.join(' \u2228 ')"
             >
-              <span :title="f.name">{{ shortName(f.name) }}</span> ({{ f.coef > 0 ? '+' : '' }}{{ f.coef }})
+              {{ termLabel(term, shortName) }} ({{ coefLabel(term.coef) }})
             </span>
           </div>
         </div>
@@ -92,6 +93,7 @@
 
 <script setup>
 import { shortFeatureName as shortName } from '../utils/chartLabels'
+import { termsFromIndices, termLabel, coefLabel } from '../utils/modelTerms'
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api'
@@ -110,16 +112,10 @@ const jobResults = ref(null)
 const jobLoading = ref(false)
 
 const best = computed(() => jobResults.value?.best_individual || {})
-const bestFeatures = computed(() => {
+// One term per feature, or per clause "(A ∨ B)" for the OR languages
+const bestTerms = computed(() => {
   if (!jobResults.value) return []
-  const features = best.value.features || {}
-  const names = jobResults.value.feature_names || []
-  return Object.entries(features)
-    .sort(([a], [b]) => parseInt(a) - parseInt(b))
-    .map(([idx, coef]) => ({
-      name: names[parseInt(idx)] || `feature_${idx}`,
-      coef: parseInt(coef),
-    }))
+  return termsFromIndices(best.value.features, best.value.clauses, jobResults.value.feature_names || [])
 })
 
 async function loadProject() {

@@ -70,6 +70,22 @@ export function validateForm(form, defs) {
     const err = validateParam(def, form?.[def.category]?.[def.key])
     if (err) errors[id] = err
   }
+  // Options available only for some value of another field of the same section
+  // (e.g. OR languages with the Beam algorithm): report them while they are picked.
+  for (const def of defs) {
+    if (def.inputType !== 'checkboxGroup') continue
+    const id = `${def.category}.${def.key}`
+    if (errors[id]) continue
+    const picked = String(form?.[def.category]?.[def.key] || '').split(',').map(v => v.trim()).filter(Boolean)
+    for (const opt of def.options || []) {
+      const rule = opt.onlyWith
+      if (!rule || !picked.includes(opt.value)) continue
+      if (!rule.values.includes(form?.[def.category]?.[rule.key])) {
+        errors[id] = { code: 'onlyWith', params: { option: opt.label, other: rule.key, values: rule.values.join(', ') } }
+        break
+      }
+    }
+  }
   for (const [cat, lo, hi, strict] of ORDER_RULES) {
     const loId = `${cat}.${lo}`
     const hiId = `${cat}.${hi}`

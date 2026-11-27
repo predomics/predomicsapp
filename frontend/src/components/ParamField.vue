@@ -31,9 +31,16 @@
           v-for="opt in def.options"
           :key="opt.value"
           class="checkbox-group-item"
-          :class="{ active: isChecked(opt.value) }"
+          :class="{ active: isChecked(opt.value), unavailable: optionUnavailable(opt) }"
+          :title="optionUnavailable(opt) && opt.onlyWith.hint ? $t(opt.onlyWith.hint) : undefined"
         >
-          <input type="checkbox" :checked="isChecked(opt.value)" @change="toggle(opt.value)" />
+          <input
+            type="checkbox"
+            :checked="isChecked(opt.value)"
+            :disabled="optionUnavailable(opt) && !isChecked(opt.value)"
+            :aria-disabled="optionUnavailable(opt) ? 'true' : undefined"
+            @change="toggle(opt.value)"
+          />
           <span>{{ optionLabel(def, opt) }}</span>
         </label>
       </div>
@@ -108,6 +115,14 @@ function toggle(value) {
   if (idx >= 0) cur.splice(idx, 1)
   else cur.push(value)
   props.form[props.def.key] = cur.join(',')
+}
+// An option tied to another field of the same section (`onlyWith`), e.g. the OR
+// languages that only Beam Search produces. It stays clickable while checked so
+// the user can clear it; validation reports it meanwhile.
+function optionUnavailable(opt) {
+  const rule = opt.onlyWith
+  if (!rule) return false
+  return !rule.values.includes(props.form[rule.key])
 }
 
 // Number: keep '' → null (so "empty" is explicit and validated) instead of NaN,
@@ -213,4 +228,6 @@ input[type="number"], input[type="text"], select {
   color: var(--text-body);
 }
 .checkbox-group-item.active { border-color: var(--info); background: var(--info-bg); color: var(--info); font-weight: 600; }
+.checkbox-group-item.unavailable { opacity: 0.55; }
+.checkbox-group-item.unavailable input { cursor: not-allowed; }
 </style>

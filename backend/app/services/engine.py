@@ -440,6 +440,7 @@ def write_param_yaml(
     beam_cfg = _merge("beam", {
         "method": "LimitedExhaustive", "k_start": 1, "k_stop": 100,
         "best_models_criterion": 10.0, "max_nb_of_models": 10000,
+        "max_clause_size": 3,
     })
     # Rename k_start/k_stop to kmin/kmax for gpredomics YAML format
     beam_out = {
@@ -448,6 +449,8 @@ def write_param_yaml(
         "kmax": beam_cfg.pop("k_stop"),
         "best_models_criterion": beam_cfg["best_models_criterion"],
         "max_nb_of_models": beam_cfg["max_nb_of_models"],
+        # OR (clause) languages: features per clause, 0 = unlimited
+        "max_clause_size": beam_cfg["max_clause_size"],
     }
 
     mcmc = config.get("mcmc", {})
@@ -577,6 +580,33 @@ def _mock_results() -> dict[str, Any]:
             },
             "features": {},
             "named_features": {f"feature_{rng.randint(0, 49)}": rng.choice([-1, 1]) for _ in range(3)},
+        })
+    # A few OR (clause) models, so the frontend can be developed without the engine:
+    # each clause groups features sharing one coefficient, e.g. (A ∨ B) + C - D.
+    for i, (features, clauses) in enumerate([
+        ({3: 1, 8: 1, 21: 1, 30: -1}, [[3, 8], [21], [30]]),
+        ({5: 1, 12: -1, 37: 1, 40: -1}, [[5, 37], [12, 40]]),
+        ({2: 1, 7: 1, 9: 1, 15: -1, 44: -1}, [[2, 7, 9], [15], [44]]),
+    ]):
+        auc_val = round(0.86 - i * 0.01, 4)
+        population.append({
+            "rank": 20 + i,
+            "metrics": {
+                "auc": auc_val,
+                "fit": round(auc_val - 0.001, 4),
+                "accuracy": round(0.82 - i * 0.01, 4),
+                "sensitivity": round(0.84 - i * 0.01, 4),
+                "specificity": round(0.80 - i * 0.01, 4),
+                "k": len(features),
+                "language": "ternary-or",
+                "data_type": "prev",
+            },
+            "features": {str(k): v for k, v in features.items()},
+            "named_features": {f"feature_{k}": v for k, v in features.items()},
+            "clauses": clauses,
+            "named_clauses": [
+                {"coef": features[c[0]], "features": [f"feature_{k}" for k in c]} for c in clauses
+            ],
         })
 
     return {

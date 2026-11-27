@@ -25,7 +25,16 @@ _LANGUAGES = {
     "ter": "ternary", "ternary": "ternary",
     "pow2": "pow2",
     "ratio": "ratio",
+    # OR (clause) languages: each term is a disjunctive clause scored by the max
+    # of its features (gpredomics codes 4, 5 and 7; 6 = pow2-or is not implemented)
+    "bin-or": "binary-or", "bin_or": "binary-or", "binary-or": "binary-or", "binary_or": "binary-or",
+    "0-or": "binary-or",
+    "ter-or": "ternary-or", "ter_or": "ternary-or", "ternary-or": "ternary-or", "ternary_or": "ternary-or",
+    "1-or": "ternary-or",
+    "ratio-or": "ratio-or", "ratio_or": "ratio-or", "3-or": "ratio-or",
 }
+_BASE_LANGUAGE = {"binary-or": "binary", "ternary-or": "ternary", "ratio-or": "ratio"}
+OR_LANGUAGES = frozenset(_BASE_LANGUAGE)
 _DATA_TYPES = {
     "raw": "raw",
     "prev": "prevalence", "prevalence": "prevalence",
@@ -45,9 +54,40 @@ def normalize_language(language) -> str:
     if key not in _LANGUAGES:
         raise UnsupportedModelError(
             f"Models of type '{language}' cannot be scored on new data "
-            "(supported model languages: binary, ternary, pow2, ratio)."
+            "(supported model languages: binary, ternary, pow2, ratio and their "
+            "OR variants binary-or, ternary-or, ratio-or)."
         )
     return _LANGUAGES[key]
+
+
+def is_or_language(language) -> bool:
+    """True for the clause languages (binary-or, ternary-or, ratio-or), accepting aliases."""
+    try:
+        return normalize_language(language) in OR_LANGUAGES
+    except UnsupportedModelError:
+        return False
+
+
+def base_language(language: str) -> str:
+    """The arithmetic language an OR language is built on (``ternary-or`` -> ``ternary``)."""
+    lang = normalize_language(language)
+    return _BASE_LANGUAGE.get(lang, lang)
+
+
+def clause_columns(clauses, feature_indices) -> list[list[int]]:
+    """Translate clauses given as feature indices into positions of ``feature_indices``.
+
+    ``feature_indices`` is the ordered list of model feature indices (one per
+    column of the scored matrix). Features missing from it are dropped; an empty
+    clause is dropped too.
+    """
+    pos = {int(idx): j for j, idx in enumerate(feature_indices)}
+    out = []
+    for clause in clauses or []:
+        cols = [pos[int(f)] for f in clause if int(f) in pos]
+        if cols:
+            out.append(cols)
+    return out
 
 
 def normalize_data_type(data_type) -> str:
@@ -102,6 +142,7 @@ def score_matrix(
     epsilon: float = DEFAULT_EPSILON,
     means=None,
     stds=None,
+    clauses=None,
 ) -> np.ndarray:
     """Score samples exactly as ``Individual::evaluate`` does.
 
@@ -114,8 +155,15 @@ def score_matrix(
         Model coefficients (+-1 for binary/ternary/ratio, +-powers of two for pow2).
     means, stds : arrays (k,), required for ``zscore`` models
         Training-set statistics of each feature (see :func:`zscore_stats`).
+    clauses : list of lists of column positions, for the OR languages
+        Each clause is scored by the max of its transformed features and carries
+        the coefficient of its features (one per clause). Without clauses, an OR
+        model is scored as its base language (every feature is its own clause).
     """
     lang = normalize_language(language)
+    or_model = lang in OR_LANGUAGES
+    if or_model:
+        lang = _BASE_LANGUAGE[lang]
     dtype = normalize_data_type(data_type)
     x = np.nan_to_num(np.asarray(x, dtype=float), nan=0.0)
     if x.ndim != 2:
@@ -142,6 +190,28 @@ def score_matrix(
                 "to enable prediction."
             )
         t = (x - np.asarray(means, dtype=float)) / np.asarray(stds, dtype=float)
+
+    if or_model and clauses:
+        # Mirrors Individual::evaluate_or_with: per clause the max of the transformed
+        # values, weighted by |coef|, summed into positive and negative parts.
+        positive = np.zeros(x.shape[0])
+        negative = np.zeros(x.shape[0])
+        for clause in clauses:
+            cols = [int(c) for c in clause]
+            if not cols:
+                continue
+            coef = coefs[cols[0]]
+            if coef == 0:
+                continue
+            v = t[:, cols].max(axis=1) * abs(coef)
+            if coef > 0:
+                positive += v
+            else:
+                negative += v
+        if lang == "ratio":
+            with np.errstate(divide="ignore", invalid="ignore"):
+                return positive / (negative + eps)
+        return positive - negative
 
     if lang == "ratio":
         pos = coefs > 0
@@ -223,6 +293,7 @@ def predict_from_model(
     if not features:
         raise UnsupportedModelError("The job has no model features to apply.")
     language = normalize_language(best.get("language"))
+    clauses = best.get("clauses") if language in OR_LANGUAGES else None
     data_type = normalize_data_type(best.get("data_type", "raw"))
     threshold = float(best.get("threshold", 0.0))
     epsilon = float(results.get("epsilon") or DEFAULT_EPSILON)
@@ -249,7 +320,8 @@ def predict_from_model(
         except (KeyError, IndexError, TypeError, ValueError):
             means = stds = None  # score_matrix raises the explanatory error
 
-    scores = score_matrix(x, coefs, language, data_type, epsilon, means, stds)
+    cols = clause_columns(clauses, sorted(int(i) for i in features)) if clauses else None
+    scores = score_matrix(x, coefs, language, data_type, epsilon, means, stds, clauses=cols)
     predicted = (scores >= threshold).astype(int)
     sample_names = [str(s) for s in x_data.index]
 

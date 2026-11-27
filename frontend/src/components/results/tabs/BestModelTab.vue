@@ -1,5 +1,14 @@
 <template>
   <div class="sub-content">
+    <ModelFormula
+      v-if="detail.best_individual"
+      :model="detail.best_individual"
+      :feature-names="detail.feature_names || []"
+      :label-of="featureLabel"
+      :class-name-for="classNameFor"
+      :is-regression="isRegressionJob"
+    />
+
     <section class="section" v-if="detail.best_individual">
       <div class="best-model-layout">
         <!-- Left column: metrics + radar -->
@@ -143,11 +152,13 @@ import { shortFeatureName as shortName } from '../../../utils/chartLabels'
 import { onMounted } from 'vue'
 import { useResults } from '../../../composables/useResultsTab'
 import ValidateModal from '../../ValidateModal.vue'
+import ModelFormula from '../ModelFormula.vue'
 
 const {
   apiBaseUrl,
   beeswarmChartEl,
   bestMetrics,
+  classNameFor,
   coefficientsChartEl,
   coefficientsSummary,
   contributionData,
@@ -162,6 +173,7 @@ const {
   forceChartEl,
   importanceChartEl,
   importanceData,
+  isRegressionJob,
   loadContributionHeatmap,
   loadShapData,
   radarChartEl,

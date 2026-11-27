@@ -177,16 +177,7 @@
             </tr>
             <tr v-if="expandedRank === ind.rank" class="detail-row">
               <td colspan="8">
-                <div class="feature-list">
-                  <div
-                    v-for="[name, coef] in sortedFeatures(ind.named_features)"
-                    :key="name"
-                    class="feature-chip"
-                    :class="{ positive: coef > 0, negative: coef < 0 }"
-                  >
-                    <span :title="name">{{ shortName(featureLabel(name)) }}</span> ({{ coef > 0 ? '+1' : '-1' }})
-                  </div>
-                </div>
+                <ModelTerms :model="ind" :label-of="featureLabel" />
               </td>
             </tr>
           </template>
@@ -205,7 +196,7 @@
 
 <script setup>
 import CollapsibleSection from '../../CollapsibleSection.vue'
-import { shortFeatureName as shortName } from '../../../utils/chartLabels'
+import ModelTerms from '../ModelTerms.vue'
 /**
  * "population" sub-tab of the Results view. Markup only: state and chart rendering
  * live in composables/useResultsTab.js, shared by every sub-tab through useResults().
@@ -250,7 +241,6 @@ const {
   selectedJobId,
   selectedJobInfo,
   selectedLanguages,
-  sortedFeatures,
   toggleBasket,
   toggleExpand,
   topNModels,

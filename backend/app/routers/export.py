@@ -17,6 +17,7 @@ from ..core.database import get_db
 from ..core.deps import get_current_user, get_project_access
 from ..models.db_models import User, Job
 from ..services import results_io
+from ..services.model_format import format_model_formula, model_terms
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -63,14 +64,14 @@ async def export_csv(
         writer.writerow(["Metric", "Value"])
         for key in ["auc", "fit", "accuracy", "sensitivity", "specificity", "threshold", "language", "data_type", "k", "epoch"]:
             writer.writerow([key, best.get(key, "")])
+        writer.writerow(["formula", format_model_formula(best, feature_names)])
 
         writer.writerow([])
-        writer.writerow(["Feature", "Coefficient"])
-        features = best.get("features", {})
-        for idx_str, coef in sorted(features.items(), key=lambda x: int(x[0])):
-            idx = int(idx_str)
-            name = feature_names[idx] if idx < len(feature_names) else f"feature_{idx}"
-            writer.writerow([name, coef])
+        # OR (clause) languages: the "Clause" column groups the features of one clause
+        writer.writerow(["Feature", "Coefficient", "Clause"])
+        for n, term in enumerate(model_terms(best, feature_names), 1):
+            for name in term["features"]:
+                writer.writerow([name, term["coef"], n])
 
         filename = f"best_model_{job_id[:8]}.csv"
 
@@ -79,7 +80,7 @@ async def export_csv(
         if not pop:
             raise HTTPException(status_code=404, detail="No population data")
 
-        writer.writerow(["Rank", "AUC", "Fit", "Accuracy", "Sensitivity", "Specificity", "Threshold", "Language", "Data Type", "k", "Epoch", "Features"])
+        writer.writerow(["Rank", "AUC", "Fit", "Accuracy", "Sensitivity", "Specificity", "Threshold", "Language", "Data Type", "k", "Epoch", "Features", "Formula"])
         for ind in pop:
             m = ind.get("metrics", {})
             # Build feature string
@@ -92,6 +93,7 @@ async def export_csv(
                 m.get("threshold", ""), m.get("language", ""), m.get("data_type", ""),
                 m.get("k", ""), m.get("epoch", ""),
                 feat_str,
+                format_model_formula(ind, feature_names),
             ])
 
         filename = f"population_{job_id[:8]}.csv"
@@ -177,13 +179,22 @@ async def export_report(
     pop_top = []
     for ind in pop[:20]:
         m = ind.get("metrics", {})
-        named = ind.get("named_features", {})
+        if ind.get("named_clauses"):
+            # OR (clause) languages: one entry per clause, "(A ∨ B)(+)"
+            feat_str = ", ".join(
+                (f"({' ∨ '.join(t['features'])})" if len(t["features"]) > 1 else t["features"][0])
+                + f"({'+' if t['coef'] > 0 else '-'})"
+                for t in model_terms(ind, feature_names)
+            )
+        else:
+            named = ind.get("named_features", {})
+            feat_str = ", ".join(f"{n}({'+'if c>0 else '-'})" for n, c in sorted(named.items()))
         pop_top.append({
             "rank": ind.get("rank", 0),
             "auc": m.get("auc"), "fit": m.get("fit"),
             "accuracy": m.get("accuracy"), "k": m.get("k"),
             "language": m.get("language"), "data_type": m.get("data_type"),
-            "features": ", ".join(f"{n}({'+'if c>0 else '-'})" for n, c in sorted(named.items())),
+            "features": feat_str,
         })
 
     # Format execution time
@@ -332,16 +343,19 @@ def _build_report_html(*, job_id, job_name, best, best_features, results,
 
     Uses string concatenation to avoid f-string nesting issues with JavaScript.
     """
-    # Feature chips
+    # Feature chips: one per term (a clause groups several features for the OR languages)
     chips = []
-    for f in best_features:
-        cls = "positive" if f["coef"] > 0 else "negative"
-        sign = "+" if f["coef"] > 0 else ""
+    for term in model_terms(best, feature_names):
+        cls = "positive" if term["coef"] > 0 else "negative"
+        sign = "+" if term["coef"] > 0 else ""
         chips.append(
             '<span class="feature-chip feature-' + cls + '">'
-            + _esc(f["name"]) + " (" + sign + str(f["coef"]) + ")</span>"
+            + _esc(" ∨ ".join(term["features"])) + " (" + sign + str(term["coef"]) + ")</span>"
         )
     chips_html = "".join(chips)
+    formula = format_model_formula(best, feature_names, with_threshold=True)
+    if formula:
+        chips_html += '<p class="model-formula"><code>' + _esc(formula) + "</code></p>"
 
     # Population rows
     pop_rows = ""

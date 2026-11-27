@@ -270,6 +270,27 @@
     "modelComplexity": "Model Complexity (k)",
     "fitVsAuc": "Fit vs AUC",
     "metrics": "Metrics",
+    "modelRule": "Model",
+    "modelRuleMeta": "{language} · {dataType} · {k} features",
+    "modelRuleMetaOr": "{language} · {dataType} · {k} features in {terms} terms",
+    "positiveTerms": "Positive terms",
+    "negativeTerms": "Negative terms",
+    "noTerms": "none",
+    "scoreWord": "score",
+    "decisionWhen": "when",
+    "decisionOtherwise": "otherwise",
+    "formulaLabel": "Formula",
+    "scoreLegendBinary": "The score is the sum of the terms.",
+    "scoreLegendBinaryPrev": "The score is the number of true terms (each term is 1 when present, 0 otherwise).",
+    "scoreLegendTernary": "The score is the sum of the positive terms minus the sum of the negative terms.",
+    "scoreLegendPow2": "The score is the weighted sum of the terms; the weights are powers of 2, shown on each term.",
+    "scoreLegendRatio": "The score is the sum of the positive terms divided by the sum of the negative terms. ε is a small constant that avoids dividing by zero.",
+    "epsilonHint": "Small constant that avoids dividing by zero",
+    "dataTypeHintPrev": "Prevalence (⁰): a feature counts 1 when it is detected (value > 0) and 0 otherwise.",
+    "dataTypeHintLog": "ln(x): each feature enters with the natural logarithm of its value.",
+    "dataTypeHintZscore": "Each feature enters with its standardized value (z-score).",
+    "dataTypeHintRaw": "Each feature enters with its raw value.",
+    "orClauseHint": "A term \"A ∨ B\" is a clause: it is true when at least one of its features is (it takes the largest value among them).",
     "modelCoefficients": "Model Coefficients",
     "featureImportanceMDA": "Feature Importance (MDA)",
     "featureImportanceNotAvailable": "Feature importance not available. Enable \"Compute importance\" in the Parameters tab to include MDA analysis.",
@@ -802,6 +823,7 @@
     "uploadFirst": "Upload X and y training datasets in the Data tab first",
     "regressionMode": "Regression mode",
     "votingDisabledRegression": "Voting is not applicable for regression",
+    "beamOnly": "Available with the Beam Search algorithm only (clause models)",
     "helpFor": "Help: {name}",
     "enabled": "Enabled",
     "disabled": "Disabled",
@@ -1386,7 +1408,8 @@
     "pickOne": "Select at least one.",
     "option": "Not one of the available choices.",
     "atLeast": "Must be at least “{other}” ({value}).",
-    "greaterThan": "Must be greater than “{other}” ({value})."
+    "greaterThan": "Must be greater than “{other}” ({value}).",
+    "onlyWith": "“{option}” is only available when “{other}” is {values}."
   },
   "paramCategories": {
     "general": "General",
@@ -1454,12 +1477,15 @@
       },
       "language": {
         "label": "Language",
-        "desc": "Model languages to explore. Initial population is split among selected languages.",
+        "desc": "Model languages to explore. Initial population is split among selected languages. The OR variants (Beam Search only) replace each variable by a clause of variables combined with OR, e.g. (A ∨ B) + C - D.",
         "opt": {
           "bin": "Binary",
           "ter": "Ternary",
           "ratio": "Ratio",
-          "pow2": "Power of 2"
+          "pow2": "Power of 2",
+          "bin-or": "Binary-OR",
+          "ter-or": "Ternary-OR",
+          "ratio-or": "Ratio-OR"
         }
       },
       "data_type": {
@@ -1627,6 +1653,10 @@
       "max_nb_of_models": {
         "label": "Max models",
         "desc": "Limits features to keep at each epoch based on model count possibilities."
+      },
+      "max_clause_size": {
+        "label": "Max clause size",
+        "desc": "OR languages only (Binary-OR, Ternary-OR, Ratio-OR): maximum number of variables in one clause (A ∨ B ∨ C). 0 = no limit."
       }
     },
     "mcmc": {
