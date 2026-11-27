@@ -74,17 +74,27 @@ export function coefLabel(coef) {
   return c > 0 ? `+${c}` : String(c)
 }
 
+/** 'binary', 'ternary', 'pow2' or 'ratio' for a language name or alias, OR variants included. */
+export function languageFamily(language) {
+  const key = String(language || '').trim().toLowerCase().replace(/[-_]or$/, '')
+  return {
+    bin: 'binary', binary: 'binary', '0': 'binary',
+    ter: 'ternary', ternary: 'ternary', '1': 'ternary',
+    pow2: 'pow2', '2': 'pow2',
+    ratio: 'ratio', '3': 'ratio',
+  }[key] || 'ternary'
+}
+
 /**
- * Readable formula, e.g. "((A ∨ B) + C) - (D)" or "(A + B) / (C + ε)".
- * `language` and `dataType` default to the model's metrics.
+ * Readable formula from a list of terms, e.g. "((A ∨ B) + C) - (D)" or
+ * "(A + B) / (C + ε)". A prevalence model marks its features with ⁰, a log
+ * model wraps them in ln(), Pow2 coefficients are written "2*A".
  */
-export function formatModelFormula(model, { language, dataType, labelOf } = {}) {
-  const terms = modelTerms(model)
-  if (!terms.length) return ''
-  const lang = String(language ?? model.metrics?.language ?? model.language ?? '').toLowerCase()
-  const dt = String(dataType ?? model.metrics?.data_type ?? model.data_type ?? 'raw').toLowerCase()
+export function formatFormulaFromTerms(terms, { language, dataType, labelOf } = {}) {
+  if (!terms || !terms.length) return ''
+  const dt = String(dataType || 'raw').toLowerCase()
   const label = labelOf || (n => n)
-  const family = lang.replace(/[-_]or$/, '')
+  const family = languageFamily(language)
   const mark = n => (dt === 'prev' || dt === 'prevalence') ? `${label(n)}⁰` : dt === 'log' ? `ln(${label(n)})` : label(n)
   const text = t => {
     const names = t.names.map(mark)
@@ -99,6 +109,20 @@ export function formatModelFormula(model, { language, dataType, labelOf } = {}) 
   if (family === 'ratio') return `${posStr} / ${side([...neg, 'ε'])}`
   if (neg.length) return `${posStr} - ${side(neg)}`
   return pos.length ? pos.join(' + ') : '0'
+}
+
+/**
+ * Readable formula of a model from the results JSON (see `modelTerms`).
+ * `language` and `dataType` default to the model's metrics.
+ */
+export function formatModelFormula(model, { language, dataType, labelOf } = {}) {
+  const terms = modelTerms(model)
+  if (!terms.length) return ''
+  return formatFormulaFromTerms(terms, {
+    language: language ?? model.metrics?.language ?? model.language ?? '',
+    dataType: dataType ?? model.metrics?.data_type ?? model.data_type ?? 'raw',
+    labelOf,
+  })
 }
 
 export { isOrLanguage }

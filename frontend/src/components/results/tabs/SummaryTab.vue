@@ -27,6 +27,15 @@
       </div>
     </div>
 
+    <ModelFormula
+      v-if="detail.best_individual"
+      :model="detail.best_individual"
+      :feature-names="detail.feature_names || []"
+      :label-of="featureLabel"
+      :class-name-for="classNameFor"
+      :is-regression="isRegressionJob"
+    />
+
     <!-- Convergence chart -->
     <CollapsibleSection class="section" v-if="generationTracking.length > 0" sid="summary.aucEvolution">
       <template #title>{{ $t('results.aucEvolution') }}</template>
@@ -51,6 +60,7 @@
 
 <script setup>
 import CollapsibleSection from '../../CollapsibleSection.vue'
+import ModelFormula from '../ModelFormula.vue'
 /**
  * "summary" sub-tab of the Results view. Markup only: state and chart rendering
  * live in composables/useResultsTab.js, shared by every sub-tab through useResults().
@@ -59,11 +69,13 @@ import { onMounted } from 'vue'
 import { useResults } from '../../../composables/useResultsTab'
 
 const {
+  classNameFor,
   complexitySummary,
   convergenceChartEl,
   convergenceSummary,
   detail,
   featureCountChartEl,
+  featureLabel,
   fitEvolutionChartEl,
   generationTracking,
   isRegressionJob,

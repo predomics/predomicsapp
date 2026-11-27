@@ -168,3 +168,48 @@ describe('parameter form', () => {
     expect(t('paramErrors.onlyWith', { option: 'Ternary-OR', other: 'Algorithm', values: 'beam' })).toContain('Ternary-OR')
   })
 })
+
+describe('ModelFormula component (best model as a rule)', () => {
+  const BEST = {
+    k: 4, auc: 0.9, threshold: 1.5, language: 'Ternary-OR', data_type: 'prev',
+    features: { 3: 1, 8: 1, 21: 1, 30: -1 }, clauses: [[3, 8], [21], [30]],
+  }
+  const NAMES = Array.from({ length: 40 }, (_, i) => `f${i}`)
+
+  it('shows positive and negative terms, the decision and the exact formula', async () => {
+    const { default: ModelFormula } = await import('../components/results/ModelFormula.vue')
+    const wrapper = mount(ModelFormula, {
+      global: { plugins: [i18n] },
+      props: { model: BEST, featureNames: NAMES, classNameFor: c => (c === 1 ? 'Cirrhosis' : 'Healthy') },
+    })
+    expect(wrapper.findAll('.rule-side.positive .rule-chip').map(c => c.text())).toEqual(['f3 ∨ f8', 'f21'])
+    expect(wrapper.findAll('.rule-side.negative .rule-chip').map(c => c.text())).toEqual(['f30'])
+    expect(wrapper.find('.rule-op').text()).toBe('−')
+    expect(wrapper.find('.formula-text').text()).toBe('((f3⁰ ∨ f8⁰) + f21⁰) - f30⁰ ≥ 1.5')
+    const decision = wrapper.find('.rule-decision').text()
+    expect(decision).toContain('Cirrhosis')
+    expect(decision).toContain('score ≥ 1.5')
+    expect(decision).toContain('Healthy')
+    expect(wrapper.find('.rule-meta').text()).toBe('Ternary-OR · prev · 4 features in 3 terms')
+    expect(wrapper.findAll('.rule-legend li')).toHaveLength(3)
+  })
+
+  it('writes a ratio model as a fraction with ε and a binary model without a negative side', async () => {
+    const { default: ModelFormula } = await import('../components/results/ModelFormula.vue')
+    const ratio = mount(ModelFormula, {
+      global: { plugins: [i18n] },
+      props: { model: { language: 'ratio', data_type: 'raw', threshold: 1, features: { 0: 1, 1: -1 } }, featureNames: ['a', 'b'] },
+    })
+    expect(ratio.find('.rule-visual').classes()).toContain('ratio')
+    expect(ratio.find('.rule-chip.epsilon').exists()).toBe(true)
+    expect(ratio.find('.formula-text').text()).toBe('a / (b + ε) ≥ 1')
+
+    const binary = mount(ModelFormula, {
+      global: { plugins: [i18n] },
+      props: { model: { language: 'bin', data_type: 'prev', threshold: 2, features: { 0: 1, 1: 1 } }, featureNames: ['a', 'b'], isRegression: true },
+    })
+    expect(binary.find('.rule-side.negative').exists()).toBe(false)
+    expect(binary.find('.rule-decision').exists()).toBe(false)
+    expect(binary.find('.formula-text').text()).toBe('a⁰ + b⁰')
+  })
+})
