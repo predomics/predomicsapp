@@ -393,3 +393,22 @@ class TestMockAndExports:
         assert formula == "(feature_5 + feature_37) - feature_12"
         header = rows.index(["Feature", "Coefficient", "Clause"])
         assert [r[2] for r in rows[header + 1:header + 4]] == ["1", "2", "3"]
+
+
+class TestEmptyPopulation:
+    """An engine run that yields no model must fail with an explanation, not an index error."""
+
+    def test_empty_best_population_stops_the_worker_with_a_message(self, capsys):
+        from app.services import worker
+
+        with pytest.raises(SystemExit) as exc:
+            worker._require_models([])
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "The engine produced no model" in out
+        assert "best_models_criterion" in out
+
+    def test_non_empty_population_passes(self):
+        from app.services import worker
+
+        worker._require_models([object()])

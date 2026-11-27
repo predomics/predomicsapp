@@ -499,6 +499,29 @@ def _run_sklearn_worker(param_yaml: dict, results_path: str):
     print(f"[worker] Results saved to {results_path}", flush=True)
 
 
+NO_MODEL_MESSAGE = (
+    "The engine produced no model.\n"
+    "Beam search stops when a level has no valid model, typically when few features pass the "
+    "feature selection (the k=1 level is then too small for the best models criterion) or when "
+    "every candidate has the same sign and the language requires both signs.\n"
+    "Try: relax the feature selection (feature_maximal_adj_pvalue, "
+    "feature_minimal_prevalence_pct), raise beam.best_models_criterion, add the bin language, "
+    "or run the GA instead."
+)
+
+
+def _require_models(best_pop) -> None:
+    """Stop the worker with a readable message when the engine returned an empty population.
+
+    The job runner shows the tail of the console log as the job's error, so the
+    message is printed last and the process exits with a non-zero code.
+    """
+    if len(best_pop) > 0:
+        return
+    print(f"[error] {NO_MODEL_MESSAGE}", flush=True)
+    sys.exit(1)
+
+
 def main():
     import time as _time
     param_path = sys.argv[1]
@@ -540,6 +563,7 @@ def main():
     # Extract results
     t_extract = _time.monotonic()
     best_pop = experiment.best_population()
+    _require_models(best_pop)
     best = best_pop.best()
     metrics = dict(best.get_metrics())
     feature_names = experiment.feature_names()
