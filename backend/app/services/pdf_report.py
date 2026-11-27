@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 from datetime import datetime
 
+from .model_format import format_model_formula, model_terms
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -115,20 +117,23 @@ def generate_pdf(
         f"<b>{best.get('language', '?')}</b> encoding.",
         styles["Normal"],
     ))
+    formula = _pdf_formula(best, feature_names)
+    if formula:
+        story.append(Paragraph(f"Formula: <font face='Courier'>{_esc(formula)}</font>", styles["Normal"]))
     story.append(Spacer(1, 6))
 
-    features = best.get("features", {})
-    feat_rows = [["#", "Feature", "Coefficient", "Direction"]]
-    for i, (idx_str, coef) in enumerate(
-        sorted(features.items(), key=lambda x: int(x[0])), 1
-    ):
-        idx = int(idx_str)
-        name = feature_names[idx] if idx < len(feature_names) else f"feature_{idx}"
-        coef_val = int(coef)
-        direction = "Positive" if coef_val > 0 else "Negative"
-        feat_rows.append([str(i), _esc(name), str(coef_val), direction])
+    # One row per feature; the "Clause" column groups the features of an OR
+    # (clause) model, and simply numbers the features of a classic model.
+    feat_rows = [["#", "Feature", "Coefficient", "Direction", "Clause"]]
+    i = 0
+    for n, term in enumerate(model_terms(best, feature_names), 1):
+        for name in term["features"]:
+            i += 1
+            coef_val = int(term["coef"])
+            direction = "Positive" if coef_val > 0 else "Negative"
+            feat_rows.append([str(i), _esc(name), str(coef_val), direction, str(n)])
 
-    ft = Table(feat_rows, colWidths=[10 * mm, 70 * mm, 25 * mm, 25 * mm])
+    ft = Table(feat_rows, colWidths=[10 * mm, 60 * mm, 25 * mm, 25 * mm, 15 * mm])
     ft.setStyle(_table_style(highlight_direction=True))
     story.append(ft)
 
@@ -202,6 +207,14 @@ def generate_pdf(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _pdf_formula(best: dict, feature_names: list) -> str:
+    """Model formula in plain ASCII: the standard PDF fonts lack the OR sign and superscripts."""
+    formula = format_model_formula(best, feature_names, with_threshold=True)
+    return (formula.replace(" \u2228 ", " OR ").replace("\u2070", "")
+            .replace("\u03b5", "eps").replace(" \u2265 ", " >= "))
+
 
 def _esc(s: str) -> str:
     """Escape XML entities for reportlab Paragraphs."""

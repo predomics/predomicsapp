@@ -18,7 +18,7 @@ This document compares all parameters from the gpredomics engine (`param.yaml` /
 | General | 20 | 18 | 18 | 18 |
 | Data | 14 | 0 (managed by DataTab) | 7 | 7 |
 | GA | 17 | 17 | 17 | 17 |
-| Beam | 5 | 5 | 5 | 5 |
+| Beam | 6 | 6 | 6 | 6 |
 | MCMC | 4 | 4 | 4 | 4 |
 | CV | 7 | 7 | 7 | 7 |
 | Importance | 4 | 4 | 4 | 4 |
@@ -39,7 +39,7 @@ This document compares all parameters from the gpredomics engine (`param.yaml` /
 | `cv` | false | Y | Y | Y | |
 | `thread_number` | 8 | Y | Y | Y | Default changed to 4 in web |
 | `gpu` | false | Y | Y | Y | |
-| `language` | bin,ratio,pow2,ter | Y | Y | Y | Default: bin,ter,ratio |
+| `language` | bin,ratio,pow2,ter | Y | Y | Y | Default: bin,ter,ratio. OR (clause) variants `bin-or`, `ter-or`, `ratio-or` offered with Beam only; the backend refuses them with any other algorithm |
 | `data_type` | raw,prev,log | Y | Y | Y | Default: raw,prev |
 | `epsilon` | 1e-5 | Y | Y | Y | |
 | `fit` | auc | Y | Y | Y | |
@@ -103,7 +103,7 @@ Data parameters are **not in the Parameters tab** — they are managed by the **
 | `random_sampling_epochs` | 1 | Y | Y | Y | |
 | `n_epochs_before_global` | — | Y | Y | Y | Not in param.yaml but in param.rs |
 
-### Beam (5 in gpredomics, 5 in web app) — Complete
+### Beam (6 in gpredomics, 6 in web app) — Complete
 
 | Parameter | gpredomics default | Frontend | Backend | Engine | Notes |
 |-----------|-------------------|:--------:|:-------:|:------:|-------|
@@ -112,6 +112,7 @@ Data parameters are **not in the Parameters tab** — they are managed by the **
 | `k_stop` (→ kmax) | 100 | Y | Y | Y | Renamed to kmax in YAML |
 | `best_models_criterion` | 10 | Y | Y | Y | |
 | `max_nb_of_models` | 20000 | Y | Y | Y | Web default: 10000 |
+| `max_clause_size` | 3 | Y | Y | Y | OR (clause) languages only: features per clause, 0 = unlimited |
 
 ### MCMC (4 in gpredomics, 4 in web app) — Complete
 

@@ -802,6 +802,7 @@
     "uploadFirst": "Upload X and y training datasets in the Data tab first",
     "regressionMode": "Regression mode",
     "votingDisabledRegression": "Voting is not applicable for regression",
+    "beamOnly": "Available with the Beam Search algorithm only (clause models)",
     "helpFor": "Help: {name}",
     "enabled": "Enabled",
     "disabled": "Disabled",
@@ -1386,7 +1387,8 @@
     "pickOne": "Select at least one.",
     "option": "Not one of the available choices.",
     "atLeast": "Must be at least “{other}” ({value}).",
-    "greaterThan": "Must be greater than “{other}” ({value})."
+    "greaterThan": "Must be greater than “{other}” ({value}).",
+    "onlyWith": "“{option}” is only available when “{other}” is {values}."
   },
   "paramCategories": {
     "general": "General",
@@ -1454,12 +1456,15 @@
       },
       "language": {
         "label": "Language",
-        "desc": "Model languages to explore. Initial population is split among selected languages.",
+        "desc": "Model languages to explore. Initial population is split among selected languages. The OR variants (Beam Search only) replace each variable by a clause of variables combined with OR, e.g. (A ∨ B) + C - D.",
         "opt": {
           "bin": "Binary",
           "ter": "Ternary",
           "ratio": "Ratio",
-          "pow2": "Power of 2"
+          "pow2": "Power of 2",
+          "bin-or": "Binary-OR",
+          "ter-or": "Ternary-OR",
+          "ratio-or": "Ratio-OR"
         }
       },
       "data_type": {
@@ -1627,6 +1632,10 @@
       "max_nb_of_models": {
         "label": "Max models",
         "desc": "Limits features to keep at each epoch based on model count possibilities."
+      },
+      "max_clause_size": {
+        "label": "Max clause size",
+        "desc": "OR languages only (Binary-OR, Ternary-OR, Ratio-OR): maximum number of variables in one clause (A ∨ B ∨ C). 0 = no limit."
       }
     },
     "mcmc": {

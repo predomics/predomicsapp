@@ -54,16 +54,7 @@
               </tr>
               <tr v-if="basketExpandedId === item.id" class="detail-row">
                 <td colspan="11">
-                  <div class="feature-list">
-                    <div
-                      v-for="[name, coef] in sortedFeatures(item.named_features)"
-                      :key="name"
-                      class="feature-chip"
-                      :class="{ positive: coef > 0, negative: coef < 0 }"
-                    >
-                      <span :title="name">{{ shortName(featureLabel(name)) }}</span> ({{ coef > 0 ? '+' : '' }}{{ coef }})
-                    </div>
-                  </div>
+                  <ModelTerms :model="item" :label-of="featureLabel" />
                 </td>
               </tr>
             </template>
@@ -103,6 +94,7 @@
 
 <script setup>
 import CollapsibleSection from '../../CollapsibleSection.vue'
+import ModelTerms from '../ModelTerms.vue'
 import { shortFeatureName as shortName } from '../../../utils/chartLabels'
 /**
  * "basket" sub-tab of the Results view. Markup only: state and chart rendering
@@ -125,7 +117,6 @@ const {
   confirmClearBasket,
   featureLabel,
   removeFromBasket,
-  sortedFeatures,
   toggleBasketExpand,
   renderActiveTab,
 } = useResults()

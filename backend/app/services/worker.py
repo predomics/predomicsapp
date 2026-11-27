@@ -11,6 +11,7 @@ from . import matrix_io
 from .prediction import (
     DEFAULT_EPSILON,
     UnsupportedModelError,
+    clause_columns,
     compute_auc,
     score_matrix,
     zscore_stats,
@@ -155,6 +156,31 @@ def _prepare_test_context(experiment, param_path, zstats=None):
         return None
 
 
+def _model_clauses(ind):
+    """Clause structure of an engine Individual (OR languages), or None.
+
+    Older bindings have no ``get_clauses``; their models are all classic.
+    """
+    getter = getattr(ind, "get_clauses", None)
+    if getter is None:
+        return None
+    clauses = getter()
+    if not clauses:
+        return None
+    return [[int(f) for f in clause] for clause in clauses]
+
+
+def _named_clauses(clauses, features, feature_names):
+    """``[{"coef": c, "features": [name, ...]}, ...]`` for the results JSON."""
+    out = []
+    for clause in clauses:
+        names = [feature_names[f] for f in clause if f < len(feature_names)]
+        if not names:
+            continue
+        out.append({"coef": int(features.get(clause[0], 0)), "features": names})
+    return out
+
+
 def _score_individual(ind, ctx):
     """Score one engine Individual on the test context (same maths as the engine)."""
     metrics = dict(ind.get_metrics())
@@ -162,6 +188,8 @@ def _score_individual(ind, ctx):
     idx = sorted(int(i) for i in features.keys())
     idx = [i for i in idx if i < len(ctx["feature_names"])]
     coefs = np.array([float(features[i]) for i in idx])
+    clauses = _model_clauses(ind)
+    cols = clause_columns(clauses, idx) if clauses else None
     means = stds = None
     if str(metrics.get("data_type")) == "zscore":
         try:
@@ -172,7 +200,7 @@ def _score_individual(ind, ctx):
             means = stds = None
     return score_matrix(
         ctx["x"][:, idx], coefs, metrics.get("language"), metrics.get("data_type", "raw"),
-        ctx["epsilon"], means, stds,
+        ctx["epsilon"], means, stds, clauses=cols,
     )
 
 
@@ -527,12 +555,21 @@ def main():
             for idx, coef in ind_features.items()
             if int(idx) < len(feature_names)
         }
-        population_data.append({
+        entry = {
             "rank": i,
             "metrics": ind_metrics,
             "features": {str(k): int(v) for k, v in ind_features.items()},
             "named_features": named_features,
-        })
+        }
+        # OR (clause) languages: the terms of the model are clauses of features
+        # sharing one coefficient; classic models carry no clause keys.
+        ind_clauses = _model_clauses(ind)
+        if ind_clauses is not None:
+            entry["clauses"] = ind_clauses
+            entry["named_clauses"] = _named_clauses(
+                ind_clauses, {int(k): int(v) for k, v in ind_features.items()}, feature_names
+            )
+        population_data.append(entry)
     extract_dur = _time.monotonic() - t_extract
     print(f"[worker] Population extracted: {len(population_data)} models. ({extract_dur:.1f}s)", flush=True)
     timing.append({"label": "Population extraction", "duration_s": round(extract_dur, 2)})
@@ -629,6 +666,7 @@ def main():
             "data_type": metrics["data_type"],
             "epoch": metrics["epoch"],
             "features": best.get_features(),
+            "clauses": _model_clauses(best),
         },
         "population_size": len(best_pop),
         "population": population_data,

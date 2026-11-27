@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Any, Optional, List, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
 
@@ -106,6 +106,8 @@ class BeamParams(BaseModel):
     k_stop: int = Field(100, ge=1, le=100000)
     best_models_criterion: float = 10.0
     max_nb_of_models: int = Field(10000, ge=1, le=10000000)
+    # OR (clause) languages only: maximum number of features per clause (0 = unlimited)
+    max_clause_size: int = Field(3, ge=0, le=100000)
 
 
 class McmcParams(BaseModel):
@@ -257,6 +259,22 @@ class GpuParams(BaseModel):
     max_buffer_size_mb: int = Field(128, ge=1, le=1048576)
 
 
+# OR (clause) languages of gpredomics: accepted spellings, and the one that is
+# reserved but not implemented by the engine.
+OR_LANGUAGE_ALIASES = frozenset({
+    "bin-or", "bin_or", "binary-or", "binary_or", "0-or",
+    "ter-or", "ter_or", "ternary-or", "ternary_or", "1-or",
+    "ratio-or", "ratio_or", "3-or",
+})
+RESERVED_LANGUAGE_ALIASES = frozenset({"pow2-or", "pow2_or", "2-or"})
+
+
+def or_languages_in(language: str) -> list[str]:
+    """The OR languages named in a comma-separated ``general.language`` value."""
+    return [v.strip().lower() for v in str(language or "").split(",")
+            if v.strip().lower() in OR_LANGUAGE_ALIASES]
+
+
 class RunConfig(BaseModel):
     """Full configuration for a gpredomics run."""
     general: GeneralParams = GeneralParams()
@@ -282,6 +300,24 @@ class RunConfig(BaseModel):
     voting: VotingParams = VotingParams()
     gpu: GpuParams = GpuParams()
 
+    @model_validator(mode="after")
+    def _or_languages_need_beam(self):
+        """The engine only grows clause models with Beam; refuse the rest up front."""
+        picked = [v.strip().lower() for v in str(self.general.language or "").split(",") if v.strip()]
+        reserved = [v for v in picked if v in RESERVED_LANGUAGE_ALIASES]
+        if reserved:
+            raise ValueError(
+                f"Language '{reserved[0]}' (Pow2-OR) is reserved but not implemented by the engine."
+            )
+        algo = self.general.algo.value if hasattr(self.general.algo, "value") else str(self.general.algo)
+        or_langs = or_languages_in(self.general.language)
+        if or_langs and algo != "beam":
+            raise ValueError(
+                f"OR languages ({', '.join(or_langs)}) are only available with the Beam algorithm "
+                f"(general.algo = beam), not with '{algo}'."
+            )
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Response schemas
@@ -299,6 +335,7 @@ class IndividualResponse(BaseModel):
     data_type: str
     epoch: int
     features: dict[int, int]  # feature_index -> coefficient sign
+    clauses: Optional[List[List[int]]] = None  # OR languages: feature indices per clause
 
 
 class PopulationResponse(BaseModel):
